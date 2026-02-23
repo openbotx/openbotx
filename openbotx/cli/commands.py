@@ -401,6 +401,45 @@ def config() -> None:
 
 
 @cli.command()
+def browser() -> None:
+    """Open Chrome with OpenBotX profile for pre-login setup."""
+    import subprocess
+
+    from openbotx.tools.cdp_tool import _get_chrome_binary
+
+    profile_dir = Path.home() / ".openbotx-chrome-profile"
+    profile_dir.mkdir(exist_ok=True)
+
+    try:
+        chrome_binary = _get_chrome_binary()
+        args = [
+            chrome_binary,
+            f"--user-data-dir={profile_dir}",
+            "--remote-debugging-port=9222",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ]
+
+        console.print("[bold green]Opening Chrome with OpenBotX profile...[/bold green]")
+        console.print(f"[blue]Profile: {profile_dir}[/blue]")
+        console.print(f"[dim]Remote debugging: http://localhost:9222[/dim]")
+
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        console.print("[green]Chrome opened. You can now login to sites.[/green]")
+        console.print(
+            "[yellow]Note: Close Chrome when done to avoid conflicts with CDP tools.[/yellow]"
+        )
+
+    except RuntimeError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise SystemExit(1)
+    except Exception as e:
+        console.print(f"[red]Failed to open Chrome: {e}[/red]")
+        raise SystemExit(1)
+
+
+@cli.command()
 @click.argument("template", default="starter")
 @click.option("--force", is_flag=True, help="Overwrite existing files")
 def init(template: str, force: bool) -> None:

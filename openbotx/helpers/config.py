@@ -221,6 +221,8 @@ class PathsConfig(BaseModel):
     media: str = "./media"
     logs: str = "./logs"
     db: str = "./db"
+    # Optional workspace for bootstrap files (nanobot-style: AGENTS.md, SOUL.md, USER.md, TOOLS.md)
+    workspace: str = ""
 
 
 class Config(BaseModel):
@@ -304,6 +306,8 @@ def ensure_directories(config: Config) -> None:
         config.paths.logs,
         config.paths.db,
     ]
+    if config.paths.workspace:
+        paths.append(config.paths.workspace)
 
     for path in paths:
         Path(path).mkdir(parents=True, exist_ok=True)

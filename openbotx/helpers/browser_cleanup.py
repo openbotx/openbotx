@@ -1,4 +1,4 @@
-"""Close Playwright/browser resources on app shutdown so the Node process exits."""
+"""Close browser resources on app shutdown."""
 
 import asyncio
 
@@ -10,19 +10,7 @@ _SHUTDOWN_TIMEOUT = 5.0
 
 
 async def close_browser_tools() -> None:
-    """Close browser and CDP resources (Playwright/Node). Call once on app shutdown.
-
-    Uses a short timeout so if the Node process hangs, we do not block shutdown forever.
-    """
-    try:
-        from openbotx.tools.browser_tool import close_browser_resources
-
-        await asyncio.wait_for(close_browser_resources(), timeout=_SHUTDOWN_TIMEOUT)
-    except TimeoutError:
-        logger.warning("browser_cleanup_timeout", which="browser", timeout=_SHUTDOWN_TIMEOUT)
-    except Exception as e:
-        logger.debug("browser_cleanup_error", which="browser", error=str(e))
-
+    """Close browser and CDP resources. Call once on app shutdown."""
     try:
         from openbotx.tools.cdp_tool import close_cdp_resources
 

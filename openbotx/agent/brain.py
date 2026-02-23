@@ -1,10 +1,13 @@
-"""Agent brain for OpenBotX using PydanticAI."""
+"""Agent brain for OpenBotX with manual agentic loop (nanobot-style)."""
 
+import inspect
+import json
 from typing import Any
 
-from pydantic_ai import Agent
-
-from openbotx.agent.prompt_builder import build_prompt, create_prompt_builder
+from openbotx.agent.prompt_builder import (
+    create_prompt_builder,
+    load_bootstrap_from_workspace,
+)
 from openbotx.agent.prompts import get_system_context
 from openbotx.core.skills_registry import SkillsRegistry
 from openbotx.core.tools_registry import ToolsRegistry
@@ -16,7 +19,7 @@ from openbotx.models.skill import SkillDefinition
 
 
 class AgentBrain:
-    """Brain for processing messages with PydanticAI."""
+    """Brain for processing messages with manual agentic loop."""
 
     def __init__(
         self,
@@ -33,47 +36,20 @@ class AgentBrain:
         self._tools_registry = tools_registry
         self._config = get_config().llm
         self._logger = get_logger("agent_brain")
-        self._agent: Any = None
+        self._provider: Any = None
+        self._max_iterations = 20
 
     async def initialize(self) -> None:
-        """Initialize the PydanticAI agent."""
-        from openbotx.helpers.llm_model import (
-            create_model_settings,
-            create_pydantic_model,
-        )
+        """Initialize the agent and LLM provider."""
+        from openbotx.helpers.llm_model import create_llm_provider
 
-        # Create PydanticAI model string
-        pydantic_model = create_pydantic_model(self._config)
-
-        # Create model settings from config (max_tokens, temperature, etc)
-        model_settings = create_model_settings(self._config)
-
-        # Build tool functions from registry
-        tools = []
-        if self._tools_registry:
-            for tool_def in self._tools_registry.list_tools():
-                tool = self._tools_registry.get(tool_def.name)
-                if tool and tool.callable:
-                    tools.append(tool.callable)
-
-        # Build base system prompt using the prompt builder
-        system_prompt = build_prompt(
-            context=get_system_context(),
-        )
-
-        # Create agent with model and settings
-        self._agent = Agent(
-            model=pydantic_model,
-            system_prompt=system_prompt,
-            tools=tools,
-            model_settings=model_settings,
-        )
+        # Create LLM provider for direct calls (nanobot-style loop)
+        self._provider = create_llm_provider(self._config)
 
         self._logger.info(
             "agent_initialized",
             model=f"{self._config.provider}:{self._config.model}",
-            tools_count=len(tools),
-            settings=model_settings,
+            max_iterations=self._max_iterations,
         )
 
     def _build_context_prompt(
@@ -101,7 +77,14 @@ class AgentBrain:
         # Add system context
         builder.set_context(get_system_context())
 
-        # Add memory context if available (single format: user_summary + conversation_summary from JSON)
+        # Add workspace bootstrap if configured (nanobot-style)
+        workspace_path = get_config().paths.workspace
+        if workspace_path:
+            bootstrap = load_bootstrap_from_workspace(workspace_path)
+            if bootstrap:
+                builder.set_bootstrap(bootstrap)
+
+        # Add memory context if available
         if context.history or context.summary:
             builder.set_memory(
                 summary=context.summary,
@@ -110,7 +93,7 @@ class AgentBrain:
                 conversation_summary=context.conversation_summary,
             )
 
-        # Add skills context if available - inject full skill content
+        # Add skills context if available
         if matching_skills:
             skills_data = [
                 {
@@ -122,7 +105,7 @@ class AgentBrain:
                 for s in matching_skills
             ]
 
-            # Get detailed skill content (full SKILL.md content)
+            # Get detailed skill content
             detailed_skills = []
             for skill in matching_skills:
                 if skill.content:
@@ -154,78 +137,63 @@ class AgentBrain:
 
         return builder.build()
 
-    def _extract_tool_outputs(self, result: Any) -> AgentResponse:
-        """Extract tool outputs and convert to structured AgentResponse.
-
-        Tools return ToolResult objects (guaranteed by type hints).
-        We just aggregate the contents into AgentResponse.
-
-        Args:
-            result: PydanticAI agent result
+    def _build_tool_definitions(self) -> list[dict[str, Any]]:
+        """Build tool definitions for LLM from registry.
 
         Returns:
-            Structured agent response with proper content types
+            List of tool definition dicts
         """
-        from pydantic_ai.messages import ToolReturnPart
+        tools = []
+        if not self._tools_registry:
+            return tools
 
-        from openbotx.models.response import ResponseContent
-        from openbotx.models.tool_result import ToolResult
+        for tool_def in self._tools_registry.list_tools():
+            tool = self._tools_registry.get(tool_def.name)
+            if not tool or not tool.callable:
+                continue
 
-        response = AgentResponse()
+            # Build parameter schema from callable signature
+            sig = inspect.signature(tool.callable)
+            parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
-        # Get new messages from this run
-        new_messages = result.new_messages()
+            for param_name, param in sig.parameters.items():
+                if param_name in ["self", "cls"]:
+                    continue
 
-        # Track which tools were called
-        tools_called = []
+                param_type = "string"  # default
+                if param.annotation != inspect.Parameter.empty:
+                    ann_str = str(param.annotation)
+                    if "int" in ann_str:
+                        param_type = "integer"
+                    elif "bool" in ann_str:
+                        param_type = "boolean"
+                    elif "float" in ann_str:
+                        param_type = "number"
 
-        # Process each message looking for tool returns
-        for msg in new_messages:
-            if hasattr(msg, "parts"):
-                for part in msg.parts:
-                    if isinstance(part, ToolReturnPart):
-                        tool_name = part.tool_name
-                        tools_called.append(tool_name)
+                parameters["properties"][param_name] = {
+                    "type": param_type,
+                    "description": "",
+                }
 
-                        # Get the content returned by the tool (guaranteed ToolResult by type hints)
-                        content: ToolResult = part.content
+                if param.default == inspect.Parameter.empty:
+                    parameters["required"].append(param_name)
 
-                        # Aggregate ToolResult contents into AgentResponse
-                        for tool_content in content.contents:
-                            response.contents.append(
-                                ResponseContent(
-                                    type=tool_content.type,
-                                    text=tool_content.text,
-                                    url=tool_content.url,
-                                    path=tool_content.path,
-                                    metadata=tool_content.metadata,
-                                )
-                            )
+            tools.append(
+                {
+                    "name": tool_def.name,
+                    "description": tool_def.description or "",
+                    "parameters": parameters,
+                }
+            )
 
-                        self._logger.info(
-                            "tool_result_aggregated",
-                            tool=tool_name,
-                            success=content.success,
-                            contents_count=len(content.contents),
-                        )
-
-        # Set tools_called for tracking
-        response.tools_called = tools_called
-
-        # Add the final text output from the agent
-        if result.output:
-            output_text = str(result.output)
-            if output_text.strip():
-                response.add_text(output_text)
-
-        return response
+        return tools
 
     async def process(
         self,
         message: InboundMessage,
         context: MessageContext,
     ) -> AgentResponse:
-        """Process a message and generate a response.
+        """Process a message with manual agentic loop (nanobot-style).
 
         Args:
             message: Inbound message
@@ -251,16 +219,189 @@ class AgentBrain:
         # Build context prompt
         context_prompt = self._build_context_prompt(context, matching_skills)
 
-        # Process with PydanticAI agent
-        if not self._agent:
-            raise RuntimeError("Agent not initialized")
+        # Build tool definitions
+        tool_definitions = self._build_tool_definitions()
 
-        result = await self._agent.run(
-            f"{context_prompt}\n\nUser message: {message.text}",
+        # Build initial messages
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": context_prompt},
+            {"role": "user", "content": message.text},
+        ]
+
+        # Agent loop (similar to nanobot)
+        iteration = 0
+        final_content = None
+        response = AgentResponse()
+
+        while iteration < self._max_iterations:
+            iteration += 1
+
+            self._logger.debug(
+                "agent_iteration",
+                iteration=iteration,
+                max=self._max_iterations,
+            )
+
+            # Call LLM
+            llm_response = await self._provider.chat(messages, tool_definitions)
+
+            # Handle tool calls
+            if llm_response["has_tool_calls"]:
+                # Add assistant message with tool calls
+                assistant_content: Any = llm_response["content"]
+
+                # For Anthropic, build content blocks
+                if llm_response["tool_calls"] and self._config.provider == "anthropic":
+                    content_blocks = []
+                    if llm_response["content"]:
+                        content_blocks.append({"type": "text", "text": llm_response["content"]})
+
+                    for tc in llm_response["tool_calls"]:
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tc["id"],
+                                "name": tc["name"],
+                                "input": tc["arguments"],
+                            }
+                        )
+
+                    assistant_content = content_blocks
+
+                messages.append({"role": "assistant", "content": assistant_content})
+
+                # Execute tools
+                for tool_call in llm_response["tool_calls"]:
+                    tool_name = tool_call["name"]
+                    tool_args = tool_call["arguments"]
+                    tool_id = tool_call["id"]
+
+                    self._logger.debug(
+                        "executing_tool",
+                        tool=tool_name,
+                        args=tool_args,
+                    )
+
+                    # Execute tool
+                    tool = self._tools_registry.get(tool_name) if self._tools_registry else None
+                    if tool and tool.callable:
+                        try:
+                            if inspect.iscoroutinefunction(tool.callable):
+                                result = await tool.callable(**tool_args)
+                            else:
+                                result = tool.callable(**tool_args)
+
+                            # Convert ToolResult to string
+                            if hasattr(result, "to_string"):
+                                result_text = result.to_string()
+                            else:
+                                result_text = str(result)
+
+                            # Add to response tracking
+                            response.tools_called.append(tool_name)
+
+                            # Add tool result to messages (Anthropic format)
+                            if self._config.provider == "anthropic":
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {
+                                                "type": "tool_result",
+                                                "tool_use_id": tool_id,
+                                                "content": result_text,
+                                            }
+                                        ],
+                                    }
+                                )
+                            else:
+                                # OpenAI format
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tool_id,
+                                        "name": tool_name,
+                                        "content": result_text,
+                                    }
+                                )
+
+                        except Exception as e:
+                            self._logger.error(
+                                "tool_execution_error",
+                                tool=tool_name,
+                                error=str(e),
+                            )
+
+                            # Add error to messages
+                            if self._config.provider == "anthropic":
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {
+                                                "type": "tool_result",
+                                                "tool_use_id": tool_id,
+                                                "content": f"Error: {str(e)}",
+                                                "is_error": True,
+                                            }
+                                        ],
+                                    }
+                                )
+                            else:
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tool_id,
+                                        "name": tool_name,
+                                        "content": f"Error: {str(e)}",
+                                    }
+                                )
+                    else:
+                        self._logger.warning("tool_not_found", tool=tool_name)
+
+                        # Add tool not found error
+                        if self._config.provider == "anthropic":
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "tool_result",
+                                            "tool_use_id": tool_id,
+                                            "content": f"Error: Tool '{tool_name}' not found",
+                                            "is_error": True,
+                                        }
+                                    ],
+                                }
+                            )
+                        else:
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_id,
+                                    "name": tool_name,
+                                    "content": f"Error: Tool '{tool_name}' not found",
+                                }
+                            )
+
+            else:
+                # No tool calls, we're done
+                final_content = llm_response["content"]
+                break
+
+        if final_content is None:
+            final_content = "Task processing completed (max iterations reached)."
+
+        # Add final response
+        response.add_text(final_content)
+
+        self._logger.info(
+            "processing_complete",
+            iterations=iteration,
+            tools_called=len(response.tools_called),
         )
 
-        # Intelligently extract and structure the response
-        return self._extract_tool_outputs(result)
+        return response
 
     async def learn_skill(
         self,

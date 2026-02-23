@@ -3,7 +3,7 @@
 Compatible with the Chrome extension that attaches to tabs
 and forwards CDP over WebSocket. The relay listens on 127.0.0.1:18792 by default;
 the extension connects to ws://127.0.0.1:18792/extension, and CDP clients
-(e.g. Playwright via cdp_tool) connect to the same host and use /json/version
+(e.g. python-cdp via cdp_tool) connect to the same host and use /json/version
 then ws://.../cdp.
 """
 
