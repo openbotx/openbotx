@@ -222,12 +222,47 @@ logging:
 
 ```yaml
 paths:
-  skills: "./skills"  # Optional: default "./skills"
-  memory: "./memory"  # Optional: default "./memory"
-  media: "./media"  # Optional: default "./media"
-  logs: "./logs"  # Optional: default "./logs"
-  db: "./db"  # Optional: default "./db"
+  skills: "./skills"    # Optional: default "./skills"
+  memory: "./memory"    # Optional: default "./memory"
+  media: "./media"      # Optional: default "./media"
+  logs: "./logs"       # Optional: default "./logs"
+  db: "./db"           # Optional: default "./db"
+  workspace: ""        # Optional: workspace dir for bootstrap files (nanobot-style). If set, AGENTS.md, SOUL.md, USER.md, TOOLS.md, IDENTITY.md are loaded into the system prompt.
 ```
+
+#### Where to put workspace files (in your application)
+
+OpenBotX is a Python tool you use inside **your** application. Paths under `paths` are relative to the process working directory when it runs (typically the project root where `config.yml` lives).
+
+**Typical project layout:**
+
+```
+my-app/                    # your project root (where you run openbotx)
+├── config.yml             # here you set paths.workspace
+├── .env
+├── workspace/             # folder you create for bootstrap files
+│   ├── AGENTS.md          # agent instructions (optional)
+│   ├── SOUL.md            # personality/values (optional)
+│   ├── USER.md            # user context (optional)
+│   ├── TOOLS.md           # tool usage guidelines (optional)
+│   └── IDENTITY.md        # extra identity (optional)
+├── skills/                # openbotx skills (paths.skills)
+├── memory/
+└── ...
+```
+
+In your application's `config.yml`:
+
+```yaml
+paths:
+  workspace: "./workspace"   # relative to project root (where config.yml is)
+  # or absolute path:
+  # workspace: "/home/you/my-app/workspace"
+```
+
+- Create the `workspace` folder (or another name) at **your application root** (next to `config.yml`).
+- Put inside only the files you want to use; you don't need all of them. The agent loads whatever is present.
+- If `paths.workspace` is empty or the folder doesn't exist, bootstrap is skipped and the agent uses only the default system prompt.
 
 ### Memory (Vector Index)
 

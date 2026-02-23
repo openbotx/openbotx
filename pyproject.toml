@@ -69,7 +69,7 @@ dependencies = [
     "pillow>=11.0.0",
 
     # Browser
-    "playwright>=1.58.0",
+    "python-cdp @ file:///Users/paulo/Developer/workspaces/python/python-cdp",
 
     # Storage
     "boto3>=1.42.38",

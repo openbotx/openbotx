@@ -378,11 +378,11 @@ relay:
 
 **What it is**
 
-The relay is an HTTP + WebSocket server that bridges the OpenBotX CDP client (e.g. Playwright via `cdp_tool`) and a Chrome extension. The extension attaches to Chrome tabs via `chrome.debugger` and forwards CDP messages to the relay; the relay exposes the same HTTP/WS surface as a normal Chrome remote-debugging endpoint so Playwright can connect over CDP.
+The relay is an HTTP + WebSocket server that bridges the OpenBotX CDP client (`cdp_tool`) and a Chrome extension. The extension attaches to Chrome tabs via `chrome.debugger` and forwards CDP messages to the relay; the relay exposes the same HTTP/WS surface as a normal Chrome remote-debugging endpoint so CDP clients can connect.
 
 **Why it exists**
 
-- **Use existing Chrome**: The user can drive their normal Chrome window (or a dedicated profile) instead of launching a separate Playwright browser.
+- **Use existing Chrome**: The user can drive their normal Chrome window (or a dedicated profile) without needing to launch a separate browser.
 - **Same machine**: Relay and extension run on the machine where Chrome runs; OpenBotX can run elsewhere and connect to the relay.
 
 **Components**
@@ -391,7 +391,7 @@ The relay is an HTTP + WebSocket server that bridges the OpenBotX CDP client (e.
 |----------|------|
 | **Relay server** | Listens on `relay.host:relay.port`. Serves `/`, `/json/version`, `/json/list`, WebSocket `/extension` (extension) and `/cdp` (CDP clients). |
 | **Chrome extension** | Connects to `ws://relay.host:relay.port/extension`, attaches to tabs via `chrome.debugger`, executes CDP commands and forwards events. |
-| **CDP tools** | Connect to `http://relay.host:relay.port` (Playwright uses `/json/version` then `ws://.../cdp`). |
+| **CDP tools** | Connect to `http://relay.host:relay.port` (uses `/json/version` then `ws://.../cdp`). |
 
 **When relay is enabled**
 
@@ -401,21 +401,15 @@ The relay is an HTTP + WebSocket server that bridges the OpenBotX CDP client (e.
 
 ---
 
-## 9. CDP vs Browser Tools
+## 9. CDP Tools
 
 **What it is**
 
-OpenBotX has two ways to automate a browser:
+OpenBotX provides CDP tools (`cdp_*`) to automate browsers via Chrome DevTools Protocol:
 
 - **CDP tools** (`cdp_*`): Connect to an existing browser (Chrome with remote debugging or the relay). They control the attached tab(s) without launching a new browser.
-- **Browser tools** (`browser_*`): Launch a new Chromium instance via Playwright, perform the action, then close the page. They always open a visible browser window.
 
-**Why the distinction**
+**How it works**
 
-- **Default for "access a site"**: When the user asks to open a URL, navigate, or read a page, the agent should use CDP tools so it uses the user's existing Chrome (or relay-attached tab). No need to say "use CDP" every time.
-- **Explicit "open a browser"**: When the user explicitly asks to "open the browser", "launch a browser", or "start a browser", the agent should use `browser_*` tools, which launch a new Playwright window.
-
-**How the agent chooses**
-
-- Tool **descriptions** state: use CDP tools for site access; use `browser_*` only when the user explicitly asks to open or launch a browser.
-- No separate rule is injected in the prompt; the model relies on these descriptions to pick the right tool set.
+- **Default for browser automation**: When the user asks to open a URL, navigate, or read a page, the agent uses CDP tools to control the user's existing Chrome (or relay-attached tab).
+- Tool **descriptions** guide the model to use CDP tools for site access and browser automation.
