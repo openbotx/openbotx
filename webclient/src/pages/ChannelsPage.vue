@@ -134,4 +134,20 @@ async function toggleTelegram(running) {
   display: flex;
   gap: 0.5rem;
 }
+
+@media (max-width: 768px) {
+  .page-header {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .page-header h2 {
+    font-size: 1rem;
+  }
+
+  .channels-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+}
 </style>
