@@ -2,21 +2,15 @@ name: Build
 
 on:
   push:
-    branches: [main]
     paths-ignore:
       - 'docs/**'
       - 'extras/**'
-      - 'temp/**'
-      - 'template-starter/**'
       - '*.md'
       - 'LICENSE'
   pull_request:
-    branches: [main]
     paths-ignore:
       - 'docs/**'
       - 'extras/**'
-      - 'temp/**'
-      - 'template-starter/**'
       - '*.md'
       - 'LICENSE'
 
