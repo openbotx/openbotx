@@ -207,6 +207,7 @@ function logout() {
     background: var(--p-content-background);
     border-top: 1px solid var(--p-content-border-color);
     padding: 0.4rem 0;
+    padding-bottom: max(0.4rem, env(safe-area-inset-bottom));
   }
 
   .mobile-nav-item {

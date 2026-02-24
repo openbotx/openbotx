@@ -41,8 +41,10 @@ watch(
         <div v-if="msg.content" class="message-content" v-html="renderMarkdown(msg.content)"></div>
         <div v-if="msg.tool_uses" class="tool-uses">
           <div v-for="(tu, j) in msg.tool_uses" :key="j" class="tool-use-item">
-            <i class="pi pi-cog"></i>
-            <span class="tool-name">{{ tu.tool }}</span>
+            <div class="tool-use-header">
+              <i class="pi pi-cog"></i>
+              <span class="tool-name">{{ tu.tool }} Tool</span>
+            </div>
             <span v-if="tu.description" class="tool-desc">{{ tu.description }}</span>
           </div>
         </div>
@@ -53,7 +55,7 @@ watch(
       <div class="message-avatar"><i class="pi pi-sparkles"></i></div>
       <div class="tool-indicator">
         <i class="pi pi-spin pi-spinner"></i>
-        <span>{{ currentToolUse.description || currentToolUse.tool }}</span>
+        <span>Running {{ currentToolUse.tool }} Tool...</span>
       </div>
     </div>
 
@@ -119,6 +121,8 @@ watch(
   border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   line-height: 1.5;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .message.user .message-body {
@@ -135,7 +139,7 @@ watch(
 }
 
 .message-content :deep(pre) {
-  background: var(--p-surface-100);
+  background: var(--p-content-hover-background);
   padding: 0.75rem;
   border-radius: 0.5rem;
   overflow-x: auto;
@@ -162,6 +166,12 @@ watch(
   gap: 0.4rem;
 }
 
+.tool-use-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .tool-name {
   font-weight: 600;
   color: var(--p-primary-color);
@@ -172,6 +182,7 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  overflow-wrap: break-word;
 }
 
 .tool-indicator {
@@ -181,6 +192,8 @@ watch(
   font-size: 0.85rem;
   color: var(--p-primary-color);
   padding: 0.5rem 0;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .typing-indicator {
@@ -214,5 +227,42 @@ watch(
   justify-content: center;
   gap: 1rem;
   color: var(--p-text-muted-color);
+}
+
+@media (max-width: 768px) {
+  .chat-messages {
+    padding: 0.75rem;
+    gap: 0.75rem;
+  }
+
+  .message {
+    max-width: 95%;
+    gap: 0.5rem;
+  }
+
+  .message-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 0.8rem;
+  }
+
+  .message-body {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .tool-use-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+  }
+
+  .tool-desc {
+    white-space: normal;
+  }
+
+  .message-content :deep(pre) {
+    font-size: 0.8rem;
+    padding: 0.5rem;
+  }
 }
 </style>

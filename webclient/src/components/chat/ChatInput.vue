@@ -49,4 +49,11 @@ function handleKeydown(e) {
   flex: 1;
   max-height: 150px;
 }
+
+@media (max-width: 768px) {
+  .chat-input {
+    padding: 0.75rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
 </style>

@@ -63,4 +63,14 @@ function handleNewSession() {
   margin: 0;
   font-size: 1.1rem;
 }
+
+@media (max-width: 768px) {
+  .chat-header {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .chat-header h2 {
+    font-size: 1rem;
+  }
+}
 </style>

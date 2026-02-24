@@ -24,7 +24,7 @@ onMounted(() => {
 <style scoped>
 .layout {
   display: flex;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -43,7 +43,7 @@ onMounted(() => {
   .layout-main {
     flex: 1;
     height: 0;
-    overflow: hidden;
+    overflow: auto;
   }
 }
 </style>
