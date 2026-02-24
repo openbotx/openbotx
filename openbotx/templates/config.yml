@@ -1,0 +1,47 @@
+bot:
+  name: "OpenBotX"
+  description: "Your personal AI assistant"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+agents:
+  main:
+    workspace: "./workspace"
+    model: "anthropic/claude-sonnet-4-20250514"
+    params:
+      max_tokens: 8192
+      temperature: 0.1
+      max_iterations: 40
+      memory_window: 100
+
+image:
+  provider: "gemini"
+  model: "imagen-3.0-generate-002"
+  api_key: "${GOOGLE_API_KEY}"
+
+auth:
+  username: "admin"
+  password: "admin"
+
+providers:
+  anthropic:
+    api_key: "${ANTHROPIC_API_KEY}"
+
+channels:
+  telegram:
+    enabled: false
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: []
+
+tools:
+  restrict_to_workspace: true
+  exec:
+    timeout: 60
+
+storage:
+  type: "local"
+
+cron:
+  enabled: true

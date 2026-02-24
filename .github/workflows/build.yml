@@ -1,0 +1,61 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'extras/**'
+      - 'temp/**'
+      - 'template-starter/**'
+      - '*.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'extras/**'
+      - 'temp/**'
+      - 'template-starter/**'
+      - '*.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: webclient/package-lock.json
+
+      - name: Install webclient dependencies
+        run: npm ci
+        working-directory: webclient
+
+      - name: Build webclient
+        run: npm run build
+        working-directory: webclient
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Remove local-only dependencies
+        run: sed -i '/"python-cdp @/d' pyproject.toml
+
+      - name: Install openbotx
+        run: pip install .
+
+      - name: Verify install
+        run: |
+          python -c "from openbotx.version import __version__; print(f'openbotx v{__version__}')"
+          python -c "from openbotx.config.schema import Config; print('config ok')"
+          python -c "from openbotx.tools.registry import ToolRegistry; print('tools ok')"
+          python -c "from openbotx.server.app import create_app; print('server ok')"

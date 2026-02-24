@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
+from openbotx.tools.base import Tool
+
+if TYPE_CHECKING:
+    from openbotx.agent.subagent import SubagentManager
+
+
+class SpawnTool(Tool):
+    """Spawn a subagent for background task execution."""
+
+    name = "spawn"
+    description = (
+        "Spawn a subagent to handle a task in the background. "
+        "The subagent will complete the task and report back when done."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "The task for the subagent to complete",
+            },
+            "label": {
+                "type": "string",
+                "description": "Optional short label for the task",
+            },
+        },
+        "required": ["task"],
+    }
+
+    def __init__(self, manager: SubagentManager):
+        self._manager = manager
+        self._origin_channel = "web"
+        self._origin_chat_id = "direct"
+        self._parent_task_id: str | None = None
+
+    def set_context(
+        self,
+        channel: str,
+        chat_id: str,
+        parent_task_id: str | None = None,
+    ) -> None:
+        self._origin_channel = channel
+        self._origin_chat_id = chat_id
+        self._parent_task_id = parent_task_id
+
+    async def execute(
+        self, task: str, label: str | None = None, **kwargs: Any
+    ) -> str:
+        return await self._manager.spawn(
+            task=task,
+            label=label,
+            origin_channel=self._origin_channel,
+            origin_chat_id=self._origin_chat_id,
+            parent_task_id=self._parent_task_id,
+        )

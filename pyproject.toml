@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openbotx"
 dynamic = ["version"]
-description = "Your Personal AI assistant for any OS and any platform"
+description = "AI assistant platform with web interface, task board, and multi-channel support"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11,<3.14"
@@ -19,81 +19,59 @@ keywords = [
     "ai",
     "agent",
     "assistant",
-    "personal",
     "bot",
     "llm",
-    "pydantic",
-    "pydantic-ai",
     "skills",
     "chatbot",
     "telegram",
     "websocket",
-    "mcp",
-    "anthropic",
-    "openai",
+    "fastapi",
+    "litellm",
 ]
 
 dependencies = [
-    # Core
+    # core
     "pydantic>=2.12.5",
-    "pydantic-ai>=1.50.0",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3",
 
-    # API
-    "aiohttp>=3.13.3",
+    # server
     "fastapi>=0.128.0",
     "uvicorn[standard]>=0.40.0",
     "httpx>=0.28.1",
-
-    # Database
-    "sqlalchemy>=2.0.46",
-    "aiosqlite>=0.22.1",
-
-    # Gateways
+    "aiofiles>=24.0.0",
     "websockets<16.0",
+
+    # llm
+    "litellm>=1.50.0",
+    "json-repair>=0.30.0",
+
+    # channels
     "python-telegram-bot>=22.6",
 
-    # LLM
-    "anthropic>=0.77.0",
-    "openai>=2.16.0",
+    # scheduler
+    "croniter>=5.0.0",
 
-    # Scheduler
-    "apscheduler>=3.11.2",
-
-    # Audio
-    "faster-whisper>=1.2.1",
-    "soundfile>=0.13.1",
-
-    # Image
-    "pillow>=11.0.0",
-
-    # Browser
+    # browser
     "python-cdp @ file:///Users/paulo/Developer/workspaces/python/python-cdp",
 
-    # Storage
+    # storage
     "boto3>=1.42.38",
 
-    # MCP
-    "mcp>=1.26.0",
+    # web extraction
+    "readability-lxml>=0.8.0",
+    "lxml>=5.0.0",
 
-    # Memory
-    "tiktoken>=0.12.0",
-    "sentence-transformers>=5.2.2",
-    "structlog>=25.5.0",
+    # auth
+    "pyjwt>=2.9.0",
 
-    # CLI
+    # cli
     "click>=8.3.1",
-    "rich>=14.3.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=7.0.0",
     "ruff>=0.14.14",
-    "mypy>=1.19.1",
     "build>=1.4.0",
     "twine>=6.2.0",
 ]
@@ -104,7 +82,6 @@ openbotx = "openbotx.cli.commands:cli"
 [project.urls]
 Homepage = "https://github.com/openbotx/openbotx"
 Repository = "https://github.com/openbotx/openbotx"
-Documentation = "https://github.com/openbotx/openbotx"
 "Bug Tracker" = "https://github.com/openbotx/openbotx/issues"
 
 [tool.setuptools.packages.find]
@@ -116,10 +93,8 @@ version = {attr = "openbotx.version.__version__"}
 
 [tool.setuptools.package-data]
 openbotx = [
-    "py.typed",
     "skills/**/*.md",
-    "skills/**/*.yaml",
-    "skills/**/*.yml",
+    "templates/**/*",
 ]
 
 [tool.ruff]
@@ -129,13 +104,3 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_ignores = true
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
