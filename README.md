@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+    <a href="https://github.com/openbotx/openbotx/actions/workflows/build.yml"><img src="https://github.com/openbotx/openbotx/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
+</p>
+
+<p align="center">
     OpenBotX is an open-source AI assistant platform with a web interface, task board, multi-channel support, and a skills system — all manageable through the browser.
 </p>
 
