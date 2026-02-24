@@ -247,8 +247,8 @@ async def restart_services(request: Request):
     channel_manager = ChannelManager(
         config.channels,
         bus,
+        storage=storage,
         ws_manager=ws_manager,
-        project_dir=config.project_path,
     )
     app.state.channel_manager = channel_manager
     await channel_manager.start()

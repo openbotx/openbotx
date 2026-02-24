@@ -1564,7 +1564,7 @@ Each consumer resolves the path differently:
 | Consumer | Method | Result |
 |---|---|---|
 | **LLM (Agent Loop)** | `storage.get_data_uri(path)` | `data:image/jpeg;base64,...` — works with all cloud providers |
-| **Telegram outbound** | `open(project_dir / path, "rb")` | Raw bytes sent via Telegram API |
+| **Telegram outbound** | `storage.read(path)` | Raw bytes sent via Telegram API |
 | **Web interface** | `GET /public/{path}` | HTTP file response served by FastAPI |
 | **Public URL generation** | `storage.get_url(path)` | Absolute URL for sharing or embedding |
 

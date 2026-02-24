@@ -16,22 +16,18 @@ class Tool(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        pass
+    def name(self) -> str: ...
 
     @property
     @abstractmethod
-    def description(self) -> str:
-        pass
+    def description(self) -> str: ...
 
     @property
     @abstractmethod
-    def parameters(self) -> dict[str, Any]:
-        pass
+    def parameters(self) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
-        pass
+    async def execute(self, **kwargs: Any) -> str: ...
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         schema = self.parameters or {}

@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from pathlib import Path
 from typing import Any
 
 from openbotx.bus.events import OutboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.base import BaseChannel
 from openbotx.config.schema import ChannelsConfig
+from openbotx.storage.base import StorageProvider
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +18,13 @@ class ChannelManager:
         self,
         config: ChannelsConfig,
         bus: MessageBus,
+        storage: StorageProvider,
         ws_manager=None,
-        project_dir: Path | None = None,
     ):
         self.config = config
         self.bus = bus
+        self._storage = storage
         self._ws_manager = ws_manager
-        self._project_dir = project_dir or Path.cwd() / "public"
         self._channels: dict[str, BaseChannel] = {}
         self._outbound_task: asyncio.Task | None = None
         self._send_progress = config.send_progress
@@ -37,11 +37,11 @@ class ChannelManager:
 
                 channel = TelegramChannel(
                     token=self.config.telegram.token,
+                    storage=self._storage,
                     on_message=self.bus.publish_inbound,
                     allow_from=self.config.telegram.allowed_users,
                     proxy=self.config.telegram.proxy,
                     reply_to_message=self.config.telegram.reply_to_message,
-                    project_dir=self._project_dir,
                 )
                 self._channels["telegram"] = channel
             except Exception as e:
@@ -81,11 +81,11 @@ class ChannelManager:
 
                 channel = TelegramChannel(
                     token=self.config.telegram.token,
+                    storage=self._storage,
                     on_message=self.bus.publish_inbound,
                     allow_from=self.config.telegram.allowed_users,
                     proxy=self.config.telegram.proxy,
                     reply_to_message=self.config.telegram.reply_to_message,
-                    project_dir=self._project_dir,
                 )
                 self._channels[name] = channel
 

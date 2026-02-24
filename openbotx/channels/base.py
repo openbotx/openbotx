@@ -31,13 +31,10 @@ class BaseChannel(ABC):
         return self._running
 
     @abstractmethod
-    async def start(self) -> None:
-        pass
+    async def start(self) -> None: ...
 
     @abstractmethod
-    async def stop(self) -> None:
-        pass
+    async def stop(self) -> None: ...
 
     @abstractmethod
-    async def send(self, msg: OutboundMessage) -> None:
-        pass
+    async def send(self, msg: OutboundMessage) -> None: ...

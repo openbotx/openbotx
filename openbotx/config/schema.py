@@ -119,7 +119,7 @@ class Config(BaseModel):
             return self._config_path.parent.resolve()
         return Path.cwd().resolve()
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+    def _resolve_provider(self, model: str | None = None) -> tuple[str, ProviderConfig] | None:
         from openbotx.providers.registry import PROVIDERS
 
         target = model or self.main_agent.model
@@ -130,7 +130,7 @@ class Config(BaseModel):
                 if prefix == spec.name.lower() and spec.name in self.providers:
                     cfg = self.providers[spec.name]
                     if cfg.api_key:
-                        return cfg
+                        return spec.name, cfg
 
         target_lower = target.lower()
         for spec in PROVIDERS:
@@ -139,36 +139,17 @@ class Config(BaseModel):
             ):
                 cfg = self.providers[spec.name]
                 if cfg.api_key:
-                    return cfg
-
-        for cfg in self.providers.values():
-            if cfg.api_key:
-                return cfg
-        return None
-
-    def get_provider_name(self, model: str | None = None) -> str | None:
-        from openbotx.providers.registry import PROVIDERS
-
-        target = model or self.main_agent.model
-        prefix = target.split("/", 1)[0].lower() if "/" in target else ""
-
-        if prefix:
-            for spec in PROVIDERS:
-                if prefix == spec.name.lower() and spec.name in self.providers:
-                    cfg = self.providers[spec.name]
-                    if cfg.api_key:
-                        return spec.name
-
-        target_lower = target.lower()
-        for spec in PROVIDERS:
-            if spec.name in self.providers and any(
-                kw.lower() in target_lower for kw in spec.keywords
-            ):
-                cfg = self.providers[spec.name]
-                if cfg.api_key:
-                    return spec.name
+                    return spec.name, cfg
 
         for name, cfg in self.providers.items():
             if cfg.api_key:
-                return name
+                return name, cfg
         return None
+
+    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+        result = self._resolve_provider(model)
+        return result[1] if result else None
+
+    def get_provider_name(self, model: str | None = None) -> str | None:
+        result = self._resolve_provider(model)
+        return result[0] if result else None

@@ -110,9 +110,7 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
-    ) -> LLMResponse:
-        pass
+    ) -> LLMResponse: ...
 
     @abstractmethod
-    def get_default_model(self) -> str:
-        pass
+    def get_default_model(self) -> str: ...

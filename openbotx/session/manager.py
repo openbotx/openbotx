@@ -151,6 +151,7 @@ class SessionManager:
                                     "updated_at": data.get("updated_at"),
                                 }
                             )
-            except Exception:
+            except Exception as e:
+                logger.debug("skipping session file %s: %s", path.name, e)
                 continue
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

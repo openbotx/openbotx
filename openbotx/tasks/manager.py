@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from openbotx.server.websocket import WebSocketManager
 from openbotx.tasks.models import Task, TaskState
+
+logger = logging.getLogger(__name__)
 
 
 class TaskManager:
@@ -42,8 +45,8 @@ class TaskManager:
                         updated_at=data.get("updated_at", ""),
                     )
                     self._tasks[task.id] = task
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("failed to load tasks from %s: %s", self.store_path, e)
 
     def _persist(self) -> None:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)

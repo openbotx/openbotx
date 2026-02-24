@@ -4,7 +4,6 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 
 from telegram import ReplyParameters, Update
 from telegram.ext import (
@@ -18,6 +17,7 @@ from telegram.request import HTTPXRequest
 
 from openbotx.bus.events import InboundMessage, OutboundMessage
 from openbotx.channels.base import BaseChannel
+from openbotx.storage.base import StorageProvider
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,17 @@ class TelegramChannel(BaseChannel):
     def __init__(
         self,
         token: str,
+        storage: StorageProvider,
         on_message: Callable[[InboundMessage], Awaitable[None]] | None = None,
         allow_from: list[str] | None = None,
         proxy: str | None = None,
         reply_to_message: bool = False,
-        project_dir: Path | None = None,
     ):
         super().__init__(name="telegram", on_message=on_message, allow_from=allow_from)
         self._token = token
+        self._storage = storage
         self._proxy = proxy
         self._reply_to_message = reply_to_message
-        self._project_dir = project_dir or Path.cwd()
-        self._media_dir = self._project_dir / "public" / "media"
         self._app: Application | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
 
@@ -131,7 +130,7 @@ class TelegramChannel(BaseChannel):
 
         for media_path in msg.media or []:
             try:
-                abs_path = self._project_dir / media_path
+                data = await self._storage.read(media_path)
                 media_type = self._guess_media_type(media_path)
                 sender = {
                     "photo": self._app.bot.send_photo,
@@ -145,12 +144,11 @@ class TelegramChannel(BaseChannel):
                     if media_type in ("voice", "audio")
                     else "document"
                 )
-                with open(abs_path, "rb") as f:
-                    await sender(
-                        chat_id=chat_id,
-                        **{param: f},
-                        reply_parameters=reply_params,
-                    )
+                await sender(
+                    chat_id=chat_id,
+                    **{param: data},
+                    reply_parameters=reply_params,
+                )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("failed to send media %s: %s", media_path, e)
@@ -259,14 +257,15 @@ class TelegramChannel(BaseChannel):
             try:
                 tg_file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, "mime_type", None))
-                self._media_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"{media_file.file_id[:16]}{ext}"
+                storage_path = f"public/media/{filename}"
 
-                file_path = self._media_dir / f"{media_file.file_id[:16]}{ext}"
-                await tg_file.download_to_drive(str(file_path))
+                data = await tg_file.download_as_bytearray()
+                await self._storage.write(storage_path, bytes(data))
 
-                media_paths.append(f"public/media/{file_path.name}")
-                content_parts.append(f"[{media_type}: {file_path.name}]")
-                logger.debug("downloaded %s to %s", media_type, file_path)
+                media_paths.append(storage_path)
+                content_parts.append(f"[{media_type}: {filename}]")
+                logger.debug("downloaded %s to %s", media_type, storage_path)
             except Exception as e:
                 logger.error("failed to download media: %s", e)
                 content_parts.append(f"[{media_type}: download failed]")
