@@ -80,4 +80,10 @@ function onNodeSelect(node) {
   background: transparent;
   padding: 0;
 }
+
+.file-tree :deep(.p-tree-node-label) {
+  overflow-wrap: break-word;
+  word-break: break-all;
+  min-width: 0;
+}
 </style>

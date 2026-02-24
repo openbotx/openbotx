@@ -57,6 +57,8 @@ const formattedSize = computed(() => {
   font-family: monospace;
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .download-body {
@@ -77,6 +79,9 @@ const formattedSize = computed(() => {
 .download-filename {
   margin: 0;
   font-size: 1.1rem;
+  overflow-wrap: break-word;
+  word-break: break-all;
+  text-align: center;
 }
 
 .download-meta {

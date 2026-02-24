@@ -75,6 +75,9 @@ const formattedSize = computed(() => {
   font-family: monospace;
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+  overflow-wrap: break-word;
+  word-break: break-all;
+  min-width: 0;
 }
 
 .media-info {
@@ -119,5 +122,18 @@ const formattedSize = computed(() => {
 .preview-audio {
   width: 100%;
   max-width: 500px;
+}
+
+@media (max-width: 768px) {
+  .media-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .media-preview {
+    padding: 1rem;
+  }
 }
 </style>

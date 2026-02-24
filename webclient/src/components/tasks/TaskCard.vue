@@ -43,6 +43,7 @@ function formatTime(iso) {
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.5rem;
   padding: 0.75rem;
+  overflow-wrap: break-word;
 }
 
 .task-header {
