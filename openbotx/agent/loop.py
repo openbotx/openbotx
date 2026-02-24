@@ -13,7 +13,7 @@ from openbotx.agent.subagent import SubagentManager
 from openbotx.bus.events import InboundMessage, OutboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.cron.service import CronService
-from openbotx.helpers.text import humanize
+from openbotx.helpers.text import describe_tool_use, humanize
 from openbotx.providers.base import LLMProvider
 from openbotx.server.websocket import WebSocketManager
 from openbotx.session.manager import SessionManager
@@ -292,11 +292,13 @@ class AgentLoop:
 
                     if self._ws_manager:
                         display_name = humanize(tc.name)
+                        description = describe_tool_use(tc.name, tc.arguments)
                         await self._ws_manager.broadcast(
                             "chat:tool_use",
                             {
                                 "task_id": task_id,
                                 "tool": display_name,
+                                "description": description,
                             },
                         )
 

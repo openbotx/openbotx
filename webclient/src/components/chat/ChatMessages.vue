@@ -1,7 +1,6 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import { marked } from 'marked'
-import ToolUseIndicator from './ToolUseIndicator.vue'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -36,7 +35,7 @@ watch(
     >
       <div class="message-avatar">
         <i v-if="msg.role === 'user'" class="pi pi-user"></i>
-        <img v-else src="/logo-chat.png" alt="AI" class="avatar-logo" />
+        <i v-else class="pi pi-sparkles"></i>
       </div>
       <div class="message-body">
         <div v-if="msg.content" class="message-content" v-html="renderMarkdown(msg.content)"></div>
@@ -44,20 +43,24 @@ watch(
           <div v-for="(tu, j) in msg.tool_uses" :key="j" class="tool-use-item">
             <i class="pi pi-cog"></i>
             <span class="tool-name">{{ tu.tool }}</span>
-            <span v-if="tu.result" class="tool-result">{{ tu.result.substring(0, 100) }}</span>
+            <span v-if="tu.description" class="tool-desc">{{ tu.description }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <ToolUseIndicator v-if="streaming && currentToolUse" :tool-use="currentToolUse" />
+    <div v-if="streaming && currentToolUse" class="message assistant">
+      <div class="message-avatar"><i class="pi pi-sparkles"></i></div>
+      <div class="tool-indicator">
+        <i class="pi pi-spin pi-spinner"></i>
+        <span>{{ currentToolUse.description || currentToolUse.tool }}</span>
+      </div>
+    </div>
 
     <div v-if="streaming && !currentToolUse" class="message assistant">
-      <div class="message-avatar"><img src="/logo-chat.png" alt="AI" class="avatar-logo" /></div>
-      <div class="message-body">
-        <div class="typing-indicator">
-          <span></span><span></span><span></span>
-        </div>
+      <div class="message-avatar"><i class="pi pi-sparkles"></i></div>
+      <div class="typing-indicator">
+        <span></span><span></span><span></span>
       </div>
     </div>
 
@@ -97,7 +100,8 @@ watch(
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--p-surface-200);
+  background: var(--p-content-border-color);
+  color: var(--p-text-color);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -107,12 +111,6 @@ watch(
 .message.user .message-avatar {
   background: var(--p-primary-color);
   color: var(--p-primary-contrast-color);
-}
-
-.avatar-logo {
-  width: 20px;
-  height: 20px;
-  object-fit: contain;
 }
 
 .message-body {
@@ -169,17 +167,27 @@ watch(
   color: var(--p-primary-color);
 }
 
-.tool-result {
-  opacity: 0.7;
+.tool-desc {
+  color: var(--p-text-muted-color);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 300px;
+}
+
+.tool-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--p-primary-color);
+  padding: 0.5rem 0;
 }
 
 .typing-indicator {
   display: flex;
+  align-items: center;
   gap: 4px;
+  padding: 0.75rem 0;
 }
 
 .typing-indicator span {

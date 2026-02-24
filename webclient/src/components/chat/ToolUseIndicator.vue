@@ -8,10 +8,7 @@ const props = defineProps({
   <div v-if="toolUse" class="tool-indicator">
     <div class="tool-header">
       <i class="pi pi-spin pi-spinner"></i>
-      <span class="tool-label">Using <strong>{{ toolUse.tool }}</strong></span>
-    </div>
-    <div v-if="toolUse.arguments" class="tool-args">
-      {{ typeof toolUse.arguments === 'string' ? toolUse.arguments : JSON.stringify(toolUse.arguments).substring(0, 200) }}
+      <span class="tool-label">{{ toolUse.description || toolUse.tool }}</span>
     </div>
   </div>
 </template>
@@ -31,13 +28,5 @@ const props = defineProps({
   align-items: center;
   gap: 0.5rem;
   color: var(--p-primary-color);
-}
-
-.tool-args {
-  margin-top: 0.4rem;
-  color: var(--p-text-muted-color);
-  font-family: monospace;
-  font-size: 0.8rem;
-  word-break: break-all;
 }
 </style>
