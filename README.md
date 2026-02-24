@@ -2,7 +2,7 @@
 
 <p align="center">
     <a href="https://github.com/openbotx/openbotx" target="_blank" rel="noopener noreferrer">
-        <img width="280" src="extras/logo.png" alt="OpenBotX Logo">
+        <img width="280" src="extras/images/logo.png" alt="OpenBotX Logo">
     </a>
 </p>
 
