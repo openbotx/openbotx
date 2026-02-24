@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class WebSocketManager:
-
     def __init__(self):
         self._connections: set[WebSocket] = set()
 

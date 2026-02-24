@@ -326,7 +326,8 @@ Response:
     "configured": "boolean",
     "api_base": "string",
     "has_key": "boolean",
-    "params": {}
+    "headers": {},
+    "options": {}
   }
 ]
 ```
@@ -339,7 +340,8 @@ Request body:
 {
   "api_key": "string",
   "api_base": "string",
-  "params": {}
+  "headers": {},
+  "options": {}
 }
 ```
 

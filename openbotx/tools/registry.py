@@ -2,11 +2,11 @@ from typing import Any
 
 from openbotx.tools.base import Tool
 
-_HINT = "\n\n[Analyze the error above and try a different approach.]"
-
 
 class ToolRegistry:
     """Registry for agent tools."""
+
+    _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
@@ -37,14 +37,14 @@ class ToolRegistry:
                 return (
                     f"Error: Invalid parameters for tool '{name}': "
                     + "; ".join(errors)
-                    + _HINT
+                    + self._HINT
                 )
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
-                return result + _HINT
+                return result + self._HINT
             return result
         except Exception as e:
-            return f"Error executing {name}: {e}" + _HINT
+            return f"Error executing {name}: {e}" + self._HINT
 
     @property
     def tool_names(self) -> list[str]:

@@ -1,4 +1,5 @@
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from openbotx.bus.events import OutboundMessage
 from openbotx.tools.base import Tool
@@ -46,16 +47,12 @@ class MessageTool(Tool):
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
 
-    def set_context(
-        self, channel: str, chat_id: str, message_id: str | None = None
-    ) -> None:
+    def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         self._default_channel = channel
         self._default_chat_id = chat_id
         self._default_message_id = message_id
 
-    def set_send_callback(
-        self, callback: Callable[[OutboundMessage], Awaitable[None]]
-    ) -> None:
+    def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         self._send_callback = callback
 
     def start_turn(self) -> None:

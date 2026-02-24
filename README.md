@@ -84,6 +84,7 @@ openbotx version            # Show version
 
 Detailed documentation is available in the [docs/](docs/) folder:
 
+- [Execution Flow](docs/flow.md) — Complete agent execution flow, step by step
 - [Architecture](docs/architecture.md) — System design, message flow, and components
 - [Configuration](docs/configuration.md) — Complete config.yml reference
 - [API Reference](docs/api.md) — REST API and WebSocket endpoints

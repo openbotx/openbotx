@@ -71,9 +71,13 @@ agents:
 # Image Generation
 # ---------------------------------------------------------------------------
 image:
-  provider: "gemini"              # str  -- Image generation provider (e.g. "gemini", "openai").
-  model: "imagen-3.0-generate-002"  # str  -- Model name for image generation.
-  api_key: ""                     # str  -- API key for the image provider.
+  model: "gemini-3-pro-image-preview"  # str  -- Model name for image generation.
+  provider:                            # ProviderConfig -- Provider connection settings (same schema as providers.*).
+    name: "gemini"                     # str  -- Image generation backend (e.g. "gemini", "openai").
+    api_key: ""                        # str  -- API key for the image provider.
+    api_base: null                     # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
+    headers: {}                        # dict[str, str] -- Custom HTTP headers sent with every API request.
+    options: {}                        # dict -- Additional provider-specific parameters merged into the request body.
 
 # ---------------------------------------------------------------------------
 # Authentication
@@ -92,7 +96,8 @@ providers:
   anthropic:                      # Provider name (must match prefix used in agent model field).
     api_key: ""                   # str  -- API key for this provider.
     api_base: null                # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
-    params: {}                    # dict[str, str] -- Additional provider-specific parameters passed with every request.
+    headers: {}                   # dict[str, str] -- Custom HTTP headers sent with every API request.
+    options: {}                   # dict -- Additional provider-specific parameters merged into the request body.
 
 # ---------------------------------------------------------------------------
 # Channels
@@ -285,9 +290,10 @@ agents:
     model: "anthropic/claude-sonnet-4-20250514"
 
 image:
-  provider: "gemini"
-  model: "imagen-3.0-generate-002"
-  api_key: ${GEMINI_API_KEY}
+  model: "gemini-3-pro-image-preview"
+  provider:
+    name: "gemini"
+    api_key: ${GEMINI_API_KEY}
 
 auth:
   username: ${AUTH_USERNAME}

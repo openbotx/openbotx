@@ -14,7 +14,6 @@ IDENTITY = "You are OpenBotX, a personal AI assistant."
 
 
 class ContextBuilder:
-
     def __init__(
         self,
         workspace: Path,
@@ -29,9 +28,7 @@ class ContextBuilder:
         parts = [IDENTITY]
 
         now = datetime.now()
-        parts.append(
-            f"\nCurrent date and time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}."
-        )
+        parts.append(f"\nCurrent date and time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
 
         for filename in BOOTSTRAP_FILES:
             filepath = self._workspace / filename
@@ -70,14 +67,14 @@ class ContextBuilder:
         messages.extend(history)
 
         if media:
-            content_parts: list[dict[str, Any]] = [
-                {"type": "text", "text": user_content}
-            ]
+            content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_content}]
             for item in media:
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": item},
-                })
+                content_parts.append(
+                    {
+                        "type": "image",
+                        "url": item,
+                    }
+                )
             messages.append({"role": "user", "content": content_parts})
         else:
             messages.append({"role": "user", "content": user_content})
@@ -92,12 +89,14 @@ class ContextBuilder:
         result: str,
     ) -> None:
         truncated = result[:500] if len(result) > 500 else result
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "name": tool_name,
-            "content": truncated,
-        })
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": tool_name,
+                "content": truncated,
+            }
+        )
 
     @staticmethod
     def add_assistant_message(

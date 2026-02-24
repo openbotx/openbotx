@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable
 
-from telegram import Update, ReplyParameters
+from telegram import ReplyParameters, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -22,87 +22,7 @@ from openbotx.channels.base import BaseChannel
 logger = logging.getLogger(__name__)
 
 
-def _markdown_to_telegram_html(text: str) -> str:
-    if not text:
-        return ""
-
-    # extract and protect code blocks
-    code_blocks: list[str] = []
-
-    def _save_code_block(m: re.Match) -> str:
-        code_blocks.append(m.group(1))
-        return f"\x00CB{len(code_blocks) - 1}\x00"
-
-    text = re.sub(r"```[\w]*\n?([\s\S]*?)```", _save_code_block, text)
-
-    # extract and protect inline code
-    inline_codes: list[str] = []
-
-    def _save_inline_code(m: re.Match) -> str:
-        inline_codes.append(m.group(1))
-        return f"\x00IC{len(inline_codes) - 1}\x00"
-
-    text = re.sub(r"`([^`]+)`", _save_inline_code, text)
-
-    # headers
-    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
-
-    # blockquotes
-    text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
-
-    # escape html
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    # links
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
-
-    # bold
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
-
-    # italic
-    text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
-
-    # strikethrough
-    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
-
-    # bullet lists
-    text = re.sub(r"^[-*]\s+", "\u2022 ", text, flags=re.MULTILINE)
-
-    # restore inline code
-    for i, code in enumerate(inline_codes):
-        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
-
-    # restore code blocks
-    for i, code in enumerate(code_blocks):
-        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
-
-    return text
-
-
-def _split_message(content: str, max_len: int = 4000) -> list[str]:
-    if len(content) <= max_len:
-        return [content]
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-        cut = content[:max_len]
-        pos = cut.rfind("\n")
-        if pos == -1:
-            pos = cut.rfind(" ")
-        if pos == -1:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
-
-
 class TelegramChannel(BaseChannel):
-
     def __init__(
         self,
         token: str,
@@ -110,11 +30,14 @@ class TelegramChannel(BaseChannel):
         allow_from: list[str] | None = None,
         proxy: str | None = None,
         reply_to_message: bool = False,
+        project_dir: Path | None = None,
     ):
         super().__init__(name="telegram", on_message=on_message, allow_from=allow_from)
         self._token = token
         self._proxy = proxy
         self._reply_to_message = reply_to_message
+        self._project_dir = project_dir or Path.cwd()
+        self._media_dir = self._project_dir / "public" / "media"
         self._app: Application | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
 
@@ -131,12 +54,7 @@ class TelegramChannel(BaseChannel):
             connect_timeout=30.0,
             read_timeout=30.0,
         )
-        builder = (
-            Application.builder()
-            .token(self._token)
-            .request(req)
-            .get_updates_request(req)
-        )
+        builder = Application.builder().token(self._token).request(req).get_updates_request(req)
         if self._proxy:
             builder = builder.proxy(self._proxy).get_updates_proxy(self._proxy)
 
@@ -213,6 +131,7 @@ class TelegramChannel(BaseChannel):
 
         for media_path in msg.media or []:
             try:
+                abs_path = self._project_dir / media_path
                 media_type = self._guess_media_type(media_path)
                 sender = {
                     "photo": self._app.bot.send_photo,
@@ -226,7 +145,7 @@ class TelegramChannel(BaseChannel):
                     if media_type in ("voice", "audio")
                     else "document"
                 )
-                with open(media_path, "rb") as f:
+                with open(abs_path, "rb") as f:
                     await sender(
                         chat_id=chat_id,
                         **{param: f},
@@ -242,9 +161,9 @@ class TelegramChannel(BaseChannel):
                 )
 
         if msg.content and msg.content != "[empty message]":
-            for chunk in _split_message(msg.content):
+            for chunk in self._split_message(msg.content):
                 try:
-                    html = _markdown_to_telegram_html(chunk)
+                    html = self._markdown_to_telegram_html(chunk)
                     await self._app.bot.send_message(
                         chat_id=chat_id,
                         text=html,
@@ -263,9 +182,7 @@ class TelegramChannel(BaseChannel):
 
     # -- handlers --
 
-    async def _on_start(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user:
             return
         user = update.effective_user
@@ -274,18 +191,14 @@ class TelegramChannel(BaseChannel):
             "Type /help to see available commands."
         )
 
-    async def _on_help(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message:
             return
         await update.message.reply_text(
-            "Available commands:\n" "/new - Start a new conversation\n" "/help - Show this help"
+            "Available commands:\n/new - Start a new conversation\n/help - Show this help"
         )
 
-    async def _on_command(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def _on_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_user:
             return
         sender_id = self._build_sender_id(update.effective_user)
@@ -345,17 +258,14 @@ class TelegramChannel(BaseChannel):
         if media_file and self._app:
             try:
                 tg_file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(
-                    media_type, getattr(media_file, "mime_type", None)
-                )
-                media_dir = Path.home() / ".openbotx" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
+                ext = self._get_extension(media_type, getattr(media_file, "mime_type", None))
+                self._media_dir.mkdir(parents=True, exist_ok=True)
 
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+                file_path = self._media_dir / f"{media_file.file_id[:16]}{ext}"
                 await tg_file.download_to_drive(str(file_path))
 
-                media_paths.append(str(file_path))
-                content_parts.append(f"[{media_type}: {file_path}]")
+                media_paths.append(f"public/media/{file_path.name}")
+                content_parts.append(f"[{media_type}: {file_path.name}]")
                 logger.debug("downloaded %s to %s", media_type, file_path)
             except Exception as e:
                 logger.error("failed to download media: %s", e)
@@ -395,9 +305,7 @@ class TelegramChannel(BaseChannel):
     async def _typing_loop(self, chat_id: str) -> None:
         try:
             while self._app:
-                await self._app.bot.send_chat_action(
-                    chat_id=int(chat_id), action="typing"
-                )
+                await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
             pass
@@ -460,7 +368,65 @@ class TelegramChannel(BaseChannel):
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type or "", "")
 
-    async def _on_error(
-        self, update: object, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    @staticmethod
+    def _markdown_to_telegram_html(text: str) -> str:
+        if not text:
+            return ""
+
+        code_blocks: list[str] = []
+
+        def _save_code_block(m: re.Match) -> str:
+            code_blocks.append(m.group(1))
+            return f"\x00CB{len(code_blocks) - 1}\x00"
+
+        text = re.sub(r"```[\w]*\n?([\s\S]*?)```", _save_code_block, text)
+
+        inline_codes: list[str] = []
+
+        def _save_inline_code(m: re.Match) -> str:
+            inline_codes.append(m.group(1))
+            return f"\x00IC{len(inline_codes) - 1}\x00"
+
+        text = re.sub(r"`([^`]+)`", _save_inline_code, text)
+
+        text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
+        text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+        text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+        text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
+        text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
+        text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
+        text = re.sub(r"^[-*]\s+", "\u2022 ", text, flags=re.MULTILINE)
+
+        for i, code in enumerate(inline_codes):
+            escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
+
+        for i, code in enumerate(code_blocks):
+            escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
+
+        return text
+
+    @staticmethod
+    def _split_message(content: str, max_len: int = 4000) -> list[str]:
+        if len(content) <= max_len:
+            return [content]
+        chunks: list[str] = []
+        while content:
+            if len(content) <= max_len:
+                chunks.append(content)
+                break
+            cut = content[:max_len]
+            pos = cut.rfind("\n")
+            if pos == -1:
+                pos = cut.rfind(" ")
+            if pos == -1:
+                pos = max_len
+            chunks.append(content[:pos])
+            content = content[pos:].lstrip()
+        return chunks
+
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("telegram error: %s", context.error)

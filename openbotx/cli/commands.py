@@ -1,5 +1,4 @@
 import io
-import shutil
 import webbrowser
 import zipfile
 from pathlib import Path
@@ -53,7 +52,7 @@ def init(force):
 
             rel_path = info.filename
             if prefix and rel_path.startswith(prefix + "/"):
-                rel_path = rel_path[len(prefix) + 1:]
+                rel_path = rel_path[len(prefix) + 1 :]
 
             if not rel_path:
                 continue
@@ -86,8 +85,23 @@ def start(host, port, no_browser):
     import uvicorn
 
     if not no_browser:
-        url = f"http://localhost:{port}/app/" if host == "0.0.0.0" else f"http://{host}:{port}/app/"
+        from openbotx.config.loader import load_config
+
+        try:
+            cfg = load_config()
+            public_url = cfg.server.public_url.rstrip("/") if cfg.server.public_url else ""
+        except Exception:
+            public_url = ""
+
+        if public_url:
+            url = f"{public_url}/app/"
+        elif host == "0.0.0.0":
+            url = f"http://localhost:{port}/app/"
+        else:
+            url = f"http://{host}:{port}/app/"
+
         import threading
+
         threading.Timer(1.5, webbrowser.open, args=[url]).start()
 
     click.echo(f"Starting OpenBotX v{__version__} on {host}:{port}")

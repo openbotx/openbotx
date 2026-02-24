@@ -1,10 +1,10 @@
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import logging
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +144,13 @@ class SessionManager:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
-                            sessions.append({
-                                "key": key,
-                                "created_at": data.get("created_at"),
-                                "updated_at": data.get("updated_at"),
-                            })
+                            sessions.append(
+                                {
+                                    "key": key,
+                                    "created_at": data.get("created_at"),
+                                    "updated_at": data.get("updated_at"),
+                                }
+                            )
             except Exception:
                 continue
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

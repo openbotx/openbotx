@@ -6,40 +6,43 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from openbotx.bus.events import InboundMessage, OutboundMessage
-from openbotx.bus.queue import MessageBus
-from openbotx.providers.base import LLMProvider
-from openbotx.tools.registry import ToolRegistry
-from openbotx.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from openbotx.tools.shell import ExecTool
-from openbotx.tools.web import WebSearchTool, WebFetchTool
-from openbotx.tools.message import MessageTool
-from openbotx.tools.spawn import SpawnTool
-from openbotx.tools.cron import CronTool
-from openbotx.tools.memory_tool import SaveMemoryTool
-from openbotx.tools.browser import BrowserTool
-from openbotx.tools.http_client import HttpClientTool
-from openbotx.tools.image import ImageGenerationTool
-from openbotx.session.manager import SessionManager
-from openbotx.tasks.models import TaskState
-from openbotx.tasks.manager import TaskManager
-from openbotx.server.websocket import WebSocketManager
 from openbotx.agent.context import ContextBuilder
 from openbotx.agent.memory import MemoryStore
 from openbotx.agent.skills import SkillsLoader
 from openbotx.agent.subagent import SubagentManager
+from openbotx.bus.events import InboundMessage, OutboundMessage
+from openbotx.bus.queue import MessageBus
 from openbotx.cron.service import CronService
+from openbotx.helpers.text import humanize
+from openbotx.providers.base import LLMProvider
+from openbotx.server.websocket import WebSocketManager
+from openbotx.session.manager import SessionManager
+from openbotx.tasks.manager import TaskManager
+from openbotx.tasks.models import TaskState
+from openbotx.tools.browser import BrowserTool
+from openbotx.tools.cron import CronTool
+from openbotx.tools.filesystem import (
+    EditFileTool,
+    ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
+)
+from openbotx.tools.http_client import HttpClientTool
+from openbotx.tools.image import ImageGenerationTool
+from openbotx.tools.memory_tool import SaveMemoryTool
+from openbotx.tools.message import MessageTool
+from openbotx.tools.registry import ToolRegistry
+from openbotx.tools.shell import ExecTool
+from openbotx.tools.spawn import SpawnTool
+from openbotx.tools.web import WebFetchTool, WebSearchTool
 
 logger = logging.getLogger(__name__)
 
-HELP_TEXT = (
-    "Available commands:\n"
-    "  /new - Start a new conversation\n"
-    "  /help - Show this help message\n"
-)
-
 
 class AgentLoop:
+    _HELP_TEXT = (
+        "Available commands:\n  /new - Start a new conversation\n  /help - Show this help message\n"
+    )
 
     def __init__(
         self,
@@ -61,10 +64,12 @@ class AgentLoop:
         exec_timeout: int = 60,
         restrict_to_workspace: bool = True,
         image_config=None,
+        storage=None,
     ):
         self._bus = bus
         self._provider = provider
         self._workspace = workspace
+        self._storage = storage
         self._ws_manager = ws_manager
         self._task_manager = task_manager
         self._session_manager = session_manager
@@ -95,18 +100,10 @@ class AgentLoop:
     def _register_tools(self) -> None:
         allowed_dir = self._workspace if self._restrict_to_workspace else None
 
-        self._registry.register(
-            ReadFileTool(workspace=self._workspace, allowed_dir=allowed_dir)
-        )
-        self._registry.register(
-            WriteFileTool(workspace=self._workspace, allowed_dir=allowed_dir)
-        )
-        self._registry.register(
-            EditFileTool(workspace=self._workspace, allowed_dir=allowed_dir)
-        )
-        self._registry.register(
-            ListDirTool(workspace=self._workspace, allowed_dir=allowed_dir)
-        )
+        self._registry.register(ReadFileTool(workspace=self._workspace, allowed_dir=allowed_dir))
+        self._registry.register(WriteFileTool(workspace=self._workspace, allowed_dir=allowed_dir))
+        self._registry.register(EditFileTool(workspace=self._workspace, allowed_dir=allowed_dir))
+        self._registry.register(ListDirTool(workspace=self._workspace, allowed_dir=allowed_dir))
         self._registry.register(
             ExecTool(
                 timeout=self._exec_timeout,
@@ -131,23 +128,18 @@ class AgentLoop:
         self._registry.register(BrowserTool())
         self._registry.register(HttpClientTool())
 
-        if self._image_config and self._image_config.api_key:
-            self._registry.register(ImageGenerationTool(
-                provider=self._image_config.provider,
-                model=self._image_config.model,
-                api_key=self._image_config.api_key,
-                workspace=self._workspace,
-            ))
+        if self._image_config and self._image_config.provider.api_key and self._storage:
+            self._registry.register(
+                ImageGenerationTool(config=self._image_config, storage=self._storage)
+            )
 
     async def run(self) -> None:
         logger.info("agent loop started (model=%s)", self._model)
         while not self._stop_event.is_set():
             try:
-                msg = await asyncio.wait_for(
-                    self._bus.consume_inbound(), timeout=1.0
-                )
+                msg = await asyncio.wait_for(self._bus.consume_inbound(), timeout=1.0)
                 await self._process_message(msg)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
@@ -185,80 +177,78 @@ class AgentLoop:
             session.clear()
             self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.DONE)
-            await self._bus.publish_outbound(OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="Conversation cleared. How can I help you?",
-                metadata={"task_id": task_id},
-            ))
+            await self._bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Conversation cleared. How can I help you?",
+                    metadata={"task_id": task_id},
+                )
+            )
             return
 
         if content.lower() == "/help":
             await self._task_manager.update_state(task_id, TaskState.DONE)
-            await self._bus.publish_outbound(OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=HELP_TEXT,
-                metadata={"task_id": task_id},
-            ))
+            await self._bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=self._HELP_TEXT,
+                    metadata={"task_id": task_id},
+                )
+            )
             return
 
         if self._message_tool:
-            self._message_tool.set_context(
-                msg.channel, msg.chat_id, msg.metadata.get("message_id")
-            )
+            self._message_tool.set_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
             self._message_tool.start_turn()
 
         if self._spawn_tool:
-            self._spawn_tool.set_context(
-                msg.channel, msg.chat_id, parent_task_id=task_id
-            )
+            self._spawn_tool.set_context(msg.channel, msg.chat_id, parent_task_id=task_id)
 
         if self._cron_tool:
             self._cron_tool.set_context(msg.channel, msg.chat_id)
 
+        media_urls = await self._resolve_media(msg.media) if msg.media else None
+
         system_prompt = self._context_builder.build_system_prompt()
         history = session.get_history()
-        messages = ContextBuilder.build_messages(
-            system_prompt, history, content, media=msg.media or None
-        )
+        messages = ContextBuilder.build_messages(system_prompt, history, content, media=media_urls)
 
         try:
             response_text = await self._run_agent_loop(messages, task_id)
         except Exception as e:
             logger.error("agent loop error for task %s: %s", task_id, e, exc_info=True)
             response_text = f"I encountered an error: {e}"
-            await self._task_manager.update_state(
-                task_id, TaskState.ERROR, error=str(e)
+            await self._task_manager.update_state(task_id, TaskState.ERROR, error=str(e))
+            await self._bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=response_text,
+                    metadata={"task_id": task_id},
+                )
             )
-            await self._bus.publish_outbound(OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=response_text,
-                metadata={"task_id": task_id},
-            ))
             return
 
         session.add_message("user", content)
         session.add_message("assistant", response_text)
         self._session_manager.save(session)
 
-        await self._bus.publish_outbound(OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=response_text,
-            metadata={"task_id": task_id},
-        ))
-
-        await self._task_manager.update_state(
-            task_id, TaskState.DONE, result=response_text[:200]
+        await self._bus.publish_outbound(
+            OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=response_text,
+                metadata={"task_id": task_id},
+            )
         )
+
+        await self._task_manager.update_state(task_id, TaskState.DONE, result=response_text[:200])
 
         await self._check_consolidation(session)
 
-    async def _run_agent_loop(
-        self, messages: list[dict[str, Any]], task_id: str
-    ) -> str:
+    async def _run_agent_loop(self, messages: list[dict[str, Any]], task_id: str) -> str:
         for iteration in range(self._max_iterations):
             response = await self._provider.chat(
                 messages=messages,
@@ -269,10 +259,13 @@ class AgentLoop:
             )
 
             if response.reasoning_content and self._ws_manager:
-                await self._ws_manager.broadcast("chat:thinking", {
-                    "task_id": task_id,
-                    "content": response.reasoning_content,
-                })
+                await self._ws_manager.broadcast(
+                    "chat:thinking",
+                    {
+                        "task_id": task_id,
+                        "content": response.reasoning_content,
+                    },
+                )
 
             if response.has_tool_calls:
                 tool_calls_data = [
@@ -298,16 +291,16 @@ class AgentLoop:
                     result = await self._registry.execute(tc.name, tc.arguments)
 
                     if self._ws_manager:
-                        await self._ws_manager.broadcast("chat:tool_use", {
-                            "task_id": task_id,
-                            "tool": tc.name,
-                            "arguments": tc.arguments,
-                            "result": result[:300] if len(result) > 300 else result,
-                        })
+                        display_name = humanize(tc.name)
+                        await self._ws_manager.broadcast(
+                            "chat:tool_use",
+                            {
+                                "task_id": task_id,
+                                "tool": display_name,
+                            },
+                        )
 
-                    ContextBuilder.add_tool_result(
-                        messages, tc.id, tc.name, result
-                    )
+                    ContextBuilder.add_tool_result(messages, tc.id, tc.name, result)
             else:
                 return response.content or ""
 
@@ -323,7 +316,8 @@ class AgentLoop:
 
         logger.info(
             "triggering memory consolidation for session %s (%d unconsolidated)",
-            session.key, unconsolidated,
+            session.key,
+            unconsolidated,
         )
 
         consolidation_messages = self._memory.get_consolidation_messages(
@@ -358,22 +352,24 @@ class AgentLoop:
                         for tc in response.tool_calls
                     ]
 
-                    consolidation_messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": tool_calls_data,
-                    })
+                    consolidation_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": tool_calls_data,
+                        }
+                    )
 
                     for tc in response.tool_calls:
-                        result = await consolidation_registry.execute(
-                            tc.name, tc.arguments
+                        result = await consolidation_registry.execute(tc.name, tc.arguments)
+                        consolidation_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "name": tc.name,
+                                "content": result,
+                            }
                         )
-                        consolidation_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "name": tc.name,
-                            "content": result,
-                        })
                 else:
                     break
 
@@ -383,3 +379,15 @@ class AgentLoop:
 
         except Exception as e:
             logger.error("memory consolidation failed: %s", e, exc_info=True)
+
+    async def _resolve_media(self, paths: list[str]) -> list[str]:
+        resolved = []
+        for path in paths:
+            if path.startswith("data:"):
+                resolved.append(path)
+                continue
+            if self._storage:
+                resolved.append(self._storage.get_data_uri(path))
+            else:
+                resolved.append(path)
+        return resolved

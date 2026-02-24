@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
+from openbotx.agent.subagent import SubagentManager
 from openbotx.tools.base import Tool
-
-if TYPE_CHECKING:
-    from openbotx.agent.subagent import SubagentManager
 
 
 class SpawnTool(Tool):
@@ -47,9 +45,7 @@ class SpawnTool(Tool):
         self._origin_chat_id = chat_id
         self._parent_task_id = parent_task_id
 
-    async def execute(
-        self, task: str, label: str | None = None, **kwargs: Any
-    ) -> str:
+    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
         return await self._manager.spawn(
             task=task,
             label=label,

@@ -25,7 +25,7 @@ const api = useApi()
 const bot = ref({ name: '', description: '' })
 const agents = ref({})
 const newAgentName = ref('')
-const image = ref({ provider: 'gemini', model: 'imagen-3.0-generate-002', api_key: '' })
+const image = ref({ provider: 'gemini', model: 'gemini-3-pro-image-preview', api_key: '' })
 const auth = ref({ username: 'admin', password: '' })
 const tools = ref({ restrict_to_workspace: true, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 } })
 const storage = ref({ type: 'local', s3_bucket: '', s3_region: 'us-east-1', s3_access_key: '', s3_secret_key: '' })
@@ -60,7 +60,7 @@ onMounted(async () => {
     }
     agents.value = loaded
 
-    image.value = { ...{ provider: 'gemini', model: 'imagen-3.0-generate-002', api_key: '' }, ...(configStore.config.image || {}) }
+    image.value = { ...{ provider: 'gemini', model: 'gemini-3-pro-image-preview', api_key: '' }, ...(configStore.config.image || {}) }
     auth.value = { ...{ username: 'admin', password: '' }, ...(configStore.config.auth || {}) }
     tools.value = {
       restrict_to_workspace: configStore.config.tools?.restrict_to_workspace ?? true,
@@ -229,7 +229,7 @@ async function restartServices() {
               </div>
               <div class="form-group">
                 <label>Model</label>
-                <InputText v-model="image.model" class="w-full" placeholder="imagen-3.0-generate-002" />
+                <InputText v-model="image.model" class="w-full" placeholder="gemini-3-pro-image-preview" />
               </div>
               <div class="form-group">
                 <label>API Key</label>

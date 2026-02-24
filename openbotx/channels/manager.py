@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from openbotx.bus.events import OutboundMessage
@@ -13,10 +14,17 @@ logger = logging.getLogger(__name__)
 class ChannelManager:
     """Manages chat channels lifecycle and message routing."""
 
-    def __init__(self, config: ChannelsConfig, bus: MessageBus, ws_manager=None):
+    def __init__(
+        self,
+        config: ChannelsConfig,
+        bus: MessageBus,
+        ws_manager=None,
+        project_dir: Path | None = None,
+    ):
         self.config = config
         self.bus = bus
         self._ws_manager = ws_manager
+        self._project_dir = project_dir or Path.cwd() / "public"
         self._channels: dict[str, BaseChannel] = {}
         self._outbound_task: asyncio.Task | None = None
         self._send_progress = config.send_progress
@@ -33,6 +41,7 @@ class ChannelManager:
                     allow_from=self.config.telegram.allowed_users,
                     proxy=self.config.telegram.proxy,
                     reply_to_message=self.config.telegram.reply_to_message,
+                    project_dir=self._project_dir,
                 )
                 self._channels["telegram"] = channel
             except Exception as e:
@@ -76,6 +85,7 @@ class ChannelManager:
                     allow_from=self.config.telegram.allowed_users,
                     proxy=self.config.telegram.proxy,
                     reply_to_message=self.config.telegram.reply_to_message,
+                    project_dir=self._project_dir,
                 )
                 self._channels[name] = channel
 
@@ -132,11 +142,14 @@ class ChannelManager:
 
         if msg.channel == "web":
             if self._ws_manager:
-                await self._ws_manager.broadcast("chat:message", {
-                    "content": msg.content,
-                    "chat_id": msg.chat_id,
-                    "task_id": msg.metadata.get("task_id"),
-                })
+                await self._ws_manager.broadcast(
+                    "chat:message",
+                    {
+                        "content": msg.content,
+                        "chat_id": msg.chat_id,
+                        "task_id": msg.metadata.get("task_id"),
+                    },
+                )
             return
 
         channel = self._channels.get(msg.channel)

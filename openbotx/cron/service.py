@@ -5,9 +5,10 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from openbotx.cron.types import (
     CronJob,
@@ -23,7 +24,6 @@ TICK_INTERVAL = 5.0
 
 
 class CronService:
-
     def __init__(
         self,
         workspace: Path,
@@ -126,8 +126,9 @@ class CronService:
 
         if schedule.kind == "cron":
             try:
-                from croniter import croniter
                 from zoneinfo import ZoneInfo
+
+                from croniter import croniter
 
                 if schedule.tz:
                     tz = ZoneInfo(schedule.tz)
@@ -230,8 +231,7 @@ class CronService:
             self._store.jobs = [j for j in self._store.jobs if j.id != job_id]
 
         if to_delete or any(
-            j.state.last_run_ms == int(time.time() * 1000)
-            for j in self._store.jobs
+            j.state.last_run_ms == int(time.time() * 1000) for j in self._store.jobs
         ):
             self._persist()
 

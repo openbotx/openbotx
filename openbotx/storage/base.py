@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 
 class StorageProvider(ABC):
@@ -23,4 +22,14 @@ class StorageProvider(ABC):
 
     @abstractmethod
     async def exists(self, path: str) -> bool:
+        pass
+
+    @abstractmethod
+    def get_url(self, path: str) -> str:
+        """Return the public URL for the given path."""
+        pass
+
+    @abstractmethod
+    def get_data_uri(self, path: str) -> str:
+        """Read file and return as data URI (data:mime;base64,...)."""
         pass

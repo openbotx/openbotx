@@ -22,7 +22,7 @@ PUBLIC_PREFIXES = (
 def create_token(username: str, secret: str) -> str:
     payload = {
         "sub": username,
-        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24),
+        "exp": datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=24),
     }
     return jwt.encode(payload, secret, algorithm="HS256")
 
@@ -35,7 +35,6 @@ def verify_token(token: str, secret: str) -> dict | None:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 

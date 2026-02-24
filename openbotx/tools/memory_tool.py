@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
+from openbotx.agent.memory import MemoryStore
 from openbotx.tools.base import Tool
-
-if TYPE_CHECKING:
-    from openbotx.agent.memory import MemoryStore
 
 
 class SaveMemoryTool(Tool):

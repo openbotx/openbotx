@@ -289,7 +289,7 @@ Key configuration sections:
 | `server`    | Host and port                                                |
 | `agents`    | Named agent configs (model, workspace, params)               |
 | `auth`      | Username, password, JWT secret                               |
-| `providers` | API keys and base URLs per provider                          |
+| `providers` | API keys, base URLs, headers, and options per provider       |
 | `channels`  | Telegram settings, progress/tool hint broadcasting           |
 | `tools`     | Web search API key, exec timeout, workspace restriction      |
 | `storage`   | Backend type (local/S3), paths, credentials                  |

@@ -49,9 +49,7 @@ class ExecTool(Tool):
         self.working_dir = working_dir
         self.restrict_to_workspace = restrict_to_workspace
 
-    async def execute(
-        self, command: str, working_dir: str | None = None, **kwargs: Any
-    ) -> str:
+    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
@@ -66,14 +64,12 @@ class ExecTool(Tool):
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=self.timeout
-                )
-            except asyncio.TimeoutError:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
+            except TimeoutError:
                 process.kill()
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
                 return f"Error: Command timed out after {self.timeout} seconds"
 
@@ -91,10 +87,7 @@ class ExecTool(Tool):
 
             max_len = 10000
             if len(result) > max_len:
-                result = (
-                    result[:max_len]
-                    + f"\n... (truncated, {len(result) - max_len} more chars)"
-                )
+                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
             return result
 
         except Exception as e:

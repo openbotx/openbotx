@@ -77,6 +77,31 @@ class LLMProvider(ABC):
             result.append(msg)
         return result
 
+    @staticmethod
+    def _convert_image_blocks(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Convert internal image format to OpenAI-compatible format."""
+        result: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                result.append(msg)
+                continue
+            converted = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image" and "url" in part:
+                    converted.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": part["url"]},
+                        }
+                    )
+                else:
+                    converted.append(part)
+            result.append({**msg, "content": converted})
+        return result
+
     @abstractmethod
     async def chat(
         self,

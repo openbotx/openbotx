@@ -9,7 +9,8 @@ router = APIRouter()
 class ProviderUpdate(BaseModel):
     api_key: str = ""
     api_base: str = ""
-    params: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    options: dict = Field(default_factory=dict)
 
 
 @router.get("")
@@ -19,13 +20,16 @@ async def list_providers(request: Request):
     for spec in PROVIDERS:
         configured = spec.name in config.providers
         cfg = config.providers.get(spec.name)
-        result.append({
-            "name": spec.name,
-            "configured": configured,
-            "api_base": cfg.api_base if configured else "",
-            "has_key": bool(cfg.api_key) if configured else False,
-            "params": dict(cfg.params) if configured else {},
-        })
+        result.append(
+            {
+                "name": spec.name,
+                "configured": configured,
+                "api_base": cfg.api_base if configured else "",
+                "has_key": bool(cfg.api_key) if configured else False,
+                "headers": dict(cfg.headers) if configured else {},
+                "options": dict(cfg.options) if configured else {},
+            }
+        )
     return result
 
 
@@ -45,7 +49,8 @@ async def update_provider(name: str, body: ProviderUpdate, request: Request):
     config.providers[name] = ProviderConfig(
         api_key=api_key,
         api_base=api_base,
-        params=body.params,
+        headers=body.headers,
+        options=body.options,
     )
     save_config(config, config._config_path)
     return {"status": "ok"}

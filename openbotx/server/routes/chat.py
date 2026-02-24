@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from openbotx.bus.events import InboundMessage
-from openbotx.tasks.models import TaskState
 
 router = APIRouter()
 

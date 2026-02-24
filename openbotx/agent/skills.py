@@ -14,7 +14,6 @@ FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
 class SkillsLoader:
-
     def __init__(self, workspace: Path):
         self._workspace = workspace
         self._workspace_skills_dir = workspace / "skills"
@@ -48,7 +47,7 @@ class SkillsLoader:
         except yaml.YAMLError:
             metadata = {}
 
-        body = content[match.end():]
+        body = content[match.end() :]
         return metadata, body
 
     @staticmethod
@@ -77,12 +76,14 @@ class SkillsLoader:
                 metadata, _ = self._parse_frontmatter(content)
                 requires = metadata.get("requires", {})
                 available = self._check_requirements(requires) if requires else True
-                result.append({
-                    "name": metadata.get("name", name),
-                    "description": metadata.get("description", ""),
-                    "available": available,
-                    "always": bool(metadata.get("always", False)),
-                })
+                result.append(
+                    {
+                        "name": metadata.get("name", name),
+                        "description": metadata.get("description", ""),
+                        "available": available,
+                        "always": bool(metadata.get("always", False)),
+                    }
+                )
             except Exception as e:
                 logger.warning("failed to load skill %s: %s", name, e)
         return result
@@ -128,7 +129,7 @@ class SkillsLoader:
             always_tag = ' always="true"' if s["always"] else ""
             lines.append(
                 f'  <skill name="{s["name"]}" status="{status}"{always_tag}>'
-                f'{s["description"]}</skill>'
+                f"{s['description']}</skill>"
             )
         lines.append("</skills>")
         return "\n".join(lines)

@@ -9,7 +9,6 @@ HISTORY_FILE = "HISTORY.md"
 
 
 class MemoryStore:
-
     def __init__(self, workspace: Path):
         self._workspace = workspace
         self._memory_dir = workspace / "memory"
@@ -30,9 +29,7 @@ class MemoryStore:
             logger.warning("failed to read memory file: %s", e)
             return ""
 
-    def get_consolidation_messages(
-        self, session: Any, window: int
-    ) -> list[dict[str, Any]]:
+    def get_consolidation_messages(self, session: Any, window: int) -> list[dict[str, Any]]:
         start = session.last_consolidated
         end = len(session.messages)
         if end - start < window:

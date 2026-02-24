@@ -1,9 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class TaskState(str, Enum):
+class TaskState(StrEnum):
     TODO = "TODO"
     DOING = "DOING"
     DONE = "DONE"

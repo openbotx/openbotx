@@ -11,6 +11,7 @@ class BotConfig(BaseModel):
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
+    public_url: str = ""
 
 
 class ModelParams(BaseModel):
@@ -26,22 +27,23 @@ class AgentConfig(BaseModel):
     params: ModelParams = Field(default_factory=ModelParams)
 
 
-class ImageConfig(BaseModel):
-    provider: str = "gemini"
-    model: str = "imagen-3.0-generate-002"
+class ProviderConfig(BaseModel):
+    name: str = ""
     api_key: str = ""
+    api_base: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    options: dict = Field(default_factory=dict)
+
+
+class ImageConfig(BaseModel):
+    model: str = "gemini-3-pro-image-preview"
+    provider: ProviderConfig = Field(default_factory=lambda: ProviderConfig(name="gemini"))
 
 
 class AuthConfig(BaseModel):
     username: str = "admin"
     password: str = "admin"
     secret_key: str = ""
-
-
-class ProviderConfig(BaseModel):
-    api_key: str = ""
-    api_base: str | None = None
-    params: dict[str, str] = Field(default_factory=dict)
 
 
 class TelegramConfig(BaseModel):
@@ -91,9 +93,7 @@ class Config(BaseModel):
 
     bot: BotConfig = Field(default_factory=BotConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
-    agents: dict[str, AgentConfig] = Field(
-        default_factory=lambda: {"main": AgentConfig()}
-    )
+    agents: dict[str, AgentConfig] = Field(default_factory=lambda: {"main": AgentConfig()})
     image: ImageConfig = Field(default_factory=ImageConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
@@ -112,6 +112,12 @@ class Config(BaseModel):
     @property
     def workspace_path(self) -> Path:
         return Path(self.main_agent.workspace).expanduser().resolve()
+
+    @property
+    def project_path(self) -> Path:
+        if self._config_path:
+            return self._config_path.parent.resolve()
+        return Path.cwd().resolve()
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         from openbotx.providers.registry import PROVIDERS

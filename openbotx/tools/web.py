@@ -9,33 +9,6 @@ import httpx
 
 from openbotx.tools.base import Tool
 
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
-MAX_REDIRECTS = 5
-
-
-def _strip_tags(text: str) -> str:
-    text = re.sub(r"<script[\s\S]*?</script>", "", text, flags=re.I)
-    text = re.sub(r"<style[\s\S]*?</style>", "", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", "", text)
-    return html.unescape(text).strip()
-
-
-def _normalize(text: str) -> str:
-    text = re.sub(r"[ \t]+", " ", text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
-
-
-def _validate_url(url: str) -> tuple[bool, str]:
-    try:
-        p = urlparse(url)
-        if p.scheme not in ("http", "https"):
-            return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
-        if not p.netloc:
-            return False, "Missing domain"
-        return True, ""
-    except Exception as e:
-        return False, str(e)
-
 
 class WebSearchTool(Tool):
     name = "web_search"
@@ -58,9 +31,7 @@ class WebSearchTool(Tool):
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
 
-    async def execute(
-        self, query: str, count: int | None = None, **kwargs: Any
-    ) -> str:
+    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         if not self.api_key:
             return "Error: BRAVE_API_KEY not configured"
 
@@ -84,9 +55,7 @@ class WebSearchTool(Tool):
 
             lines = [f"Results for: {query}\n"]
             for i, item in enumerate(results[:n], 1):
-                lines.append(
-                    f"{i}. {item.get('title', '')}\n   {item.get('url', '')}"
-                )
+                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
             return "\n".join(lines)
@@ -101,22 +70,23 @@ class WebFetchTool(Tool):
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
-            "maxChars": {"type": "integer", "minimum": 100},
+            "max_chars": {"type": "integer", "minimum": 100},
         },
         "required": ["url"],
     }
 
+    USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
+    MAX_REDIRECTS = 5
+
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(
-        self, url: str, maxChars: int | None = None, **kwargs: Any
-    ) -> str:
+    async def execute(self, url: str, max_chars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
 
-        max_chars = maxChars or self.max_chars
+        max_chars = max_chars or self.max_chars
 
-        is_valid, error_msg = _validate_url(url)
+        is_valid, error_msg = self._validate_url(url)
         if not is_valid:
             return json.dumps(
                 {"error": f"URL validation failed: {error_msg}", "url": url},
@@ -125,9 +95,9 @@ class WebFetchTool(Tool):
 
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=30.0
+                follow_redirects=True, max_redirects=self.MAX_REDIRECTS, timeout=30.0
             ) as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                r = await client.get(url, headers={"User-Agent": self.USER_AGENT})
                 r.raise_for_status()
 
             ctype = r.headers.get("content-type", "")
@@ -135,9 +105,7 @@ class WebFetchTool(Tool):
             if "application/json" in ctype:
                 text = json.dumps(r.json(), indent=2, ensure_ascii=False)
                 extractor = "json"
-            elif "text/html" in ctype or r.text[:256].lower().startswith(
-                ("<!doctype", "<html")
-            ):
+            elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 doc = Document(r.text)
                 content = self._to_markdown(doc.summary())
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content
@@ -168,22 +136,46 @@ class WebFetchTool(Tool):
     def _to_markdown(self, raw_html: str) -> str:
         text = re.sub(
             r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
-            lambda m: f"[{_strip_tags(m[2])}]({m[1]})",
+            lambda m: f"[{self._strip_tags(m[2])}]({m[1]})",
             raw_html,
             flags=re.I,
         )
         text = re.sub(
             r"<h([1-6])[^>]*>([\s\S]*?)</h\1>",
-            lambda m: f'\n{"#" * int(m[1])} {_strip_tags(m[2])}\n',
+            lambda m: f"\n{'#' * int(m[1])} {self._strip_tags(m[2])}\n",
             text,
             flags=re.I,
         )
         text = re.sub(
             r"<li[^>]*>([\s\S]*?)</li>",
-            lambda m: f"\n- {_strip_tags(m[1])}",
+            lambda m: f"\n- {self._strip_tags(m[1])}",
             text,
             flags=re.I,
         )
         text = re.sub(r"</(p|div|section|article)>", "\n\n", text, flags=re.I)
         text = re.sub(r"<(br|hr)\s*/?>", "\n", text, flags=re.I)
-        return _normalize(_strip_tags(text))
+        return self._normalize(self._strip_tags(text))
+
+    @staticmethod
+    def _strip_tags(text: str) -> str:
+        text = re.sub(r"<script[\s\S]*?</script>", "", text, flags=re.I)
+        text = re.sub(r"<style[\s\S]*?</style>", "", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", "", text)
+        return html.unescape(text).strip()
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        text = re.sub(r"[ \t]+", " ", text)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    @staticmethod
+    def _validate_url(url: str) -> tuple[bool, str]:
+        try:
+            p = urlparse(url)
+            if p.scheme not in ("http", "https"):
+                return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
+            if not p.netloc:
+                return False, "Missing domain"
+            return True, ""
+        except Exception as e:
+            return False, str(e)

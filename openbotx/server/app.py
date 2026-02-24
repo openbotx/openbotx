@@ -1,13 +1,17 @@
 import asyncio
 import logging
+import logging.handlers
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
+from openbotx.agent.loop import AgentLoop
+from openbotx.agent.skills import SkillsLoader
+from openbotx.agent.subagent import SubagentManager
 from openbotx.bus.events import InboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.manager import ChannelManager
@@ -19,9 +23,6 @@ from openbotx.server.auth import AuthMiddleware
 from openbotx.server.websocket import WebSocketManager, websocket_endpoint
 from openbotx.session.manager import SessionManager
 from openbotx.tasks.manager import TaskManager
-from openbotx.agent.skills import SkillsLoader
-from openbotx.agent.subagent import SubagentManager
-from openbotx.agent.loop import AgentLoop
 from openbotx.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -43,11 +44,52 @@ def _build_cron_callback(bus: MessageBus):
     return _on_job
 
 
+def _create_storage(config, project_path: Path, public_url: str):
+    if config.storage.type == "s3" and config.storage.s3_bucket:
+        from openbotx.storage.s3 import S3Storage
+
+        return S3Storage(
+            bucket=config.storage.s3_bucket,
+            region=config.storage.s3_region,
+            access_key=config.storage.s3_access_key,
+            secret_key=config.storage.s3_secret_key,
+        )
+
+    from openbotx.storage.local import LocalStorage
+
+    return LocalStorage(base_path=project_path, public_url=public_url)
+
+
+def _setup_logging(project_path: Path) -> None:
+    log_dir = project_path / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    root = logging.getLogger("openbotx")
+    root.setLevel(logging.DEBUG)
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_dir / "openbotx.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    root.addHandler(console_handler)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config = load_config()
     workspace = config.workspace_path
     workspace.mkdir(parents=True, exist_ok=True)
+
+    _setup_logging(config.project_path)
 
     if not config.auth.secret_key:
         config.auth.secret_key = uuid4().hex
@@ -61,11 +103,19 @@ async def lifespan(app: FastAPI):
     skills_loader = SkillsLoader(workspace)
     cron_service = CronService(workspace, on_job_callback=_build_cron_callback(bus))
 
+    public_dir = config.project_path / "public"
+    public_dir.mkdir(parents=True, exist_ok=True)
+    (public_dir / "media").mkdir(parents=True, exist_ok=True)
+
+    public_url = config.server.public_url or f"http://localhost:{config.server.port}"
+    storage = _create_storage(config, config.project_path, public_url)
+
     main_agent = config.main_agent
     provider_cfg = config.get_provider()
     provider = LiteLLMProvider(
         api_key=provider_cfg.api_key if provider_cfg else "",
         api_base=provider_cfg.api_base if provider_cfg else None,
+        extra_headers=provider_cfg.headers if provider_cfg else None,
     )
 
     subagent_manager = SubagentManager(
@@ -78,6 +128,8 @@ async def lifespan(app: FastAPI):
         brave_api_key=config.tools.web_search.api_key,
         exec_timeout=config.tools.exec.timeout,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        image_config=config.image,
+        storage=storage,
     )
 
     agent_loop = AgentLoop(
@@ -99,11 +151,18 @@ async def lifespan(app: FastAPI):
         exec_timeout=config.tools.exec.timeout,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         image_config=config.image,
+        storage=storage,
     )
 
-    channel_manager = ChannelManager(config.channels, bus, ws_manager=ws_manager)
+    channel_manager = ChannelManager(
+        config.channels,
+        bus,
+        ws_manager=ws_manager,
+        project_dir=config.project_path,
+    )
 
     app.state.config = config
+    app.state.storage = storage
     app.state.ws_manager = ws_manager
     app.state.bus = bus
     app.state.session_manager = session_manager
@@ -119,7 +178,15 @@ async def lifespan(app: FastAPI):
     cron_task = asyncio.create_task(cron_service.run())
     await channel_manager.start()
 
-    logger.info("openbotx %s started (workspace: %s)", __version__, workspace)
+    if config.server.public_url:
+        logger.info(
+            "openbotx %s started (workspace: %s, public_url: %s)",
+            __version__,
+            workspace,
+            config.server.public_url,
+        )
+    else:
+        logger.info("openbotx %s started (workspace: %s)", __version__, workspace)
 
     yield
 
@@ -157,15 +224,15 @@ def create_app() -> FastAPI:
 
     from openbotx.server.routes import (
         auth,
-        system,
-        chat,
-        tasks,
-        files,
-        skills,
         channels,
+        chat,
+        config,
+        files,
         providers,
         scheduler,
-        config,
+        skills,
+        system,
+        tasks,
     )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
@@ -181,11 +248,24 @@ def create_app() -> FastAPI:
 
     app.add_api_websocket_route("/ws", websocket_endpoint)
 
+    @app.get("/public/{path:path}")
+    async def serve_public(path: str):
+        public_base = app.state.config.project_path / "public"
+        try:
+            file_path = (public_base / path).resolve()
+            file_path.relative_to(public_base.resolve())
+        except ValueError:
+            return JSONResponse({"error": "Access denied"}, status_code=403)
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
     @app.get("/")
     async def root_redirect():
         return RedirectResponse("/app/")
 
     if WEBCLIENT_DIR.is_dir():
+
         @app.get("/app/{path:path}")
         async def spa_fallback(path: str):
             file_path = WEBCLIENT_DIR / path

@@ -104,8 +104,7 @@ def find_by_model(model: str) -> ProviderSpec | None:
 
     for spec in std_specs:
         if any(
-            kw in model_lower or kw.replace("-", "_") in model_normalized
-            for kw in spec.keywords
+            kw in model_lower or kw.replace("-", "_") in model_normalized for kw in spec.keywords
         ):
             return spec
     return None
@@ -123,17 +122,9 @@ def find_gateway(
             return spec
 
     for spec in PROVIDERS:
-        if (
-            spec.detect_by_key_prefix
-            and api_key
-            and api_key.startswith(spec.detect_by_key_prefix)
-        ):
+        if spec.detect_by_key_prefix and api_key and api_key.startswith(spec.detect_by_key_prefix):
             return spec
-        if (
-            spec.detect_by_base_keyword
-            and api_base
-            and spec.detect_by_base_keyword in api_base
-        ):
+        if spec.detect_by_base_keyword and api_base and spec.detect_by_base_keyword in api_base:
             return spec
 
     return None

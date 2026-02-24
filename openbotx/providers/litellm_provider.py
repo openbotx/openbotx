@@ -1,4 +1,3 @@
-import json
 import os
 from typing import Any
 
@@ -64,18 +63,14 @@ class LiteLLMProvider(LLMProvider):
 
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
-            model = self._canonicalize_explicit_prefix(
-                model, spec.name, spec.litellm_prefix
-            )
+            model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
             if not any(model.startswith(s) for s in spec.skip_prefixes):
                 model = f"{spec.litellm_prefix}/{model}"
 
         return model
 
     @staticmethod
-    def _canonicalize_explicit_prefix(
-        model: str, spec_name: str, canonical_prefix: str
-    ) -> str:
+    def _canonicalize_explicit_prefix(model: str, spec_name: str, canonical_prefix: str) -> str:
         if "/" not in model:
             return model
         prefix, remainder = model.split("/", 1)
@@ -161,7 +156,7 @@ class LiteLLMProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": self._sanitize_messages(
-                self._sanitize_empty_content(messages)
+                self._convert_image_blocks(self._sanitize_empty_content(messages))
             ),
             "max_tokens": max_tokens,
             "temperature": temperature,

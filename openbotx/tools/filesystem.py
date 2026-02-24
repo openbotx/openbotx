@@ -17,9 +17,7 @@ def _resolve_path(
         try:
             resolved.relative_to(allowed_dir.resolve())
         except ValueError:
-            raise PermissionError(
-                f"Path {path} is outside allowed directory {allowed_dir}"
-            )
+            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
 
 
@@ -34,9 +32,7 @@ class ReadFileTool(Tool):
         "required": ["path"],
     }
 
-    def __init__(
-        self, workspace: Path | None = None, allowed_dir: Path | None = None
-    ):
+    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
 
@@ -56,10 +52,7 @@ class ReadFileTool(Tool):
 
 class WriteFileTool(Tool):
     name = "write_file"
-    description = (
-        "Write content to a file at the given path. "
-        "Creates parent directories if needed."
-    )
+    description = "Write content to a file at the given path. Creates parent directories if needed."
     parameters = {
         "type": "object",
         "properties": {
@@ -69,9 +62,7 @@ class WriteFileTool(Tool):
         "required": ["path", "content"],
     }
 
-    def __init__(
-        self, workspace: Path | None = None, allowed_dir: Path | None = None
-    ):
+    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
 
@@ -109,15 +100,11 @@ class EditFileTool(Tool):
         "required": ["path", "old_text", "new_text"],
     }
 
-    def __init__(
-        self, workspace: Path | None = None, allowed_dir: Path | None = None
-    ):
+    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
 
-    async def execute(
-        self, path: str, old_text: str, new_text: str, **kwargs: Any
-    ) -> str:
+    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not file_path.exists():
@@ -151,9 +138,7 @@ class EditFileTool(Tool):
 
         best_ratio, best_start = 0.0, 0
         for i in range(max(1, len(lines) - window + 1)):
-            ratio = difflib.SequenceMatcher(
-                None, old_lines, lines[i : i + window]
-            ).ratio()
+            ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
             if ratio > best_ratio:
                 best_ratio, best_start = ratio, i
 
@@ -172,8 +157,7 @@ class EditFileTool(Tool):
                 f"Best match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
             )
         return (
-            f"Error: old_text not found in {path}. "
-            "No similar text found. Verify the file content."
+            f"Error: old_text not found in {path}. No similar text found. Verify the file content."
         )
 
 
@@ -191,9 +175,7 @@ class ListDirTool(Tool):
         "required": ["path"],
     }
 
-    def __init__(
-        self, workspace: Path | None = None, allowed_dir: Path | None = None
-    ):
+    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
 

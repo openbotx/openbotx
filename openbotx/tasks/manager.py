@@ -4,12 +4,9 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from openbotx.server.websocket import WebSocketManager
 from openbotx.tasks.models import Task, TaskState
-
-if TYPE_CHECKING:
-    from openbotx.server.websocket import WebSocketManager
 
 
 class TaskManager:

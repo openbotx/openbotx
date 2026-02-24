@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-from openbotx.tools.base import Tool
-
-if TYPE_CHECKING:
-    from openbotx.cron.service import CronService
-
+from openbotx.cron.service import CronService
 from openbotx.cron.types import CronSchedule
+from openbotx.tools.base import Tool
 
 
 class CronTool(Tool):
