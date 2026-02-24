@@ -7,7 +7,8 @@ import { useChatStore } from '../stores/chat'
 
 const chatStore = useChatStore()
 
-onMounted(() => {
+onMounted(async () => {
+  await chatStore.loadHistory(chatStore.currentSessionId)
   chatStore.loadSessions()
 })
 

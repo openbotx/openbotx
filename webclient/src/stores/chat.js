@@ -6,7 +6,9 @@ export const useChatStore = defineStore('chat', () => {
   const api = useApi()
   const messages = ref([])
   const sessions = ref([])
-  const currentSessionId = ref('direct')
+  const stored = localStorage.getItem('chat_session')
+  const currentSessionId = ref(stored || crypto.randomUUID())
+  if (!stored) localStorage.setItem('chat_session', currentSessionId.value)
   const streaming = ref(false)
   const currentToolUse = ref(null)
 
@@ -72,6 +74,7 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: Date.now(),
     }))
     currentSessionId.value = sessionId
+    localStorage.setItem('chat_session', sessionId)
   }
 
   async function clearSession(sessionId) {
@@ -82,7 +85,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function newSession() {
-    currentSessionId.value = 'session_' + Date.now()
+    const id = crypto.randomUUID()
+    currentSessionId.value = id
+    localStorage.setItem('chat_session', id)
     messages.value = []
     streaming.value = false
     currentToolUse.value = null

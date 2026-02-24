@@ -1,9 +1,13 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from openbotx.tasks.models import TaskState
 
 router = APIRouter()
+
+DONE_RETENTION = timedelta(hours=24)
 
 
 class TaskUpdate(BaseModel):
@@ -13,7 +17,13 @@ class TaskUpdate(BaseModel):
 @router.get("")
 async def list_tasks(request: Request):
     task_manager = request.app.state.task_manager
-    return [t.to_dict() for t in task_manager.list_tasks()]
+    cutoff = (datetime.now() - DONE_RETENTION).isoformat()
+    tasks = []
+    for t in task_manager.list_tasks():
+        if t.state in (TaskState.DONE, TaskState.ERROR) and t.updated_at < cutoff:
+            continue
+        tasks.append(t.to_dict())
+    return tasks
 
 
 @router.get("/{task_id}")

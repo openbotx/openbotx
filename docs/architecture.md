@@ -104,7 +104,7 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `routes/auth.py`    | Login endpoint. Issues JWT tokens.                                                          |
 | `routes/chat.py`    | Chat API (send messages, list/manage sessions).                                             |
 | `routes/tasks.py`   | Task CRUD and state management.                                                             |
-| `routes/files.py`   | File upload, download, and listing within the workspace.                                    |
+| `routes/files.py`   | File API: tree listing, read (returns JSON with type-based content or metadata), download (raw binary), write, and delete. Classifies files as `text`, `image`, `video`, `audio`, or `binary`. |
 | `routes/skills.py`  | List and load skills.                                                                       |
 | `routes/channels.py`| Channel status, start/stop control.                                                         |
 | `routes/providers.py`| Provider listing and configuration.                                                        |
@@ -112,7 +112,9 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `routes/config.py`  | Read and update platform configuration.                                                     |
 | `routes/system.py`  | System info (version, health).                                                              |
 
-The built web client (`webclient/dist/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html`.
+The built web client (`webclient/dist/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles).
+
+Files under the project's `public/` directory are served at `/public/{path}` without authentication. This allows media files (images, video, audio) to be embedded in HTML5 tags (`<img>`, `<video>`, `<audio>`) without needing auth headers.
 
 ### Message Bus
 
@@ -237,6 +239,8 @@ Task states follow a Kanban model:
 
 Tasks support a parent-child relationship: subagent tasks reference their `parent_task_id`, enabling hierarchical task tracking.
 
+**Retention:** The `GET /api/tasks` endpoint excludes `DONE` and `ERROR` tasks older than 24 hours, keeping the task board focused on recent activity.
+
 ### Sessions
 
 **Location:** `openbotx/session/`
@@ -319,15 +323,16 @@ The web client is a single-page application built with:
 - **PrimeVue 4** -- UI component library
 - **Tailwind CSS 4** -- utility-first styling
 - **Pinia** -- state management
+- **md-editor-v3** -- Markdown editor and preview
 - **WebSocket** -- real-time communication with the server
 
 Pages:
 
 | Page       | Function                                        |
 | ---------- | ----------------------------------------------- |
-| Chat       | Main conversation interface with real-time updates |
+| Chat       | Main conversation interface with real-time updates. Sessions are identified by UUID and persisted in localStorage. |
 | TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns |
-| Files      | File browser for the workspace                  |
+| Files      | File browser with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. |
 | Skills     | View and manage agent skills                    |
 | Channels   | Monitor and control communication channels      |
 | Providers  | Configure LLM providers and API keys            |

@@ -13,9 +13,25 @@ SYSTEM_FILES = {
 }
 
 EDITABLE_EXTENSIONS = {
-    ".md", ".yml", ".yaml", ".txt", ".json", ".xml", ".html", ".htm",
-    ".css", ".js", ".ts", ".py", ".sh", ".toml", ".cfg", ".ini", ".csv",
-    ".env", ".log",
+    ".md",
+    ".yml",
+    ".yaml",
+    ".txt",
+    ".json",
+    ".xml",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".ts",
+    ".py",
+    ".sh",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".csv",
+    ".env",
+    ".log",
 }
 
 

@@ -153,9 +153,13 @@ Response:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/tasks` | List all tasks |
+| GET | `/api/tasks` | List active tasks (done/error tasks older than 24h are excluded) |
 | GET | `/api/tasks/{task_id}` | Get a single task |
 | PATCH | `/api/tasks/{task_id}` | Update task state |
+
+**GET /api/tasks**
+
+Returns all `TODO` and `DOING` tasks, plus `DONE` and `ERROR` tasks from the last 24 hours.
 
 **PATCH /api/tasks/{task_id}**
 
@@ -173,60 +177,77 @@ Request body:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/files/tree` | Get workspace file tree |
-| GET | `/api/files/read?path=...` | Read file content |
-| PUT | `/api/files/write` | Write content to a file |
-| POST | `/api/files/mkdir` | Create a directory |
-| DELETE | `/api/files/delete?path=...` | Delete a file |
-| POST | `/api/files/rename` | Rename or move a file |
+| GET | `/api/files` | Get workspace file tree |
+| GET | `/api/files/{path}` | Read file metadata or content |
+| GET | `/api/files/download/{path}` | Download raw file |
+| PUT | `/api/files/{path}` | Write content to a file |
+| DELETE | `/api/files/{path}` | Delete a file |
 
-**GET /api/files/read**
+**GET /api/files**
 
-Query parameters:
+Returns a recursive tree of the workspace directory (excluding hidden files and system files).
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | string | Relative path to the file |
+**GET /api/files/{path}**
 
-**PUT /api/files/write**
+Returns file info. The response format depends on the file type:
 
-Request body:
+For text files (`.md`, `.txt`, `.json`, `.yaml`, `.py`, `.js`, `.html`, etc.):
 
 ```json
 {
   "path": "string",
+  "type": "text",
   "content": "string"
 }
 ```
 
-**POST /api/files/mkdir**
+For media and binary files (`image`, `video`, `audio`, `binary`):
+
+```json
+{
+  "path": "string",
+  "type": "image | video | audio | binary",
+  "mime": "string",
+  "size": 0,
+  "url": "string"
+}
+```
+
+The `url` field points to `/public/{path}` for files under the `public/` directory (no auth required, suitable for `<img>`, `<video>`, `<audio>` tags), or `/api/files/download/{path}` for other files.
+
+**GET /api/files/download/{path}**
+
+Returns the raw file as a `FileResponse` (binary download). Requires authentication.
+
+**PUT /api/files/{path}**
 
 Request body:
 
 ```json
 {
-  "path": "string"
+  "content": "string"
 }
 ```
 
-**DELETE /api/files/delete**
+**DELETE /api/files/{path}**
 
-Query parameters:
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | string | Relative path to the file |
-
-**POST /api/files/rename**
-
-Request body:
+Response:
 
 ```json
 {
-  "old_path": "string",
-  "new_path": "string"
+  "status": "deleted"
 }
 ```
+
+---
+
+### Public Files
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/public/{path}` | Serve files from the `public/` directory |
+
+No authentication required. Files under the project's `public/` directory are served directly. This allows media files (images, video, audio) to be rendered in HTML5 tags without needing auth headers.
 
 ---
 
