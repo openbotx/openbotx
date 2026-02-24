@@ -105,6 +105,7 @@ class ChannelManager:
         status = {
             "web": {"running": True, "type": "builtin"},
         }
+
         for name, channel in self._channels.items():
             status[name] = {
                 "running": channel.is_running,

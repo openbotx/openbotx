@@ -1,11 +1,22 @@
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 router = APIRouter()
 
-SYSTEM_FILES = {"Thumbs.db", "desktop.ini"}
+SYSTEM_FILES = {
+    "Thumbs.db",
+    "desktop.ini",
+}
+
+EDITABLE_EXTENSIONS = {
+    ".md", ".yml", ".yaml", ".txt", ".json", ".xml", ".html", ".htm",
+    ".css", ".js", ".ts", ".py", ".sh", ".toml", ".cfg", ".ini", ".csv",
+    ".env", ".log",
+}
 
 
 class FileContent(BaseModel):
@@ -24,12 +35,34 @@ def _get_project_root(request: Request) -> Path:
     return request.app.state.config.project_path
 
 
+class AccessDeniedError(Exception):
+    pass
+
+
 def _safe_path(root: Path, path: str) -> Path:
     if _has_hidden_component(path):
-        raise ValueError("Access denied")
+        raise AccessDeniedError("Access denied")
     resolved = (root / path).resolve()
-    resolved.relative_to(root.resolve())
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError:
+        raise AccessDeniedError("Access denied")
     return resolved
+
+
+def _classify_file(file_path: Path) -> tuple[str, str | None]:
+    mime, _ = mimetypes.guess_type(file_path.name)
+    ext = file_path.suffix.lower()
+
+    if ext in EDITABLE_EXTENSIONS or (mime and mime.startswith("text/")):
+        return "text", mime
+    if mime and mime.startswith("image/"):
+        return "image", mime
+    if mime and mime.startswith("video/"):
+        return "video", mime
+    if mime and mime.startswith("audio/"):
+        return "audio", mime
+    return "binary", mime
 
 
 @router.get("")
@@ -74,6 +107,18 @@ async def list_files(request: Request):
     return _tree(root)
 
 
+@router.get("/download/{path:path}")
+async def download_file(path: str, request: Request):
+    root = _get_project_root(request)
+    try:
+        file_path = _safe_path(root, path)
+        if not file_path.exists():
+            return {"error": "File not found"}
+        return FileResponse(file_path)
+    except AccessDeniedError:
+        return {"error": "Access denied"}
+
+
 @router.get("/{path:path}")
 async def read_file(path: str, request: Request):
     root = _get_project_root(request)
@@ -83,9 +128,26 @@ async def read_file(path: str, request: Request):
             return {"error": "File not found"}
         if file_path.is_dir():
             return {"error": "Path is a directory"}
-        content = file_path.read_text(encoding="utf-8")
-        return {"path": path, "content": content}
-    except ValueError:
+
+        file_type, mime = _classify_file(file_path)
+
+        if file_type == "text":
+            content = file_path.read_text(encoding="utf-8")
+            return {"path": path, "type": "text", "content": content}
+
+        if path.startswith("public/"):
+            url = f"/{path}"
+        else:
+            url = f"/api/files/download/{path}"
+
+        return {
+            "path": path,
+            "type": file_type,
+            "mime": mime,
+            "size": file_path.stat().st_size,
+            "url": url,
+        }
+    except AccessDeniedError:
         return {"error": "Access denied"}
     except Exception as e:
         return {"error": str(e)}
@@ -99,7 +161,7 @@ async def write_file(path: str, body: FileContent, request: Request):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(body.content, encoding="utf-8")
         return {"status": "ok", "path": path}
-    except ValueError:
+    except AccessDeniedError:
         return {"error": "Access denied"}
     except Exception as e:
         return {"error": str(e)}
@@ -114,7 +176,7 @@ async def delete_file(path: str, request: Request):
             return {"error": "File not found"}
         file_path.unlink()
         return {"status": "deleted"}
-    except ValueError:
+    except AccessDeniedError:
         return {"error": "Access denied"}
     except Exception as e:
         return {"error": str(e)}

@@ -1,17 +1,24 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import FileTree from '../components/files/FileTree.vue'
 import MarkdownEditor from '../components/files/MarkdownEditor.vue'
+import TextEditor from '../components/files/TextEditor.vue'
+import MediaPreview from '../components/files/MediaPreview.vue'
+import FileDownload from '../components/files/FileDownload.vue'
 import { useApi } from '../composables/useApi'
 
 const api = useApi()
 const toast = useToast()
 const files = ref([])
-const currentPath = ref('')
-const currentContent = ref('')
+const currentFile = ref(null)
+
+const isMarkdown = computed(() => {
+  const p = currentFile.value?.path || ''
+  return p.endsWith('.md')
+})
 
 onMounted(async () => {
   await loadFiles()
@@ -27,14 +34,19 @@ async function openFile(path) {
     toast.add({ severity: 'error', summary: 'Error', detail: data.error, life: 3000 })
     return
   }
-  currentPath.value = path
-  currentContent.value = data.content
+  currentFile.value = data
 }
 
 async function saveFile(content) {
-  await api.put(`/files/${currentPath.value}`, { content })
-  toast.add({ severity: 'success', summary: 'Saved', detail: currentPath.value, life: 2000 })
+  const path = currentFile.value?.path
+  if (!path) return
+  await api.put(`/files/${path}`, { content })
+  toast.add({ severity: 'success', summary: 'Saved', detail: path, life: 2000 })
   await loadFiles()
+}
+
+function closeFile() {
+  currentFile.value = null
 }
 </script>
 
@@ -52,12 +64,35 @@ async function saveFile(content) {
           </div>
         </SplitterPanel>
         <SplitterPanel :size="70" :min-size="40">
-          <MarkdownEditor
-            v-if="currentPath"
-            :content="currentContent"
-            :path="currentPath"
-            @save="saveFile"
-          />
+          <template v-if="currentFile">
+            <MarkdownEditor
+              v-if="currentFile.type === 'text' && isMarkdown"
+              :content="currentFile.content"
+              :path="currentFile.path"
+              @save="saveFile"
+            />
+            <TextEditor
+              v-else-if="currentFile.type === 'text'"
+              :content="currentFile.content"
+              :path="currentFile.path"
+              @save="saveFile"
+            />
+            <MediaPreview
+              v-else-if="['image', 'video', 'audio'].includes(currentFile.type)"
+              :path="currentFile.path"
+              :type="currentFile.type"
+              :mime="currentFile.mime"
+              :size="currentFile.size"
+              :url="currentFile.url"
+            />
+            <FileDownload
+              v-else
+              :path="currentFile.path"
+              :mime="currentFile.mime"
+              :size="currentFile.size"
+              :url="currentFile.url"
+            />
+          </template>
           <div v-else class="no-file">
             <i class="pi pi-file" style="font-size: 3rem; color: var(--p-text-muted-color)"></i>
             <p>Select a file to edit</p>
@@ -67,17 +102,39 @@ async function saveFile(content) {
     </div>
 
     <div class="files-mobile">
-      <div v-if="!currentPath" class="tree-panel-mobile">
+      <div v-if="!currentFile" class="tree-panel-mobile">
         <FileTree :files="files" @select="openFile" />
       </div>
       <div v-else class="editor-panel-mobile">
-        <button class="back-btn" @click="currentPath = ''">
+        <button class="back-btn" @click="closeFile">
           <i class="pi pi-arrow-left"></i> Back to files
         </button>
         <MarkdownEditor
-          :content="currentContent"
-          :path="currentPath"
+          v-if="currentFile.type === 'text' && isMarkdown"
+          :content="currentFile.content"
+          :path="currentFile.path"
           @save="saveFile"
+        />
+        <TextEditor
+          v-else-if="currentFile.type === 'text'"
+          :content="currentFile.content"
+          :path="currentFile.path"
+          @save="saveFile"
+        />
+        <MediaPreview
+          v-else-if="['image', 'video', 'audio'].includes(currentFile.type)"
+          :path="currentFile.path"
+          :type="currentFile.type"
+          :mime="currentFile.mime"
+          :size="currentFile.size"
+          :url="currentFile.url"
+        />
+        <FileDownload
+          v-else
+          :path="currentFile.path"
+          :mime="currentFile.mime"
+          :size="currentFile.size"
+          :url="currentFile.url"
         />
       </div>
     </div>

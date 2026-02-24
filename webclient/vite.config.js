@@ -11,5 +11,16 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:8000', ws: true }
     }
   },
-  build: { outDir: 'dist' }
+  build: {
+    outDir: 'dist',
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'md-editor': ['md-editor-v3'],
+          'primevue': ['primevue'],
+        }
+      }
+    }
+  }
 })

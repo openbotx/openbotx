@@ -3,7 +3,8 @@ import { ref, onMounted } from 'vue'
 import Card from 'primevue/card'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
-import { marked } from 'marked'
+import { MdPreview } from 'md-editor-v3'
+import 'md-editor-v3/lib/preview.css'
 import { useApi } from '../composables/useApi'
 
 const api = useApi()
@@ -58,7 +59,7 @@ async function viewSkill(skill) {
       :style="{ width: '80vw', maxWidth: '800px' }"
       :breakpoints="{ '768px': '95vw' }"
     >
-      <div class="skill-content" v-html="marked(skillContent || '')"></div>
+      <MdPreview :modelValue="skillContent || ''" class="skill-content" />
     </Dialog>
   </div>
 </template>

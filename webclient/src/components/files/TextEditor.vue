@@ -1,8 +1,7 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
-import { MdEditor, MdPreview } from 'md-editor-v3'
-import 'md-editor-v3/lib/style.css'
+import { ref, watch } from 'vue'
 import Button from 'primevue/button'
+import Textarea from 'primevue/textarea'
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -11,11 +10,6 @@ const props = defineProps({
 
 const emit = defineEmits(['save'])
 const editContent = ref(props.content)
-const editing = ref(false)
-
-const isDark = computed(() =>
-  document.documentElement.classList.contains('dark-mode')
-)
 
 watch(() => props.content, (val) => {
   editContent.value = val
@@ -31,36 +25,13 @@ function save() {
     <div class="editor-toolbar">
       <span class="editor-path">{{ path }}</span>
       <div class="editor-actions">
-        <Button
-          :label="editing ? 'Preview' : 'Edit'"
-          :icon="editing ? 'pi pi-eye' : 'pi pi-pencil'"
-          severity="secondary"
-          text
-          size="small"
-          @click="editing = !editing"
-        />
         <Button label="Save" icon="pi pi-save" size="small" @click="save" />
       </div>
     </div>
-
-    <MdEditor
-      v-if="editing"
+    <Textarea
       v-model="editContent"
-      :theme="isDark ? 'dark' : 'light'"
-      language="en-US"
-      :preview="false"
-      :toolbars="['bold', 'underline', 'italic', 'strikeThrough', '-',
-        'title', 'sub', 'sup', 'quote', 'unorderedList', 'orderedList', 'task', '-',
-        'codeRow', 'code', 'link', 'image', 'table', '-',
-        'revoke', 'next', '=',
-        'preview', 'fullscreen']"
-      class="md-editor-fill"
-    />
-    <MdPreview
-      v-else
-      :modelValue="editContent"
-      :theme="isDark ? 'dark' : 'light'"
-      class="md-preview-fill"
+      class="editor-textarea"
+      :rows="30"
     />
   </div>
 </template>
@@ -92,15 +63,15 @@ function save() {
   gap: 0.5rem;
 }
 
-.md-editor-fill {
+.editor-textarea {
   flex: 1;
-  min-height: 0;
-}
-
-.md-preview-fill {
-  flex: 1;
-  min-height: 0;
-  padding: 0 1.5rem;
-  overflow-y: auto;
+  width: 100%;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  border: none;
+  border-radius: 0;
+  resize: none;
+  tab-size: 2;
 }
 </style>
