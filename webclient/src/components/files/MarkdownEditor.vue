@@ -60,6 +60,7 @@ function save() {
       v-else
       :modelValue="editContent"
       :theme="isDark ? 'dark' : 'light'"
+      language="en-US"
       class="md-preview-fill"
     />
   </div>

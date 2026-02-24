@@ -59,7 +59,7 @@ async function viewSkill(skill) {
       :style="{ width: '80vw', maxWidth: '800px' }"
       :breakpoints="{ '768px': '95vw' }"
     >
-      <MdPreview :modelValue="skillContent || ''" class="skill-content" />
+      <MdPreview :modelValue="skillContent || ''" language="en-US" class="skill-content" />
     </Dialog>
   </div>
 </template>
