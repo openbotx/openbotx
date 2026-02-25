@@ -73,7 +73,7 @@ async function toggleTelegram(running) {
             <InputText v-model="telegramUsers" placeholder="user1, user2" class="w-full" />
           </div>
           <div class="button-row">
-            <Button label="Save" icon="pi pi-save" size="small" @click="saveTelegram" />
+            <Button label="Save" icon="pi pi-save" size="small" severity="secondary" @click="saveTelegram" />
             <Button
               :label="channelsStore.channels?.telegram?.running ? 'Stop' : 'Start'"
               :icon="channelsStore.channels?.telegram?.running ? 'pi pi-stop' : 'pi pi-play'"

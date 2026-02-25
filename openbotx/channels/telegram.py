@@ -45,8 +45,6 @@ class TelegramChannel(BaseChannel):
             logger.error("telegram bot token not configured")
             return
 
-        self._running = True
-
         req = HTTPXRequest(
             connection_pool_size=16,
             pool_timeout=5.0,
@@ -79,19 +77,23 @@ class TelegramChannel(BaseChannel):
 
         logger.info("starting telegram bot (polling mode)")
 
-        await self._app.initialize()
-        await self._app.start()
+        try:
+            await self._app.initialize()
+            await self._app.start()
 
-        bot_info = await self._app.bot.get_me()
-        logger.info("telegram bot @%s connected", bot_info.username)
+            bot_info = await self._app.bot.get_me()
+            logger.info("telegram bot @%s connected", bot_info.username)
 
-        await self._app.updater.start_polling(
-            allowed_updates=["message"],
-            drop_pending_updates=True,
-        )
-
-        while self._running:
-            await asyncio.sleep(1)
+            await self._app.updater.start_polling(
+                allowed_updates=["message"],
+                drop_pending_updates=True,
+            )
+            self._running = True
+        except Exception as e:
+            logger.error("failed to start telegram bot: %s", e)
+            self._running = False
+            self._app = None
+            raise
 
     async def stop(self) -> None:
         self._running = False

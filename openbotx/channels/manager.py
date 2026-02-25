@@ -91,6 +91,7 @@ class ChannelManager:
 
         if channel and not channel.is_running:
             await channel.start()
+            self._broadcast_channel_status(name, channel.is_running)
             return True
         return False
 
@@ -98,8 +99,17 @@ class ChannelManager:
         channel = self._channels.get(name)
         if channel and channel.is_running:
             await channel.stop()
+            self._broadcast_channel_status(name, channel.is_running)
             return True
         return False
+
+    def _broadcast_channel_status(self, name: str, running: bool) -> None:
+        if self._ws_manager:
+            asyncio.create_task(
+                self._ws_manager.broadcast(
+                    "channel:status", {"name": name, "running": running}
+                )
+            )
 
     def get_status(self) -> dict[str, Any]:
         status = {

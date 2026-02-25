@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useChannelsStore } from './channels'
 import { useChatStore } from './chat'
 import { useTasksStore } from './tasks'
 import { useAuthStore } from './auth'
@@ -57,10 +58,14 @@ export const useWebSocketStore = defineStore('websocket', () => {
   }
 
   function dispatch(msg) {
+    const channels = useChannelsStore()
     const chat = useChatStore()
     const tasks = useTasksStore()
 
     switch (msg.type) {
+      case 'channel:status':
+        channels.onChannelStatus(msg.data)
+        break
       case 'chat:message':
         chat.onMessage(msg.data)
         break

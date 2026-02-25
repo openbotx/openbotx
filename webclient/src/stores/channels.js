@@ -25,5 +25,13 @@ export const useChannelsStore = defineStore('channels', () => {
     await loadChannels()
   }
 
-  return { channels, loadChannels, updateChannel, startChannel, stopChannel }
+  function onChannelStatus(data) {
+    if (channels.value[data.name]) {
+      channels.value[data.name].running = data.running
+    } else {
+      channels.value[data.name] = { running: data.running, type: data.name }
+    }
+  }
+
+  return { channels, loadChannels, updateChannel, startChannel, stopChannel, onChannelStatus }
 })
