@@ -76,4 +76,9 @@ async def delete_session(session_id: str, request: Request):
     session_manager = request.app.state.session_manager
     key = _resolve_session_key(session_id)
     session_manager.delete(key)
+
+    ws_manager = getattr(request.app.state, "ws_manager", None)
+    if ws_manager:
+        await ws_manager.broadcast("sessions:updated", {})
+
     return {"status": "deleted"}

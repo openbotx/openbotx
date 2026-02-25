@@ -237,6 +237,9 @@ class AgentLoop:
         session.add_message("assistant", response_text)
         self._session_manager.save(session)
 
+        if self._ws_manager:
+            await self._ws_manager.broadcast("sessions:updated", {})
+
         await self._bus.publish_outbound(
             OutboundMessage(
                 channel=msg.channel,

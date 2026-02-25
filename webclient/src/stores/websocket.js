@@ -75,6 +75,9 @@ export const useWebSocketStore = defineStore('websocket', () => {
       case 'chat:tool_use':
         chat.onToolUse(msg.data)
         break
+      case 'sessions:updated':
+        chat.onSessionsUpdated()
+        break
       case 'task:created':
         tasks.onTaskCreated(msg.data)
         break

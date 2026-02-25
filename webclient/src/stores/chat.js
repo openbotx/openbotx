@@ -140,6 +140,10 @@ export const useChatStore = defineStore('chat', () => {
     await loadSessions()
   }
 
+  function onSessionsUpdated() {
+    loadSessions()
+  }
+
   function newSession() {
     const key = `web:${crypto.randomUUID()}`
     currentSessionId.value = key
@@ -159,6 +163,7 @@ export const useChatStore = defineStore('chat', () => {
     onMessage,
     onThinking,
     onToolUse,
+    onSessionsUpdated,
     loadSessions,
     loadHistory,
     switchSession,
