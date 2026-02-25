@@ -193,7 +193,7 @@ Request body:
 
 **GET /api/files**
 
-Returns a recursive tree of the workspace directory (excluding hidden files and system files).
+Returns a recursive tree of the workspace directory (excluding hidden files, system files, and protected files like `config.yml`).
 
 **GET /api/files/{path}**
 

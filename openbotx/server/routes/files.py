@@ -14,6 +14,11 @@ SYSTEM_FILES = {
     "desktop.ini",
 }
 
+PROTECTED_FILES = {
+    "config.yml",
+    "config.yaml",
+}
+
 EDITABLE_EXTENSIONS = {
     ".md",
     ".yml",
@@ -52,6 +57,10 @@ def _has_hidden_component(path: str) -> bool:
 
 class AccessDeniedError(Exception):
     pass
+
+
+def _is_protected(path: str) -> bool:
+    return posixpath.normpath(path) in PROTECTED_FILES
 
 
 def _safe_storage_path(path: str) -> str:
@@ -93,7 +102,7 @@ async def list_files(request: Request):
         except Exception:
             return items
         for entry in entries:
-            if _is_hidden(entry.name):
+            if _is_hidden(entry.name) or _is_protected(entry.path):
                 continue
             if entry.is_dir:
                 items.append(
@@ -123,6 +132,8 @@ async def download_file(path: str, request: Request):
     storage = _get_storage(request)
     try:
         safe_path = _safe_storage_path(path)
+        if _is_protected(safe_path):
+            return {"error": "Access denied"}
         if not await storage.exists(safe_path):
             return {"error": "File not found"}
 
@@ -178,6 +189,8 @@ async def read_file(path: str, request: Request):
     storage = _get_storage(request)
     try:
         safe_path = _safe_storage_path(path)
+        if _is_protected(safe_path):
+            return {"error": "Access denied"}
         if not await storage.exists(safe_path):
             return {"error": "File not found"}
         if await storage.is_directory(safe_path):
@@ -215,6 +228,8 @@ async def write_file(path: str, body: FileContent, request: Request):
     storage = _get_storage(request)
     try:
         safe_path = _safe_storage_path(path)
+        if _is_protected(safe_path):
+            return {"error": "This file can only be edited via Settings > Advanced"}
         await storage.write(safe_path, body.content.encode("utf-8"))
         return {"status": "ok", "path": safe_path}
     except AccessDeniedError:
@@ -228,6 +243,8 @@ async def delete_path(path: str, request: Request):
     storage = _get_storage(request)
     try:
         safe_path = _safe_storage_path(path)
+        if _is_protected(safe_path):
+            return {"error": "This file cannot be deleted"}
         if not await storage.exists(safe_path):
             is_dir = await storage.is_directory(safe_path)
             if not is_dir:

@@ -209,12 +209,14 @@ async function confirmDelete() {
           v-if="currentFile.type === 'text' && isMarkdown"
           :content="currentFile.content"
           :path="currentFile.path"
+          :readonly="!!currentFile.readonly"
           @save="saveFile"
         />
         <TextEditor
           v-else-if="currentFile.type === 'text'"
           :content="currentFile.content"
           :path="currentFile.path"
+          :readonly="!!currentFile.readonly"
           @save="saveFile"
         />
         <MediaPreview
