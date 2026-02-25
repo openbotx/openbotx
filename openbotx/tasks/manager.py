@@ -19,6 +19,7 @@ class TaskManager:
         self.store_path = workspace / "tasks.jsonl"
         self.ws_manager = ws_manager
         self._tasks: dict[str, Task] = {}
+        self._recovered_ids: list[str] = []
         self._load()
 
     def _load(self) -> None:
@@ -37,6 +38,8 @@ class TaskManager:
                         description=data.get("description", ""),
                         state=TaskState(data.get("state", "TODO")),
                         agent_type=data.get("agent_type", "agent"),
+                        channel=data.get("channel", ""),
+                        chat_id=data.get("chat_id", ""),
                         parent_task_id=data.get("parent_task_id"),
                         subagent_ids=data.get("subagent_ids", []),
                         result=data.get("result"),
@@ -47,6 +50,30 @@ class TaskManager:
                     self._tasks[task.id] = task
         except Exception as e:
             logger.warning("failed to load tasks from %s: %s", self.store_path, e)
+
+        # recover tasks that were interrupted mid-execution
+        recovered = 0
+        now = datetime.now().isoformat()
+        for task in self._tasks.values():
+            if task.state == TaskState.DOING:
+                task.updated_at = now
+                if task.agent_type == "subagent":
+                    task.state = TaskState.ERROR
+                    task.error = "interrupted by server shutdown"
+                else:
+                    task.state = TaskState.TODO
+                    self._recovered_ids.append(task.id)
+                recovered += 1
+
+        if recovered:
+            logger.info("recovered %d interrupted task(s)", recovered)
+            self._persist()
+
+    def get_recovered_tasks(self) -> list[Task]:
+        """Return tasks recovered from DOING on startup and clear the list."""
+        tasks = [self._tasks[tid] for tid in self._recovered_ids if tid in self._tasks]
+        self._recovered_ids.clear()
+        return tasks
 
     def _persist(self) -> None:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +90,8 @@ class TaskManager:
         title: str,
         description: str = "",
         agent_type: str = "agent",
+        channel: str = "",
+        chat_id: str = "",
         parent_task_id: str | None = None,
     ) -> Task:
         task = Task(
@@ -70,6 +99,8 @@ class TaskManager:
             title=title,
             description=description,
             agent_type=agent_type,
+            channel=channel,
+            chat_id=chat_id,
             parent_task_id=parent_task_id,
         )
         self._tasks[task.id] = task

@@ -21,6 +21,7 @@ This document describes the system architecture, core components, and data flow.
   - [Tasks](#tasks)
   - [Sessions](#sessions)
   - [Cron](#cron)
+  - [Heartbeat](#heartbeat)
   - [Config](#config)
   - [Storage](#storage)
   - [Web Client](#web-client)
@@ -274,6 +275,18 @@ Schedule kinds:
 
 Jobs marked `delete_after_run: true` are automatically removed after their first execution.
 
+### Heartbeat
+
+**Location:** `openbotx/heartbeat/`
+
+The heartbeat service periodically checks `HEARTBEAT.md` in the workspace for tasks.
+
+| File         | Purpose                                                                            |
+| ------------ | ---------------------------------------------------------------------------------- |
+| `service.py` | `HeartbeatService` -- runs a background loop that reads `workspace/HEARTBEAT.md` every N seconds. If the file has actionable content (not just headers/comments), publishes an `InboundMessage` to the bus with `channel="heartbeat"` and `chat_id="heartbeat"` (session key: `heartbeat:heartbeat`). The agent processes the tasks in a dedicated session. Responses are routed to the WebSocket (since there is no dedicated heartbeat channel handler). |
+
+Unlike cron (agent-managed via tools), `HEARTBEAT.md` is a file the user edits manually — a persistent to-do list the agent checks periodically.
+
 ### Config
 
 **Location:** `openbotx/config/`
@@ -298,6 +311,7 @@ Key configuration sections:
 | `tools`     | Web search API key, exec timeout, workspace restriction      |
 | `storage`   | Backend type (local/S3), paths, credentials                  |
 | `image`     | Image generation provider, model, API key                    |
+| `heartbeat` | Enabled flag, check interval                                 |
 | `cron`      | Enabled flag                                                 |
 
 ### Storage
@@ -330,7 +344,7 @@ Pages:
 
 | Page       | Function                                        |
 | ---------- | ----------------------------------------------- |
-| Chat       | Main conversation interface with real-time updates. Sessions are identified by UUID and persisted in localStorage. |
+| Chat       | Main conversation interface with session list panel, real-time updates, and session-aware message filtering. Users can switch between sessions (including heartbeat). |
 | TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns |
 | Files      | File browser with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. |
 | Skills     | View and manage agent skills                    |
@@ -366,6 +380,8 @@ openbotx/
 ├── cron/            # Scheduled task service
 │   ├── service.py       # CronService - tick loop and job execution
 │   └── types.py         # CronJob, CronSchedule, CronPayload data classes
+├── heartbeat/       # Periodic HEARTBEAT.md checker
+│   └── service.py       # HeartbeatService - reads workspace/HEARTBEAT.md
 ├── providers/       # LLM provider abstraction
 │   ├── base.py          # LLMProvider and LLMResponse
 │   ├── litellm_provider.py  # LiteLLM wrapper for multi-provider access
@@ -423,14 +439,17 @@ The FastAPI lifespan context manager in `app.py` orchestrates the full startup s
    h. SubagentManager
    i. AgentLoop (registers all tools)
    j. ChannelManager (initializes Telegram if enabled)
+   k. HeartbeatService
 5. Start background tasks:
    a. AgentLoop.run() -- consumes inbound queue
    b. CronService.run() -- tick loop for scheduled jobs
    c. ChannelManager.start() -- starts channels + outbound dispatch
-6. Application is ready to serve requests
+   d. HeartbeatService.start() -- periodic HEARTBEAT.md check
+6. Re-queue recovered tasks (DOING → TODO on restart)
+7. Application is ready to serve requests
 ```
 
-On shutdown, the reverse occurs: agent loop stops, cron service stops, and channels are shut down.
+On shutdown, the reverse occurs: HeartbeatService stops, agent loop stops, cron service stops, and channels are shut down (with a 10-second timeout per channel). Tasks that are in DOING state when the server stops will be recovered on the next startup.
 
 ---
 

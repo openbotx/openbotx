@@ -60,20 +60,26 @@ onMounted(async () => {
     }
     agents.value = loaded
 
-    image.value = { ...{ provider: 'gemini', model: 'gemini-3-pro-image-preview', api_key: '' }, ...(configStore.config.image || {}) }
-    auth.value = { ...{ username: 'admin', password: '' }, ...(configStore.config.auth || {}) }
+    const cfgImage = configStore.config.image || {}
+    image.value = {
+      provider: cfgImage.provider || 'gemini',
+      model: cfgImage.model || 'gemini-3-pro-image-preview',
+      api_key: '',
+    }
+    const cfgAuth = configStore.config.auth || {}
+    auth.value = { username: cfgAuth.username || 'admin', password: '', secret_key: '' }
     tools.value = {
       restrict_to_workspace: configStore.config.tools?.restrict_to_workspace ?? true,
       exec: { timeout: configStore.config.tools?.exec?.timeout ?? 60 },
-      web_search: { api_key: configStore.config.tools?.web_search?.api_key ?? '', max_results: configStore.config.tools?.web_search?.max_results ?? 5 },
+      web_search: { api_key: '', max_results: configStore.config.tools?.web_search?.max_results ?? 5 },
     }
     const st = configStore.config.storage || {}
     storage.value = {
       type: st.type || 'local',
       s3_bucket: st.s3_bucket || '',
       s3_region: st.s3_region || 'us-east-1',
-      s3_access_key: st.s3_access_key || '',
-      s3_secret_key: st.s3_secret_key || '',
+      s3_access_key: '',
+      s3_secret_key: '',
     }
   }
 })
@@ -233,7 +239,7 @@ async function restartServices() {
               </div>
               <div class="form-group">
                 <label>API Key</label>
-                <Password v-model="image.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" />
+                <Password v-model="image.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
               </div>
               <Button label="Save Image" icon="pi pi-save" size="small" @click="saveImage" />
             </div>
@@ -259,11 +265,11 @@ async function restartServices() {
                 </div>
                 <div class="form-group">
                   <label>Access Key</label>
-                  <Password v-model="storage.s3_access_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" />
+                  <Password v-model="storage.s3_access_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
                 </div>
                 <div class="form-group">
                   <label>Secret Key</label>
-                  <Password v-model="storage.s3_secret_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" />
+                  <Password v-model="storage.s3_secret_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
                 </div>
               </template>
               <Button label="Save" icon="pi pi-save" size="small" @click="saveSection('storage', storage)" />
@@ -284,7 +290,7 @@ async function restartServices() {
               <h3>Web Search</h3>
               <div class="form-group">
                 <label>Brave API Key</label>
-                <Password v-model="tools.web_search.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" />
+                <Password v-model="tools.web_search.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
               </div>
               <div class="form-group">
                 <label>Max Results</label>
@@ -299,11 +305,11 @@ async function restartServices() {
               <Message severity="info" :closable="false" class="tab-message">Changes take effect on next server restart.</Message>
               <div class="form-group">
                 <label>Username</label>
-                <InputText v-model="auth.username" class="w-full" />
+                <InputText v-model="auth.username" class="w-full" autocomplete="off" />
               </div>
               <div class="form-group">
                 <label>Password</label>
-                <Password v-model="auth.password" class="w-full" :feedback="false" toggle-mask input-class="w-full" />
+                <Password v-model="auth.password" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="new-password" placeholder="Leave empty to keep current" />
               </div>
               <Button label="Save" icon="pi pi-save" size="small" @click="saveSection('auth', auth)" />
             </div>

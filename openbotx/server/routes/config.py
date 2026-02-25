@@ -8,6 +8,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _is_sensitive_key(name: str) -> bool:
+    n = name.lower()
+    return "key" in n or "token" in n or "secret" in n or "password" in n
+
+
 def _mask_keys(d) -> dict | list:
     if isinstance(d, list):
         return [_mask_keys(v) for v in d]
@@ -17,12 +22,7 @@ def _mask_keys(d) -> dict | list:
     for k, v in d.items():
         if isinstance(v, (dict, list)):
             masked[k] = _mask_keys(v)
-        elif (
-            "key" in k.lower()
-            or "token" in k.lower()
-            or "secret" in k.lower()
-            or "password" in k.lower()
-        ):
+        elif _is_sensitive_key(k):
             masked[k] = "***" if v else ""
         else:
             masked[k] = v
@@ -71,12 +71,27 @@ async def update_section(section: str, body: ConfigSection, request: Request):
         _update_agents(config, body.data)
     else:
         current = getattr(config, section)
-        for key, value in body.data.items():
-            if hasattr(current, key):
-                setattr(current, key, value)
+        _update_section(current, body.data)
 
     save_config(config, config._config_path)
     return {"status": "ok"}
+
+
+def _update_section(current, data: dict) -> None:
+    """Update a config section, preserving sensitive fields when masked or empty."""
+    for key, value in data.items():
+        if not hasattr(current, key):
+            continue
+        if isinstance(value, dict):
+            nested = getattr(current, key)
+            if hasattr(nested, "__dict__"):
+                _update_section(nested, value)
+            else:
+                setattr(current, key, value)
+            continue
+        if _is_sensitive_key(key) and (not value or value == "***"):
+            continue
+        setattr(current, key, value)
 
 
 def _update_agents(config, data):
@@ -140,20 +155,18 @@ async def restart_services(request: Request):
     app = request.app
     config = app.state.config
 
-    try:
-        await app.state.agent_loop.stop()
-    except Exception as e:
-        logger.warning("Error stopping agent loop: %s", e)
-
-    try:
-        await app.state.channel_manager.stop()
-    except Exception as e:
-        logger.warning("Error stopping channels: %s", e)
-
-    try:
-        await app.state.cron_service.stop()
-    except Exception as e:
-        logger.warning("Error stopping cron: %s", e)
+    for name, service in [
+        ("heartbeat", getattr(app.state, "heartbeat", None)),
+        ("agent_loop", app.state.agent_loop),
+        ("channel_manager", app.state.channel_manager),
+        ("cron_service", app.state.cron_service),
+    ]:
+        if service is None:
+            continue
+        try:
+            await service.stop()
+        except Exception as e:
+            logger.warning("Error stopping %s: %s", name, e)
 
     workspace = config.workspace_path
     public_dir = config.project_path / "public"
@@ -252,6 +265,17 @@ async def restart_services(request: Request):
     )
     app.state.channel_manager = channel_manager
     await channel_manager.start()
+
+    from openbotx.heartbeat.service import HeartbeatService
+
+    heartbeat = HeartbeatService(
+        workspace=workspace,
+        bus=bus,
+        interval=config.heartbeat.interval,
+        enabled=config.heartbeat.enabled,
+    )
+    app.state.heartbeat = heartbeat
+    await heartbeat.start()
 
     logger.info("Services restarted successfully")
     return {"status": "restarted"}

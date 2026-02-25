@@ -151,21 +151,20 @@ class ChannelManager:
         if is_tool_hint and not self._send_tool_hints:
             return
 
-        if msg.channel == "web":
-            if self._ws_manager:
-                await self._ws_manager.broadcast(
-                    "chat:message",
-                    {
-                        "content": msg.content,
-                        "chat_id": msg.chat_id,
-                        "task_id": msg.metadata.get("task_id"),
-                    },
-                )
-            return
-
         channel = self._channels.get(msg.channel)
         if channel and channel.is_running:
             try:
                 await channel.send(msg)
             except Exception as e:
                 logger.error("Failed to send to %s: %s", msg.channel, e)
+            return
+
+        if self._ws_manager:
+            await self._ws_manager.broadcast(
+                "chat:message",
+                {
+                    "content": msg.content,
+                    "chat_id": msg.chat_id,
+                    "task_id": msg.metadata.get("task_id"),
+                },
+            )

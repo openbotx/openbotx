@@ -40,8 +40,8 @@ async function handleLogin() {
         </div>
       </template>
       <template #content>
-        <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
         <form @submit.prevent="handleLogin" class="login-form">
+          <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
           <div class="form-field">
             <label for="username">Username</label>
             <InputText id="username" v-model="username" class="w-full" autofocus />

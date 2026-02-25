@@ -17,6 +17,8 @@ class Task:
     description: str = ""
     state: TaskState = TaskState.TODO
     agent_type: str = "agent"
+    channel: str = ""
+    chat_id: str = ""
     parent_task_id: str | None = None
     subagent_ids: list[str] = field(default_factory=list)
     result: str | None = None
@@ -31,6 +33,8 @@ class Task:
             "description": self.description,
             "state": self.state.value,
             "agent_type": self.agent_type,
+            "channel": self.channel,
+            "chat_id": self.chat_id,
             "parent_task_id": self.parent_task_id,
             "subagent_ids": self.subagent_ids,
             "result": self.result,

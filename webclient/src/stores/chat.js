@@ -2,12 +2,52 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useApi } from '../composables/useApi'
 
+/**
+ * Extract the chat_id from a session key.
+ * "web:abc-123" → "abc-123", "heartbeat:heartbeat" → "heartbeat"
+ */
+function chatIdFromKey(key) {
+  const idx = key.indexOf(':')
+  return idx !== -1 ? key.slice(idx + 1) : key
+}
+
+/**
+ * Extract the channel from a session key.
+ * "web:abc-123" → "web", "heartbeat:heartbeat" → "heartbeat"
+ */
+function channelFromKey(key) {
+  const idx = key.indexOf(':')
+  return idx !== -1 ? key.slice(0, idx) : key
+}
+
+/**
+ * Display label for a session key.
+ */
+function sessionLabel(key) {
+  const channel = channelFromKey(key)
+  const chatId = chatIdFromKey(key)
+
+  if (channel === 'heartbeat') return 'Heartbeat'
+  if (channel === 'telegram') return `Telegram ${chatId}`
+  if (channel === 'web') {
+    return chatId.length > 12 ? `Chat ${chatId.slice(0, 8)}` : chatId
+  }
+  return key
+}
+
+export { chatIdFromKey, channelFromKey, sessionLabel }
+
 export const useChatStore = defineStore('chat', () => {
   const api = useApi()
   const messages = ref([])
   const sessions = ref([])
-  const stored = localStorage.getItem('chat_session')
-  const currentSessionId = ref(stored || crypto.randomUUID())
+  let stored = localStorage.getItem('chat_session')
+  // Migrate bare UUIDs from older versions to full session keys
+  if (stored && !stored.includes(':')) {
+    stored = `web:${stored}`
+    localStorage.setItem('chat_session', stored)
+  }
+  const currentSessionId = ref(stored || `web:${crypto.randomUUID()}`)
   if (!stored) localStorage.setItem('chat_session', currentSessionId.value)
   const streaming = ref(false)
   const currentToolUse = ref(null)
@@ -29,7 +69,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function _isCurrentSession(data) {
+    if (!data.chat_id) return true
+    return data.chat_id === chatIdFromKey(currentSessionId.value)
+  }
+
   function onMessage(data) {
+    if (!_isCurrentSession(data)) return
     streaming.value = false
     currentToolUse.value = null
     messages.value.push({
@@ -41,10 +87,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function onThinking(data) {
+    if (!_isCurrentSession(data)) return
     streaming.value = true
   }
 
   function onToolUse(data) {
+    if (!_isCurrentSession(data)) return
     currentToolUse.value = {
       tool: data.tool,
       arguments: data.arguments,
@@ -67,27 +115,35 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = await api.get('/chat/sessions')
   }
 
-  async function loadHistory(sessionId) {
-    const data = await api.get(`/chat/sessions/${sessionId}`)
+  async function loadHistory(sessionKey) {
+    const data = await api.get(`/chat/sessions/${sessionKey}`)
     messages.value = (data.messages || []).map((m) => ({
       ...m,
       timestamp: Date.now(),
     }))
-    currentSessionId.value = sessionId
-    localStorage.setItem('chat_session', sessionId)
+    currentSessionId.value = sessionKey
+    localStorage.setItem('chat_session', sessionKey)
   }
 
-  async function clearSession(sessionId) {
-    await api.del(`/chat/sessions/${sessionId}`)
-    if (sessionId === currentSessionId.value) {
+  async function switchSession(sessionKey) {
+    streaming.value = false
+    currentToolUse.value = null
+    await loadHistory(sessionKey)
+    await loadSessions()
+  }
+
+  async function clearSession(sessionKey) {
+    await api.del(`/chat/sessions/${sessionKey}`)
+    if (sessionKey === currentSessionId.value) {
       messages.value = []
     }
+    await loadSessions()
   }
 
   function newSession() {
-    const id = crypto.randomUUID()
-    currentSessionId.value = id
-    localStorage.setItem('chat_session', id)
+    const key = `web:${crypto.randomUUID()}`
+    currentSessionId.value = key
+    localStorage.setItem('chat_session', key)
     messages.value = []
     streaming.value = false
     currentToolUse.value = null
@@ -105,6 +161,7 @@ export const useChatStore = defineStore('chat', () => {
     onToolUse,
     loadSessions,
     loadHistory,
+    switchSession,
     clearSession,
     newSession,
   }

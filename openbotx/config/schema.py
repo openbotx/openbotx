@@ -84,6 +84,11 @@ class StorageConfig(BaseModel):
     s3_secret_key: str = ""
 
 
+class HeartbeatConfig(BaseModel):
+    enabled: bool = True
+    interval: int = 1800
+
+
 class CronConfig(BaseModel):
     enabled: bool = True
 
@@ -100,6 +105,7 @@ class Config(BaseModel):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     cron: CronConfig = Field(default_factory=CronConfig)
 
     def get_agent(self, name: str = "main") -> AgentConfig:

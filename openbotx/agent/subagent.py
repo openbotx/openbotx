@@ -66,6 +66,8 @@ class SubagentManager:
             title=title,
             description=task,
             agent_type="subagent",
+            channel=origin_channel,
+            chat_id=origin_chat_id,
             parent_task_id=parent_task_id,
         )
         await self._task_manager.update_state(task_obj.id, TaskState.DOING)

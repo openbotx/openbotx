@@ -126,6 +126,10 @@ Response:
 
 **GET /api/chat/sessions/{session_id}**
 
+The `session_id` is resolved using key resolution:
+- If it contains `:`, used as the session key directly (e.g., `web:abc123`, `heartbeat:heartbeat`)
+- Otherwise, prefixed with `web:` (standard user sessions)
+
 Response:
 
 ```json
@@ -138,6 +142,8 @@ Response:
 ```
 
 **DELETE /api/chat/sessions/{session_id}**
+
+Uses the same key resolution as GET.
 
 Response:
 
@@ -440,10 +446,11 @@ ws://host:port/ws?token=JWT_TOKEN
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `chat:message` | `{ content, chat_id, task_id }` | Final AI response |
-| `chat:thinking` | `{ task_id, content }` | Agent reasoning and thinking steps |
-| `chat:tool_use` | `{ task_id, tool, arguments, result }` | Tool execution details |
+| `chat:thinking` | `{ task_id, chat_id, content }` | Agent reasoning and thinking steps |
+| `chat:tool_use` | `{ task_id, chat_id, tool, description }` | Tool execution details |
 | `task:created` | Task object | New task was created |
 | `task:updated` | Task object | Task state changed |
+| `channel:status` | `{ name, running }` | Channel connection status changed |
 
 **chat:message**
 
@@ -465,6 +472,7 @@ ws://host:port/ws?token=JWT_TOKEN
   "event": "chat:thinking",
   "data": {
     "task_id": "string",
+    "chat_id": "string",
     "content": "string"
   }
 }
@@ -477,12 +485,14 @@ ws://host:port/ws?token=JWT_TOKEN
   "event": "chat:tool_use",
   "data": {
     "task_id": "string",
+    "chat_id": "string",
     "tool": "string",
-    "arguments": {},
-    "result": "string"
+    "description": "string"
   }
 }
 ```
+
+All `chat:*` events include `chat_id` so the frontend can filter messages by session. Only messages matching the active session should be displayed — others are silently ignored until the user switches to that session.
 
 #### Client to Server
 

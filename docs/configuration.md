@@ -135,6 +135,13 @@ storage:
   s3_secret_key: ""              # str  -- AWS secret access key.
 
 # ---------------------------------------------------------------------------
+# Heartbeat
+# ---------------------------------------------------------------------------
+heartbeat:
+  enabled: true                   # bool -- Enable the periodic heartbeat service.
+  interval: 1800                  # int  -- Seconds between checks (default: 30 minutes).
+
+# ---------------------------------------------------------------------------
 # Cron
 # ---------------------------------------------------------------------------
 cron:
@@ -373,4 +380,5 @@ providers:
 - **Secret key auto-generation.** If `auth.secret_key` is left empty, a random key is generated each time the server starts. Set it explicitly if you need stable tokens across restarts.
 - **Workspace isolation.** When `tools.restrict_to_workspace` is `true`, file operations performed by the agent are confined to its configured `workspace` directory. Disable this only if you understand the security implications.
 - **Cron scheduler.** The cron system is enabled by default. Disable it with `cron.enabled: false` if you do not need scheduled tasks.
+- **Heartbeat service.** When enabled, the agent periodically reads `HEARTBEAT.md` from the workspace for tasks. Results are stored in a dedicated `heartbeat` session, accessible from the web interface session list. Set `heartbeat.enabled: false` to disable.
 - **Model identifier format.** The `model` field in agent configurations uses the format `provider/model-name`. The prefix before the slash must match a key defined under `providers`.

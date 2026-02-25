@@ -18,6 +18,7 @@ from openbotx.channels.manager import ChannelManager
 from openbotx.config.loader import load_config
 from openbotx.cron.service import CronService
 from openbotx.cron.types import CronJob
+from openbotx.heartbeat.service import HeartbeatService
 from openbotx.providers.litellm_provider import LiteLLMProvider
 from openbotx.server.auth import AuthMiddleware
 from openbotx.server.websocket import WebSocketManager, websocket_endpoint
@@ -161,6 +162,13 @@ async def lifespan(app: FastAPI):
         ws_manager=ws_manager,
     )
 
+    heartbeat = HeartbeatService(
+        workspace=workspace,
+        bus=bus,
+        interval=config.heartbeat.interval,
+        enabled=config.heartbeat.enabled,
+    )
+
     app.state.config = config
     app.state.storage = storage
     app.state.ws_manager = ws_manager
@@ -173,10 +181,23 @@ async def lifespan(app: FastAPI):
     app.state.subagent_manager = subagent_manager
     app.state.agent_loop = agent_loop
     app.state.channel_manager = channel_manager
+    app.state.heartbeat = heartbeat
 
     agent_task = asyncio.create_task(agent_loop.run())
     cron_task = asyncio.create_task(cron_service.run())
     await channel_manager.start()
+    await heartbeat.start()
+
+    # re-queue tasks that were interrupted by previous shutdown
+    for task in task_manager.get_recovered_tasks():
+        msg = InboundMessage(
+            channel=task.channel or "web",
+            sender_id="system",
+            chat_id=task.chat_id or "direct",
+            content=task.description,
+            metadata={"task_id": task.id, "recovered": True},
+        )
+        await bus.publish_inbound(msg)
 
     if config.server.public_url:
         logger.info(
@@ -190,6 +211,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    await heartbeat.stop()
     await agent_loop.stop()
     agent_task.cancel()
     try:

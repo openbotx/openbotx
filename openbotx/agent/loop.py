@@ -164,6 +164,8 @@ class AgentLoop:
             task = await self._task_manager.create_task(
                 title=msg.content[:50],
                 description=msg.content,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
             )
             task_id = task.id
 
@@ -216,7 +218,7 @@ class AgentLoop:
         messages = ContextBuilder.build_messages(system_prompt, history, content, media=media_urls)
 
         try:
-            response_text = await self._run_agent_loop(messages, task_id)
+            response_text = await self._run_agent_loop(messages, task_id, msg.chat_id)
         except Exception as e:
             logger.error("agent loop error for task %s: %s", task_id, e, exc_info=True)
             response_text = f"I encountered an error: {e}"
@@ -248,7 +250,9 @@ class AgentLoop:
 
         await self._check_consolidation(session)
 
-    async def _run_agent_loop(self, messages: list[dict[str, Any]], task_id: str) -> str:
+    async def _run_agent_loop(
+        self, messages: list[dict[str, Any]], task_id: str, chat_id: str = ""
+    ) -> str:
         for iteration in range(self._max_iterations):
             response = await self._provider.chat(
                 messages=messages,
@@ -263,6 +267,7 @@ class AgentLoop:
                     "chat:thinking",
                     {
                         "task_id": task_id,
+                        "chat_id": chat_id,
                         "content": response.reasoning_content,
                     },
                 )
@@ -297,6 +302,7 @@ class AgentLoop:
                             "chat:tool_use",
                             {
                                 "task_id": task_id,
+                                "chat_id": chat_id,
                                 "tool": display_name,
                                 "description": description,
                             },

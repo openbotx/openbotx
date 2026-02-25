@@ -29,13 +29,14 @@
 - **Tools** — File operations, shell, web search, HTTP client, browser automation, and more
 - **Multiple Agents** — Configure named agents with different models and parameters
 - **Scheduler** — Cron jobs and one-time scheduled tasks
+- **Heartbeat** — Periodic agent wake-up to check a user-managed task file (HEARTBEAT)
 - **Multi-Provider** — Anthropic, OpenAI, OpenRouter, Gemini, DeepSeek, Groq, and custom endpoints via LiteLLM
 - **Subagents** — Spawn background agents for parallel tasks
 - **Memory** — Automatic conversation memory with consolidation
 
 ## Quick Start
 
-**Requirements:** Python 3.11-3.13 and [uv](https://github.com/astral-sh/uv)
+**Requirements:** Python 3.11-3.13 and UV [https://github.com/astral-sh/uv](https://github.com/astral-sh/uv).
 
 ```bash
 # Install
@@ -82,7 +83,7 @@ openbotx version            # Show version
 
 ## Documentation
 
-Detailed documentation is available in the [docs/](docs/) folder:
+Detailed documentation is available in the documentation folder:
 
 - [Execution Flow](docs/flow.md) — Complete agent execution flow, step by step
 - [Architecture](docs/architecture.md) — System design, message flow, and components

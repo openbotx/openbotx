@@ -24,11 +24,13 @@ This document explains the complete execution flow of the OpenBotX AI agent, fro
 16. [Memory and Consolidation](#16-memory-and-consolidation)
 17. [Sessions](#17-sessions)
 18. [Task Management](#18-task-management)
-19. [Heartbeat and WebSocket](#19-heartbeat-and-websocket)
-20. [Scheduler (Cron)](#20-scheduler-cron)
-21. [Output Routing](#21-output-routing)
-22. [Server Shutdown](#22-server-shutdown)
-23. [Complete Cycle](#23-complete-cycle)
+19. [WebSocket](#19-websocket)
+20. [Heartbeat Service](#20-heartbeat-service)
+21. [Scheduler (Cron)](#21-scheduler-cron)
+22. [Output Routing](#22-output-routing)
+23. [Media Pipeline](#23-media-pipeline)
+24. [Server Shutdown](#24-server-shutdown)
+25. [Complete Cycle](#25-complete-cycle)
 
 ---
 
@@ -80,13 +82,18 @@ graph TD
     J --> K[Create SubagentManager]
     K --> L[Create AgentLoop]
     L --> M[Create ChannelManager]
-    M --> N["Start AgentLoop (background task)"]
-    N --> O["Start CronService (background task)"]
-    O --> P["Start ChannelManager (channels + dispatch)"]
-    P --> Q[Server ready]
+    M --> N[Create HeartbeatService]
+    N --> O["Start AgentLoop (background task)"]
+    O --> P["Start CronService (background task)"]
+    P --> Q["Start ChannelManager (channels + dispatch)"]
+    Q --> R["Start HeartbeatService (background task)"]
+    R --> S[Re-queue recovered tasks]
+    S --> T[Server ready]
 ```
 
 Each component receives references to previously created ones. For example, the `AgentLoop` receives the `bus`, `provider`, `task_manager`, `session_manager`, `skills_loader`, `subagent_manager`, and `cron_service`.
+
+After all services are started, the server re-queues any tasks that were interrupted by a previous shutdown. Tasks that were in the DOING state are reset to TODO during `TaskManager` initialization, and then published back to the MessageBus so the agent can re-execute them (see section 18).
 
 ---
 
@@ -121,6 +128,7 @@ providers:
 | Workspace restriction | `restrict_to_workspace: true` |
 | WebSocket progress | `send_progress: true` |
 | Tool hints | `send_tool_hints: false` |
+| Heartbeat | `enabled: true`, `interval: 1800` (30 minutes) |
 
 ### Saving
 
@@ -401,7 +409,7 @@ After building the system prompt, `build_messages()` assembles the message list:
 ]
 ```
 
-If the message contains media (images), the agent loop resolves relative paths to base64 data URIs via the storage provider (see section 22). The user content is then assembled as multimodal:
+If the message contains media (images), the agent loop resolves relative paths to base64 data URIs via the storage provider (see section 23). The user content is then assembled as multimodal:
 
 ```python
 {"role": "user", "content": [
@@ -1090,10 +1098,11 @@ session_key = "{channel}:{chat_id}"
 ```
 
 Examples:
-- **Web (default):** `web:direct` — when the frontend sends a message with `session_id="direct"`
+- **Web (default):** `web:a1b2c3d4-...` — when the frontend sends a message with a UUID `session_id`
 - **Web (custom):** `web:project-alpha` — when the frontend sends `session_id="project-alpha"`
 - **Telegram:** `telegram:123456789` — the Telegram chat ID
 - **Cron:** `web:direct` — cron jobs use `channel="web"` and `chat_id="direct"` by default
+- **Heartbeat:** `heartbeat:heartbeat` — the heartbeat service uses `channel="heartbeat"` and `chat_id="heartbeat"`
 
 This key determines which JSONL file is loaded and which conversation history the agent sees.
 
@@ -1107,7 +1116,7 @@ def session_key(self) -> str:
     return self.session_key_override or f"{self.channel}:{self.chat_id}"
 ```
 
-This is an extension point for custom integrations. It is **not used** by the built-in web or Telegram channels — they rely on the default key. However, it enables scenarios such as:
+This is an extension point for custom integrations. The built-in channels (web, Telegram, heartbeat) all use the default `{channel}:{chat_id}` key — for example, the Heartbeat Service uses `channel="heartbeat"` and `chat_id="heartbeat"`, resulting in key `heartbeat:heartbeat` (see section 20). The override enables scenarios such as:
 
 - **Custom API consumers** that want explicit control over which session a message belongs to (e.g., sending `session_key_override="project:backend"` to group messages by project instead of by channel)
 - **Shared sessions** — multiple different users or channels routing messages into the same session by specifying the same override key
@@ -1165,8 +1174,9 @@ Sessions are persisted as **JSONL** (JSON Lines) files in the `sessions/` folder
 ```
 workspace/
   sessions/
-    web_direct.jsonl
+    web_a1b2c3d4-e5f6-....jsonl
     telegram_123456789.jsonl
+    heartbeat_heartbeat.jsonl
     reports_weekly.jsonl
 ```
 
@@ -1221,11 +1231,16 @@ This gives the user a fresh conversation while preserving long-term memory (whic
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/chat/sessions` | List all sessions, sorted by last update (newest first) |
-| `GET` | `/api/chat/sessions/{id}` | Return the complete history for session `web:{id}` |
-| `DELETE` | `/api/chat/sessions/{id}` | Delete session `web:{id}` (file + cache) |
+| `GET` | `/api/chat/sessions` | List all sessions (any channel), sorted by last update (newest first) |
+| `GET` | `/api/chat/sessions/{id}` | Return the complete history for a session |
+| `DELETE` | `/api/chat/sessions/{id}` | Delete a session (file + cache) |
 
-Note: the REST API prepends `web:` to the session ID automatically — so `GET /api/chat/sessions/direct` loads the session with key `web:direct`.
+The `{id}` parameter uses key resolution (`_resolve_session_key`):
+
+1. If the ID contains `:`, it is used as the session key directly (e.g., `web:abc123`, `heartbeat:heartbeat`)
+2. Otherwise, the ID is prefixed with `web:` (standard user sessions)
+
+This means the API works universally for any session type — web, heartbeat, telegram, or custom — as long as the user is authenticated.
 
 ---
 
@@ -1250,11 +1265,35 @@ stateDiagram-v2
     TODO --> DOING: Agent starts processing
     DOING --> DONE: Processing complete
     DOING --> ERROR: Error during processing
+    DOING --> TODO: Server restart (recovered)
+    DOING --> ERROR: Server restart (subagent)
 ```
 
 1. When the user sends a message, a task is created (state **TODO**)
 2. Immediately changes to **DOING** when the agent starts processing
 3. Upon completion, changes to **DONE** (with the first 200 characters of the result) or **ERROR** (with error message)
+
+### Task Data Model
+
+Each task stores the following fields:
+
+| Field | Description |
+|---|---|
+| `id` | First 8 characters of a UUID4 (e.g., `"a1b2c3d4"`) |
+| `title` | Short title (first 50-80 chars of the message) |
+| `description` | Full message content |
+| `state` | Current state: `TODO`, `DOING`, `DONE`, or `ERROR` |
+| `agent_type` | `"agent"` (main) or `"subagent"` |
+| `channel` | Origin channel (`"web"`, `"telegram"`) — used for recovery routing |
+| `chat_id` | Origin chat/session ID — used for recovery routing |
+| `parent_task_id` | ID of the parent task (for subagents) |
+| `subagent_ids` | List of child subagent task IDs |
+| `result` | First 200 characters of the result (on DONE) |
+| `error` | Error message (on ERROR) |
+| `created_at` | ISO 8601 timestamp |
+| `updated_at` | ISO 8601 timestamp |
+
+The `channel` and `chat_id` fields are set when the task is created and record which conversation originated it. This is essential for task recovery on restart — without them, the system wouldn't know where to route the re-queued message (see below).
 
 ### Parent-Child Hierarchy
 
@@ -1264,13 +1303,34 @@ When a subagent is created via `spawn`, it gets its own task with:
 
 The parent task maintains a `subagent_ids` list with the IDs of all created subtasks. This allows visualizing the hierarchy in the Kanban board.
 
-### Identifiers
-
-Task IDs are the first **8 characters** of a UUID4, for example: `"a1b2c3d4"`.
-
 ### Persistence
 
 Tasks are saved in `tasks.jsonl` in the workspace. Each task is a JSON line, rewritten on every update.
+
+### Task Recovery on Restart
+
+If the server stops while tasks are in the DOING state (e.g., crash, Ctrl+C during processing), those tasks would be stuck forever — the task system is **reactive** and only executes when an `InboundMessage` arrives on the MessageBus.
+
+On startup, `TaskManager._load()` detects and recovers interrupted tasks:
+
+1. **Main tasks** (`agent_type="agent"`) are reset to **TODO** and added to a recovery list
+2. **Subagent tasks** are set to **ERROR** with the message "interrupted by server shutdown" — they cannot run independently because they lack parent context, session history, and the simplified prompt needed to continue
+
+After all services are started, the server lifespan re-queues recovered main tasks by publishing an `InboundMessage` for each one:
+
+```python
+for task in task_manager.get_recovered_tasks():
+    msg = InboundMessage(
+        channel=task.channel or "web",
+        sender_id="system",
+        chat_id=task.chat_id or "direct",
+        content=task.description,
+        metadata={"task_id": task.id, "recovered": True},
+    )
+    await bus.publish_inbound(msg)
+```
+
+The `channel` and `chat_id` stored on the task ensure the message is routed to the correct session. The `task_id` in metadata links it to the existing task, so the agent loop retrieves it (instead of creating a new one) and resumes processing.
 
 ### Real-time Broadcasting
 
@@ -1282,7 +1342,7 @@ The frontend receives these events and updates the Kanban board instantly.
 
 ---
 
-## 19. Heartbeat and WebSocket
+## 19. WebSocket
 
 WebSocket is the primary real-time communication channel between the browser and the server.
 
@@ -1298,13 +1358,27 @@ class WebSocketManager:
 
 ### Broadcast Events
 
-| Event | Description | When Sent |
+| Event | Payload | When Sent |
 |---|---|---|
-| `chat:message` | Agent response | When the agent finalizes a response |
-| `chat:thinking` | LLM reasoning | During the Agent Loop, if the LLM sends reasoning |
-| `chat:tool_use` | Tool name (human-readable) | When a tool is executed |
-| `task:created` | New task | When a task is created |
-| `task:updated` | Task updated | When a task's state changes |
+| `chat:message` | `{ content, chat_id, task_id }` | When the agent finalizes a response |
+| `chat:thinking` | `{ task_id, chat_id, content }` | During the Agent Loop, if the LLM sends reasoning |
+| `chat:tool_use` | `{ task_id, chat_id, tool, description }` | When a tool is executed |
+| `task:created` | Task object | When a task is created |
+| `task:updated` | Task object | When a task's state changes |
+| `channel:status` | `{ name, running }` | When a channel connects or disconnects |
+
+### Session-Aware Message Filtering
+
+All `chat:*` events include a `chat_id` field identifying which session the message belongs to. The frontend uses this to **filter messages by session** — only messages matching `currentSessionId` are displayed. This prevents messages from different sessions (e.g., heartbeat responses) from appearing in the wrong conversation.
+
+```javascript
+// Frontend filtering (chat store)
+function _isCurrentSession(data) {
+  return !data.chat_id || data.chat_id === currentSessionId.value
+}
+```
+
+Messages from sessions other than the active one are silently ignored. The user can switch to another session to see its messages.
 
 ### Automatic Dead Connection Cleanup
 
@@ -1321,7 +1395,7 @@ async def broadcast(self, event_type, data):
     self._connections -= dead  # remove dead connections
 ```
 
-### Heartbeat
+### Connection Keep-Alive
 
 The frontend periodically sends "pings" over the WebSocket to ensure the connection is not closed due to inactivity. This is important because:
 
@@ -1331,7 +1405,82 @@ The frontend periodically sends "pings" over the WebSocket to ensure the connect
 
 ---
 
-## 20. Scheduler (Cron)
+## 20. Heartbeat Service
+
+The Heartbeat Service (`openbotx/heartbeat/service.py`) is a background process that periodically checks a file called `HEARTBEAT.md` in the workspace for tasks. If the file has actionable content, the service wakes the agent to process it.
+
+### Who Writes HEARTBEAT.md?
+
+**The user** (or an external system) — manually. Unlike cron jobs, which the agent creates programmatically via the `cron` tool, `HEARTBEAT.md` is a file the user edits directly in the workspace. Think of it as a **to-do list on the user's desk** that the agent checks periodically.
+
+Typical use cases:
+- Ongoing maintenance tasks ("check if backups are running")
+- Monitoring instructions ("summarize today's error logs")
+- Recurring checklists that change frequently and are easier to manage as a file than as cron jobs
+
+The user adds or removes items by editing the file. The agent reads it but does not modify it — the user is responsible for updating `HEARTBEAT.md` as needed.
+
+### How It Works
+
+```mermaid
+graph TD
+    A["HeartbeatService._run_loop()"] --> B["Sleep for interval seconds (default: 1800)"]
+    B --> C["Read workspace/HEARTBEAT.md"]
+    C --> D{File has actionable content?}
+    D -->|No| B
+    D -->|Yes| E["Publish InboundMessage to bus"]
+    E --> F["Agent reads HEARTBEAT.md and follows instructions"]
+    F --> G["Agent responds with results or HEARTBEAT_OK"]
+    G --> B
+```
+
+1. Every `interval` seconds (default: 1800 = 30 minutes), the service reads `HEARTBEAT.md`
+2. The file is considered **empty** (no action) if it only contains blank lines, headers (`#`), or HTML comments (`<!--`)
+3. If there is actionable content, the service publishes an `InboundMessage` with:
+   - `channel="heartbeat"` — identifies the source as the heartbeat service
+   - `chat_id="heartbeat"` — results in session key `heartbeat:heartbeat`, separate from user conversations
+   - Since `heartbeat` has no dedicated channel handler, responses are routed to the WebSocket (the default fallback) so the user can see them in the browser
+4. The agent receives the message, reads `HEARTBEAT.md`, and follows the instructions listed there
+5. If nothing needs attention, the agent responds with `HEARTBEAT_OK`
+
+The user can view heartbeat results by switching to the "Heartbeat" session in the web interface session list (see section 17).
+
+### HEARTBEAT.md Format
+
+The file is plain Markdown. Any line that is not a header, blank, or HTML comment is considered actionable:
+
+```markdown
+# Heartbeat Tasks
+
+- Check if the backup ran successfully
+- Summarize today's error logs
+- Verify that the API health endpoint returns 200
+```
+
+### Heartbeat vs Cron
+
+| Aspect | Heartbeat | Cron |
+|---|---|---|
+| **Trigger** | Periodic file check (every N seconds) | Scheduled (cron expression, interval, or specific time) |
+| **Task definition** | Written by the user in `HEARTBEAT.md` | Created by the agent via the `cron` tool |
+| **Management** | User edits a file manually | Agent adds/removes/lists jobs programmatically |
+| **Session** | Dedicated (`heartbeat:heartbeat`) | Inherits from the conversation that created the job |
+| **Persistence** | Markdown file in workspace | `cron_jobs.json` in workspace |
+| **Use case** | Ongoing checklist the user maintains | Agent-scheduled automations |
+
+### Configuration
+
+```yaml
+heartbeat:
+  enabled: true    # default — set to false to disable
+  interval: 1800   # seconds between checks (default: 30 minutes)
+```
+
+When `enabled` is `false`, the service logs "heartbeat disabled" on startup and does not start the background loop.
+
+---
+
+## 21. Scheduler (Cron)
 
 The scheduler (`openbotx/cron/service.py`) allows programming tasks to be executed in the future or on a recurring basis.
 
@@ -1438,7 +1587,7 @@ The agent processes cron messages with the full session context, so it can refer
 
 ---
 
-## 21. Output Routing
+## 22. Output Routing
 
 The `ChannelManager` (`openbotx/channels/manager.py`) is responsible for taking the agent's responses and delivering them to the correct recipient.
 
@@ -1494,7 +1643,7 @@ The `TelegramChannel` has special handling for Telegram:
 
 ---
 
-## 22. Media Pipeline
+## 23. Media Pipeline
 
 Media files (images, audio, documents) are stored with **relative paths only**. Each consumer resolves the file in the format it needs: base64 data URI for the LLM, raw bytes for Telegram, HTTP URL for the web interface.
 
@@ -1620,28 +1769,35 @@ Typical scenarios:
 
 ---
 
-## 23. Server Shutdown
+## 24. Server Shutdown
 
 When the server is stopped (Ctrl+C or shutdown signal), the lifespan executes the shutdown sequence:
 
 ```mermaid
 graph TD
-    A[Shutdown signal] --> B[AgentLoop.stop - set stop_event]
-    B --> C[Browser cleanup - close Chrome if open]
-    C --> D[Cancel agent_task]
-    D --> E[CronService.stop - set stop_event]
-    E --> F[Cancel cron_task]
-    F --> G[ChannelManager.stop]
-    G --> H[Cancel outbound dispatch]
-    H --> I[Stop channels - Telegram polling, etc.]
-    I --> J[Shutdown complete]
+    A[Shutdown signal] --> B[HeartbeatService.stop]
+    B --> C[AgentLoop.stop - set stop_event]
+    C --> D[Browser cleanup - close Chrome if open]
+    D --> E[Cancel agent_task]
+    E --> F[CronService.stop - set stop_event]
+    F --> G[Cancel cron_task]
+    G --> H[ChannelManager.stop]
+    H --> I[Cancel outbound dispatch]
+    I --> J["Stop channels (10s timeout each)"]
+    J --> K[Shutdown complete]
 ```
 
-`AgentLoop.stop()`, in addition to setting the `_stop_event`, also calls `browser_tool.cleanup()` if the browser tool is registered. This terminates the entire Chrome process, closing all tabs. Individual subagent tabs are already cleaned up via `close_tab()` in their `finally` blocks (see section 15).
+**HeartbeatService.stop()** cancels the background loop and is the first service to stop — it prevents new heartbeat messages from being queued during shutdown.
+
+**AgentLoop.stop()**, in addition to setting the `_stop_event`, also calls `browser_tool.cleanup()` if the browser tool is registered. This terminates the entire Chrome process, closing all tabs. Individual subagent tabs are already cleaned up via `close_tab()` in their `finally` blocks (see section 15).
+
+**ChannelManager.stop()** stops each channel with a **10-second timeout** (`asyncio.wait_for`). This prevents the shutdown from hanging indefinitely if a channel (e.g., Telegram long-polling) takes too long to close. If a channel exceeds the timeout, the error is logged and shutdown continues with the remaining channels.
+
+**Task state on shutdown:** Tasks that are in the DOING state when the server stops remain persisted as DOING in `tasks.jsonl`. On the next startup, they are recovered and re-queued automatically (see section 18 — Task Recovery on Restart).
 
 ---
 
-## 24. Complete Cycle
+## 25. Complete Cycle
 
 Summary of the complete message flow, from start to finish:
 

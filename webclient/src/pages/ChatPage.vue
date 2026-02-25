@@ -1,11 +1,21 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import Button from 'primevue/button'
 import ChatMessages from '../components/chat/ChatMessages.vue'
 import ChatInput from '../components/chat/ChatInput.vue'
-import { useChatStore } from '../stores/chat'
+import SessionList from '../components/chat/SessionList.vue'
+import { useChatStore, sessionLabel } from '../stores/chat'
 
 const chatStore = useChatStore()
+const isMobile = window.innerWidth <= 768
+const showSessions = ref(!isMobile)
+
+const currentLabel = computed(() => {
+  const match = chatStore.sessions.find(
+    (s) => s.key === chatStore.currentSessionId
+  )
+  return match ? sessionLabel(match.key) : 'Chat'
+})
 
 onMounted(async () => {
   await chatStore.loadHistory(chatStore.currentSessionId)
@@ -19,44 +29,103 @@ async function handleSend(text) {
 function handleNewSession() {
   chatStore.newSession()
 }
+
+async function handleSelectSession(key) {
+  await chatStore.switchSession(key)
+  showSessions.value = false
+}
+
+async function handleDeleteSession(sessionKey) {
+  await chatStore.clearSession(sessionKey)
+}
+
+function toggleSessions() {
+  showSessions.value = !showSessions.value
+}
 </script>
 
 <template>
   <div class="chat-page">
-    <div class="chat-header">
-      <h2>Chat</h2>
-      <Button
-        icon="pi pi-plus"
-        label="New"
-        severity="secondary"
-        text
-        size="small"
-        @click="handleNewSession"
-      />
-    </div>
-    <ChatMessages
-      :messages="chatStore.messages"
-      :streaming="chatStore.streaming"
-      :current-tool-use="chatStore.currentToolUse"
+    <Teleport to="body">
+      <div v-if="showSessions" class="mobile-overlay" @click="showSessions = false"></div>
+    </Teleport>
+    <SessionList
+      v-if="showSessions"
+      :sessions="chatStore.sessions"
+      :current-session-id="chatStore.currentSessionId"
+      class="chat-sessions"
+      @select="handleSelectSession"
+      @delete="handleDeleteSession"
+      @new="handleNewSession"
     />
-    <ChatInput @send="handleSend" />
+    <div class="chat-main">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <Button
+            :icon="showSessions ? 'pi pi-chevron-left' : 'pi pi-list'"
+            severity="secondary"
+            text
+            rounded
+            size="small"
+            @click="toggleSessions"
+            title="Toggle sessions"
+          />
+          <h2>{{ currentLabel }}</h2>
+        </div>
+        <Button
+          icon="pi pi-plus"
+          label="New"
+          severity="secondary"
+          text
+          size="small"
+          @click="handleNewSession"
+        />
+      </div>
+      <ChatMessages
+        :messages="chatStore.messages"
+        :streaming="chatStore.streaming"
+        :current-tool-use="chatStore.currentToolUse"
+      />
+      <ChatInput @send="handleSend" />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .chat-page {
   display: flex;
-  flex-direction: column;
   height: 100%;
+  position: relative;
+}
+
+.chat-sessions {
+  width: 260px;
+  min-width: 260px;
+  flex-shrink: 0;
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 0 1rem;
+  height: 3.25rem;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .chat-header h2 {
@@ -64,9 +133,31 @@ function handleNewSession() {
   font-size: 1.1rem;
 }
 
+.mobile-overlay {
+  display: none;
+}
+
 @media (max-width: 768px) {
-  .chat-header {
-    padding: 0.5rem 0.75rem;
+  .chat-sessions {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 280px;
+    min-width: 280px;
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.15);
+  }
+
+  .mobile-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 99;
+    background: rgba(0, 0, 0, 0.3);
   }
 
   .chat-header h2 {
