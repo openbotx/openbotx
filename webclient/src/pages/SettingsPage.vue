@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Tabs from 'primevue/tabs'
 import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
@@ -12,27 +12,32 @@ import Password from 'primevue/password'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
-import Divider from 'primevue/divider'
+import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
+import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
 import { useConfigStore } from '../stores/config'
+import { useChannelsStore } from '../stores/channels'
 import { useApi } from '../composables/useApi'
+import jsYaml from 'js-yaml'
 
 const toast = useToast()
 const configStore = useConfigStore()
+const channelsStore = useChannelsStore()
 const api = useApi()
 
 const bot = ref({ name: '', description: '' })
-const agents = ref({})
-const newAgentName = ref('')
-const image = ref({ provider: 'gemini', model: 'gemini-3-pro-image-preview', api_key: '' })
-const auth = ref({ username: 'admin', password: '' })
+const auth = ref({ username: 'admin', password: '', secret_key: '' })
 const tools = ref({ restrict_to_workspace: true, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 } })
 const storage = ref({ type: 'local', s3_bucket: '', s3_region: 'us-east-1', s3_access_key: '', s3_secret_key: '' })
 const rawYaml = ref('')
 const restarting = ref(false)
 
-const defaultParams = { max_tokens: 8192, temperature: 0.1, max_iterations: 40, memory_window: 100 }
+const telegramToken = ref('')
+const telegramUsers = ref('')
+
+const showSaveConfirm = ref(false)
+const showRestartConfirm = ref(false)
 
 const storageTypes = ref([
   { label: 'Local', value: 'local' },
@@ -40,32 +45,16 @@ const storageTypes = ref([
 ])
 
 const isS3 = computed(() => storage.value.type === 's3')
-const agentEntries = computed(() => Object.entries(agents.value))
 
 onMounted(async () => {
-  await configStore.loadConfig()
+  await Promise.all([
+    configStore.loadConfig(),
+    channelsStore.loadChannels(),
+    loadYaml(),
+  ])
   if (configStore.config) {
     bot.value = { ...configStore.config.bot }
 
-    const cfgAgents = configStore.config.agents || {}
-    const loaded = {}
-    for (const [key, val] of Object.entries(cfgAgents)) {
-      loaded[key] = {
-        model: val.model || '',
-        params: { ...defaultParams, ...(val.params || {}) },
-      }
-    }
-    if (!loaded.main) {
-      loaded.main = { model: 'anthropic/claude-sonnet-4-20250514', params: { ...defaultParams } }
-    }
-    agents.value = loaded
-
-    const cfgImage = configStore.config.image || {}
-    image.value = {
-      provider: cfgImage.provider || 'gemini',
-      model: cfgImage.model || 'gemini-3-pro-image-preview',
-      api_key: '',
-    }
     const cfgAuth = configStore.config.auth || {}
     auth.value = { username: cfgAuth.username || 'admin', password: '', secret_key: '' }
     tools.value = {
@@ -93,62 +82,76 @@ async function saveSection(section, data) {
   }
 }
 
-function addAgent() {
-  const name = newAgentName.value.trim()
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  if (!slug) {
-    toast.add({ severity: 'warn', summary: 'Invalid', detail: 'Enter a valid agent name', life: 2000 })
-    return
+async function loadYaml() {
+  try {
+    const res = await api.get('/config/yaml')
+    rawYaml.value = res.yaml || ''
+  } catch {
+    rawYaml.value = ''
   }
-  if (agents.value[slug]) {
-    toast.add({ severity: 'warn', summary: 'Exists', detail: `Agent "${slug}" already exists`, life: 2000 })
-    return
+}
+
+function validateYaml() {
+  try {
+    jsYaml.load(rawYaml.value)
+    toast.add({ severity: 'success', summary: 'Valid', detail: 'YAML syntax is correct', life: 2000 })
+  } catch (e) {
+    const line = e.mark ? e.mark.line + 1 : null
+    const detail = line ? `Line ${line}: ${e.reason || e.message}` : e.message
+    toast.add({ severity: 'error', summary: 'Invalid YAML', detail, life: 5000 })
   }
-  agents.value[slug] = { model: 'anthropic/claude-sonnet-4-20250514', params: { ...defaultParams } }
-  newAgentName.value = ''
-}
-
-function removeAgent(key) {
-  if (key === 'main') return
-  delete agents.value[key]
-}
-
-async function saveAgents() {
-  const data = {}
-  for (const [key, val] of Object.entries(agents.value)) {
-    data[key] = { model: val.model, params: { ...val.params } }
-  }
-  await saveSection('agents', data)
-}
-
-async function saveImage() {
-  await saveSection('image', image.value)
-}
-
-async function loadRawYaml() {
-  await configStore.loadConfig()
-  rawYaml.value = JSON.stringify(configStore.config, null, 2)
 }
 
 async function saveAdvanced() {
+  showSaveConfirm.value = false
   try {
-    const parsed = JSON.parse(rawYaml.value)
-    await api.put('/config/advanced', { data: parsed })
+    const res = await api.put('/config/advanced', { data: { yaml: rawYaml.value } })
+    if (res.error) {
+      const detail = res.line ? `Line ${res.line}: ${res.error}` : res.error
+      toast.add({ severity: 'error', summary: 'Error', detail, life: 5000 })
+      return
+    }
     toast.add({ severity: 'success', summary: 'Saved', detail: 'Config updated', life: 2000 })
+    await loadYaml()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: e.message, life: 3000 })
   }
 }
 
 async function restartServices() {
+  showRestartConfirm.value = false
   restarting.value = true
   try {
     await api.post('/config/restart')
     toast.add({ severity: 'success', summary: 'Restarted', detail: 'All services restarted', life: 2000 })
+    await channelsStore.loadChannels()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: e.message, life: 3000 })
   } finally {
     restarting.value = false
+  }
+}
+
+async function saveTelegram() {
+  const config = {}
+  if (telegramToken.value) config.token = telegramToken.value
+  config.allowed_users = telegramUsers.value.split(',').map((s) => s.trim()).filter(Boolean)
+  await channelsStore.updateChannel('telegram', config)
+  toast.add({ severity: 'success', summary: 'Saved', detail: 'Telegram config updated', life: 2000 })
+}
+
+async function toggleTelegram(running) {
+  try {
+    if (running) {
+      await channelsStore.stopChannel('telegram')
+      toast.add({ severity: 'success', summary: 'Stopped', detail: 'Telegram channel stopped', life: 2000 })
+    } else {
+      await channelsStore.startChannel('telegram')
+      toast.add({ severity: 'success', summary: 'Started', detail: 'Telegram channel started', life: 2000 })
+    }
+  } catch {
+    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to toggle Telegram channel', life: 3000 })
+    await channelsStore.loadChannels()
   }
 }
 </script>
@@ -162,7 +165,7 @@ async function restartServices() {
       <Tabs value="bot" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
         <TabList>
           <Tab value="bot">Bot</Tab>
-          <Tab value="agents">Agents</Tab>
+          <Tab value="channels">Channels</Tab>
           <Tab value="storage">Storage</Tab>
           <Tab value="tools">Tools</Tab>
           <Tab value="auth">Auth</Tab>
@@ -183,65 +186,45 @@ async function restartServices() {
             </div>
           </TabPanel>
 
-          <TabPanel value="agents" :pt="{ root: { style: { minHeight: '100%' } } }">
+          <TabPanel value="channels" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
-              <div v-for="([key, agent]) in agentEntries" :key="key" class="agent-block">
-                <div class="agent-header">
-                  <h3>{{ key }}</h3>
-                  <Button v-if="key !== 'main'" icon="pi pi-trash" severity="danger" text size="small" @click="removeAgent(key)" />
+              <div class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-globe"></i>
+                  <strong>Web</strong>
+                  <Tag value="running" severity="success" />
+                </div>
+                <p class="channel-desc">Built-in web channel. Always active when the server is running.</p>
+              </div>
+
+              <div class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-send"></i>
+                  <strong>Telegram</strong>
+                  <Tag
+                    :value="channelsStore.channels?.telegram?.running ? 'running' : 'stopped'"
+                    :severity="channelsStore.channels?.telegram?.running ? 'success' : 'danger'"
+                  />
                 </div>
                 <div class="form-group">
-                  <label>Model</label>
-                  <InputText v-model="agent.model" class="w-full" placeholder="anthropic/claude-sonnet-4-20250514" />
+                  <label>Bot Token</label>
+                  <Password v-model="telegramToken" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label>Temperature</label>
-                    <InputNumber v-model="agent.params.temperature" :min="0" :max="2" :step="0.1" :min-fraction-digits="1" class="w-full" />
-                  </div>
-                  <div class="form-group">
-                    <label>Max Tokens</label>
-                    <InputNumber v-model="agent.params.max_tokens" :step="1024" class="w-full" />
-                  </div>
+                <div class="form-group">
+                  <label>Allowed Users (comma-separated)</label>
+                  <InputText v-model="telegramUsers" placeholder="user1, user2" class="w-full" />
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label>Max Iterations</label>
-                    <InputNumber v-model="agent.params.max_iterations" class="w-full" />
-                  </div>
-                  <div class="form-group">
-                    <label>Memory Window</label>
-                    <InputNumber v-model="agent.params.memory_window" class="w-full" />
-                  </div>
+                <div class="button-row">
+                  <Button label="Save" icon="pi pi-save" size="small" severity="secondary" @click="saveTelegram" />
+                  <Button
+                    :label="channelsStore.channels?.telegram?.running ? 'Stop' : 'Start'"
+                    :icon="channelsStore.channels?.telegram?.running ? 'pi pi-stop' : 'pi pi-play'"
+                    :severity="channelsStore.channels?.telegram?.running ? 'danger' : 'success'"
+                    size="small"
+                    @click="toggleTelegram(channelsStore.channels?.telegram?.running)"
+                  />
                 </div>
-                <Divider />
               </div>
-
-              <div class="add-agent-row">
-                <InputText v-model="newAgentName" placeholder="New agent name" class="add-agent-input" @keyup.enter="addAgent" />
-                <Button label="Add Agent" icon="pi pi-plus" size="small" severity="secondary" @click="addAgent" />
-              </div>
-
-              <div class="save-row">
-                <Button label="Save Agents" icon="pi pi-save" size="small" @click="saveAgents" />
-              </div>
-
-              <Divider />
-
-              <h3>Image Generation</h3>
-              <div class="form-group">
-                <label>Provider</label>
-                <InputText v-model="image.provider" class="w-full" placeholder="gemini" />
-              </div>
-              <div class="form-group">
-                <label>Model</label>
-                <InputText v-model="image.model" class="w-full" placeholder="gemini-3-pro-image-preview" />
-              </div>
-              <div class="form-group">
-                <label>API Key</label>
-                <Password v-model="image.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
-              </div>
-              <Button label="Save Image" icon="pi pi-save" size="small" @click="saveImage" />
             </div>
           </TabPanel>
 
@@ -286,7 +269,6 @@ async function restartServices() {
                 <label>Exec Timeout (seconds)</label>
                 <InputNumber v-model="tools.exec.timeout" class="w-full" />
               </div>
-              <Divider />
               <h3>Web Search</h3>
               <div class="form-group">
                 <label>Brave API Key</label>
@@ -316,23 +298,42 @@ async function restartServices() {
           </TabPanel>
 
           <TabPanel value="advanced" :pt="{ root: { style: { minHeight: '100%' } } }">
-            <div class="tab-content">
+            <div class="tab-content tab-content-wide">
               <Message severity="warn" :closable="false" class="tab-message">Edit raw config with care. Invalid changes may break the application.</Message>
               <div class="form-group">
-                <Button label="Load Current Config" icon="pi pi-refresh" size="small" severity="secondary" @click="loadRawYaml" />
+                <div class="button-row">
+                  <Button label="Reload" icon="pi pi-refresh" size="small" severity="secondary" @click="loadYaml" />
+                  <Button label="Validate" icon="pi pi-check-circle" size="small" severity="info" @click="validateYaml" :disabled="!rawYaml" />
+                </div>
               </div>
               <div class="form-group">
-                <Textarea v-model="rawYaml" rows="20" class="w-full raw-editor" auto-resize />
+                <Textarea v-model="rawYaml" rows="24" class="w-full raw-editor" auto-resize />
               </div>
               <div class="button-row">
-                <Button label="Save Config" icon="pi pi-save" size="small" @click="saveAdvanced" :disabled="!rawYaml" />
-                <Button label="Restart Services" icon="pi pi-replay" size="small" severity="warn" :loading="restarting" @click="restartServices" />
+                <Button label="Save Config" icon="pi pi-save" size="small" @click="showSaveConfirm = true" :disabled="!rawYaml" />
+                <Button label="Restart Services" icon="pi pi-replay" size="small" severity="warn" :loading="restarting" @click="showRestartConfirm = true" />
               </div>
             </div>
           </TabPanel>
         </TabPanels>
       </Tabs>
     </div>
+
+    <Dialog v-model:visible="showSaveConfirm" header="Confirm Save" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <p>Are you sure? This will overwrite the current configuration.</p>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showSaveConfirm = false" />
+        <Button label="Save" icon="pi pi-save" size="small" @click="saveAdvanced" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showRestartConfirm" header="Confirm Restart" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <p>Are you sure? All services will be restarted.</p>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showRestartConfirm = false" />
+        <Button label="Restart" icon="pi pi-replay" severity="warn" size="small" @click="restartServices" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -365,6 +366,10 @@ async function restartServices() {
   padding: 1rem;
 }
 
+.tab-content-wide {
+  max-width: 800px;
+}
+
 .tab-content h3 {
   margin: 0 0 1rem;
   font-size: 1rem;
@@ -394,39 +399,29 @@ async function restartServices() {
   flex: 1;
 }
 
-.agent-block {
-  margin-bottom: 0.5rem;
-}
-
-.agent-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.agent-header h3 {
-  margin: 0;
-}
-
-.add-agent-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.add-agent-input {
-  flex: 1;
-}
-
-.save-row {
-  margin-bottom: 1rem;
-}
-
 .button-row {
   display: flex;
   gap: 0.5rem;
+}
+
+.channel-block {
+  padding: 1rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
+  margin-bottom: 1rem;
+}
+
+.channel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.channel-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
 }
 
 .raw-editor {

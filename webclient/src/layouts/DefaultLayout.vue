@@ -12,7 +12,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <Toast position="bottom-right" :breakpoints="{ '768px': { width: '100%', right: '0', left: '0' } }" />
+  <Toast position="bottom-right" :breakpoints="{ '768px': { width: 'calc(100% - 1.5rem)', right: '0.75rem', left: '0.75rem', bottom: '0.75rem' } }" />
   <div class="layout">
     <AppSidebar />
     <main class="layout-main">

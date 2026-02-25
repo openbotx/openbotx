@@ -3,6 +3,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
+import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
+import Button from 'primevue/button'
 import FileTree from '../components/files/FileTree.vue'
 import MarkdownEditor from '../components/files/MarkdownEditor.vue'
 import TextEditor from '../components/files/TextEditor.vue'
@@ -14,6 +17,14 @@ const api = useApi()
 const toast = useToast()
 const files = ref([])
 const currentFile = ref(null)
+
+const showNewFileDialog = ref(false)
+const showNewFolderDialog = ref(false)
+const showDeleteDialog = ref(false)
+const newFileName = ref('')
+const newFolderName = ref('')
+const createParentPath = ref('')
+const deleteTarget = ref(null)
 
 const isMarkdown = computed(() => {
   const p = currentFile.value?.path || ''
@@ -48,6 +59,79 @@ async function saveFile(content) {
 function closeFile() {
   currentFile.value = null
 }
+
+function openCreateFile(parentPath) {
+  createParentPath.value = parentPath
+  newFileName.value = ''
+  showNewFileDialog.value = true
+}
+
+function openCreateFolder(parentPath) {
+  createParentPath.value = parentPath
+  newFolderName.value = ''
+  showNewFolderDialog.value = true
+}
+
+function openDeleteConfirm(item) {
+  deleteTarget.value = item
+  showDeleteDialog.value = true
+}
+
+async function confirmCreateFile() {
+  const name = newFileName.value.trim()
+  if (!name) return
+  const path = createParentPath.value ? `${createParentPath.value}/${name}` : name
+  try {
+    const res = await api.post(`/files/create/${path}`)
+    if (res.error) {
+      toast.add({ severity: 'error', summary: 'Error', detail: res.error, life: 3000 })
+      return
+    }
+    toast.add({ severity: 'success', summary: 'Created', detail: path, life: 2000 })
+    showNewFileDialog.value = false
+    await loadFiles()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: e.message, life: 3000 })
+  }
+}
+
+async function confirmCreateFolder() {
+  const name = newFolderName.value.trim()
+  if (!name) return
+  const path = createParentPath.value ? `${createParentPath.value}/${name}` : name
+  try {
+    const res = await api.post(`/files/mkdir/${path}`)
+    if (res.error) {
+      toast.add({ severity: 'error', summary: 'Error', detail: res.error, life: 3000 })
+      return
+    }
+    toast.add({ severity: 'success', summary: 'Created', detail: path, life: 2000 })
+    showNewFolderDialog.value = false
+    await loadFiles()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: e.message, life: 3000 })
+  }
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value) return
+  const path = deleteTarget.value.path
+  try {
+    const res = await api.del(`/files/${path}`)
+    if (res.error) {
+      toast.add({ severity: 'error', summary: 'Error', detail: res.error, life: 3000 })
+      return
+    }
+    toast.add({ severity: 'success', summary: 'Deleted', detail: path, life: 2000 })
+    if (currentFile.value?.path === path || currentFile.value?.path?.startsWith(path + '/')) {
+      currentFile.value = null
+    }
+    showDeleteDialog.value = false
+    await loadFiles()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: e.message, life: 3000 })
+  }
+}
 </script>
 
 <template>
@@ -60,7 +144,13 @@ function closeFile() {
       <Splitter class="files-splitter">
         <SplitterPanel :size="30" :min-size="20">
           <div class="tree-panel">
-            <FileTree :files="files" @select="openFile" />
+            <FileTree
+              :files="files"
+              @select="openFile"
+              @create-file="openCreateFile"
+              @create-folder="openCreateFolder"
+              @delete="openDeleteConfirm"
+            />
           </div>
         </SplitterPanel>
         <SplitterPanel :size="70" :min-size="40">
@@ -103,7 +193,13 @@ function closeFile() {
 
     <div class="files-mobile">
       <div v-if="!currentFile" class="tree-panel-mobile">
-        <FileTree :files="files" @select="openFile" />
+        <FileTree
+          :files="files"
+          @select="openFile"
+          @create-file="openCreateFile"
+          @create-folder="openCreateFolder"
+          @delete="openDeleteConfirm"
+        />
       </div>
       <div v-else class="editor-panel-mobile">
         <button class="back-btn" @click="closeFile">
@@ -138,6 +234,46 @@ function closeFile() {
         />
       </div>
     </div>
+
+    <Dialog v-model:visible="showNewFileDialog" header="New File" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <div class="dialog-content">
+        <label>File name</label>
+        <InputText v-model="newFileName" class="w-full" placeholder="example.txt" autofocus @keyup.enter="confirmCreateFile" />
+        <small v-if="createParentPath" class="dialog-hint">In: {{ createParentPath }}/</small>
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showNewFileDialog = false" />
+        <Button label="Create" icon="pi pi-check" size="small" @click="confirmCreateFile" :disabled="!newFileName.trim()" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showNewFolderDialog" header="New Folder" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <div class="dialog-content">
+        <label>Folder name</label>
+        <InputText v-model="newFolderName" class="w-full" placeholder="my-folder" autofocus @keyup.enter="confirmCreateFolder" />
+        <small v-if="createParentPath" class="dialog-hint">In: {{ createParentPath }}/</small>
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showNewFolderDialog = false" />
+        <Button label="Create" icon="pi pi-check" size="small" @click="confirmCreateFolder" :disabled="!newFolderName.trim()" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showDeleteDialog" header="Confirm Delete" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <div class="dialog-content" v-if="deleteTarget">
+        <p>
+          Are you sure you want to delete
+          <strong>{{ deleteTarget.name }}</strong>?
+        </p>
+        <p v-if="deleteTarget.type === 'directory'" class="delete-warning">
+          This will recursively delete the folder and all its contents.
+        </p>
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showDeleteDialog = false" />
+        <Button label="Delete" icon="pi pi-trash" severity="danger" size="small" @click="confirmDelete" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -171,7 +307,6 @@ function closeFile() {
 }
 
 .tree-panel {
-  padding: 0.5rem;
   overflow-y: auto;
   height: 100%;
 }
@@ -190,6 +325,27 @@ function closeFile() {
   display: none;
 }
 
+.dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dialog-content label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.dialog-hint {
+  color: var(--p-text-muted-color);
+}
+
+.delete-warning {
+  color: var(--p-red-500);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 @media (max-width: 768px) {
   .files-desktop {
     display: none;
@@ -203,7 +359,7 @@ function closeFile() {
   }
 
   .tree-panel-mobile {
-    padding: 0.5rem;
+    padding: 0;
   }
 
   .editor-panel-mobile {

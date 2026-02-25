@@ -145,6 +145,7 @@ class ChannelManager:
     async def _route_message(self, msg: OutboundMessage) -> None:
         is_progress = msg.metadata.get("progress", False)
         is_tool_hint = msg.metadata.get("tool_hint", False)
+        is_forwarded_input = msg.metadata.get("forwarded_input", False)
 
         if is_progress and not self._send_progress:
             return
@@ -158,6 +159,11 @@ class ChannelManager:
                 await channel.send(msg)
             except Exception as e:
                 logger.error("Failed to send to %s: %s", msg.channel, e)
+
+        # Forwarded input messages only go to the channel handler,
+        # the web UI already has the user's message locally
+        if is_forwarded_input:
+            return
 
         # Always broadcast to WebSocket so the web UI mirrors all sessions
         if self._ws_manager:

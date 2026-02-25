@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from openbotx.bus.events import InboundMessage
+from openbotx.bus.events import InboundMessage, OutboundMessage
 
 router = APIRouter()
 
@@ -36,6 +36,19 @@ async def send_message(req: ChatRequest, request: Request):
         content=req.message,
         metadata={"task_id": task.id},
     )
+
+    # Forward the user message to the target channel (e.g. Telegram)
+    # so the recipient sees what was asked from the web UI
+    if channel != "web":
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=f"[Web] {req.message}",
+                metadata={"forwarded_input": True},
+            )
+        )
+
     await bus.publish_inbound(msg)
 
     return {"task_id": task.id, "session_id": req.session_id}

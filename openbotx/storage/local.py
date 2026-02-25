@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import base64
 import mimetypes
+import shutil
 from pathlib import Path
 
-from openbotx.storage.base import StorageProvider
+from openbotx.storage.base import DirEntry, StorageProvider
 
 
 class LocalStorage(StorageProvider):
@@ -43,6 +46,35 @@ class LocalStorage(StorageProvider):
 
     async def exists(self, path: str) -> bool:
         return self._resolve(path).exists()
+
+    async def list_dir(self, path: str = "") -> list[DirEntry]:
+        base = self._resolve(path) if path else self.base_path
+        if not base.is_dir():
+            return []
+        entries = []
+        for item in sorted(base.iterdir()):
+            rel = str(item.relative_to(self.base_path))
+            if item.is_dir():
+                entries.append(DirEntry(name=item.name, path=rel, is_dir=True))
+            else:
+                entries.append(
+                    DirEntry(name=item.name, path=rel, is_dir=False, size=item.stat().st_size)
+                )
+        return entries
+
+    async def create_dir(self, path: str) -> None:
+        self._resolve(path).mkdir(parents=True, exist_ok=True)
+
+    async def delete_dir(self, path: str) -> None:
+        target = self._resolve(path)
+        if target.is_dir():
+            shutil.rmtree(target)
+
+    async def size(self, path: str) -> int:
+        return self._resolve(path).stat().st_size
+
+    async def is_directory(self, path: str) -> bool:
+        return self._resolve(path).is_dir()
 
     def get_url(self, path: str) -> str:
         return f"{self._public_url}/{path}"

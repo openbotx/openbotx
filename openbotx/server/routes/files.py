@@ -1,9 +1,11 @@
 import mimetypes
-from pathlib import Path
+import posixpath
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+
+from openbotx.storage.base import StorageProvider
 
 router = APIRouter()
 
@@ -44,31 +46,30 @@ def _is_hidden(name: str) -> bool:
 
 
 def _has_hidden_component(path: str) -> bool:
-    return any(_is_hidden(part) for part in Path(path).parts)
-
-
-def _get_project_root(request: Request) -> Path:
-    return request.app.state.config.project_path
+    parts = path.replace("\\", "/").split("/")
+    return any(_is_hidden(part) for part in parts if part)
 
 
 class AccessDeniedError(Exception):
     pass
 
 
-def _safe_path(root: Path, path: str) -> Path:
-    if _has_hidden_component(path):
+def _safe_storage_path(path: str) -> str:
+    normalized = posixpath.normpath(path)
+    if normalized.startswith("..") or normalized.startswith("/"):
         raise AccessDeniedError("Access denied")
-    resolved = (root / path).resolve()
-    try:
-        resolved.relative_to(root.resolve())
-    except ValueError:
+    if _has_hidden_component(normalized):
         raise AccessDeniedError("Access denied")
-    return resolved
+    return normalized
 
 
-def _classify_file(file_path: Path) -> tuple[str, str | None]:
-    mime, _ = mimetypes.guess_type(file_path.name)
-    ext = file_path.suffix.lower()
+def _get_storage(request: Request) -> StorageProvider:
+    return request.app.state.storage
+
+
+def _classify_file(name: str) -> tuple[str, str | None]:
+    mime, _ = mimetypes.guess_type(name)
+    ext = posixpath.splitext(name)[1].lower()
 
     if ext in EDITABLE_EXTENSIONS or (mime and mime.startswith("text/")):
         return "text", mime
@@ -83,84 +84,124 @@ def _classify_file(file_path: Path) -> tuple[str, str | None]:
 
 @router.get("")
 async def list_files(request: Request):
-    root = _get_project_root(request)
+    storage = _get_storage(request)
 
-    def _tree(directory: Path) -> list[dict]:
+    async def _tree(dir_path: str) -> list[dict]:
         items = []
-        if not directory.exists():
-            return items
         try:
-            entries = sorted(directory.iterdir())
-        except PermissionError:
+            entries = await storage.list_dir(dir_path)
+        except Exception:
             return items
-        for item in entries:
-            if _is_hidden(item.name):
+        for entry in entries:
+            if _is_hidden(entry.name):
                 continue
-            rel = str(item.relative_to(root))
-            try:
-                if item.is_dir():
-                    items.append(
-                        {
-                            "name": item.name,
-                            "path": rel,
-                            "type": "directory",
-                            "children": _tree(item),
-                        }
-                    )
-                else:
-                    items.append(
-                        {
-                            "name": item.name,
-                            "path": rel,
-                            "type": "file",
-                            "size": item.stat().st_size,
-                        }
-                    )
-            except (PermissionError, OSError):
-                continue
+            if entry.is_dir:
+                items.append(
+                    {
+                        "name": entry.name,
+                        "path": entry.path,
+                        "type": "directory",
+                        "children": await _tree(entry.path),
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        "name": entry.name,
+                        "path": entry.path,
+                        "type": "file",
+                        "size": entry.size,
+                    }
+                )
         return items
 
-    return _tree(root)
+    return await _tree("")
 
 
 @router.get("/download/{path:path}")
 async def download_file(path: str, request: Request):
-    root = _get_project_root(request)
+    storage = _get_storage(request)
     try:
-        file_path = _safe_path(root, path)
-        if not file_path.exists():
+        safe_path = _safe_storage_path(path)
+        if not await storage.exists(safe_path):
             return {"error": "File not found"}
-        return FileResponse(file_path)
+
+        from openbotx.storage.local import LocalStorage
+
+        if isinstance(storage, LocalStorage):
+            file_path = storage._resolve(safe_path)
+            return FileResponse(file_path)
+
+        data = await storage.read(safe_path)
+        mime, _ = mimetypes.guess_type(safe_path)
+        return StreamingResponse(
+            iter([data]),
+            media_type=mime or "application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{posixpath.basename(safe_path)}"'
+            },
+        )
     except AccessDeniedError:
         return {"error": "Access denied"}
 
 
+@router.post("/mkdir/{path:path}")
+async def create_directory(path: str, request: Request):
+    storage = _get_storage(request)
+    try:
+        safe_path = _safe_storage_path(path)
+        await storage.create_dir(safe_path)
+        return {"status": "ok", "path": safe_path}
+    except AccessDeniedError:
+        return {"error": "Access denied"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/create/{path:path}")
+async def create_file(path: str, request: Request):
+    storage = _get_storage(request)
+    try:
+        safe_path = _safe_storage_path(path)
+        if await storage.exists(safe_path):
+            return {"error": "File already exists"}
+        await storage.write(safe_path, b"")
+        return {"status": "ok", "path": safe_path}
+    except AccessDeniedError:
+        return {"error": "Access denied"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/{path:path}")
 async def read_file(path: str, request: Request):
-    root = _get_project_root(request)
+    storage = _get_storage(request)
     try:
-        file_path = _safe_path(root, path)
-        if not file_path.exists():
+        safe_path = _safe_storage_path(path)
+        if not await storage.exists(safe_path):
             return {"error": "File not found"}
-        if file_path.is_dir():
+        if await storage.is_directory(safe_path):
             return {"error": "Path is a directory"}
 
-        file_type, mime = _classify_file(file_path)
+        file_type, mime = _classify_file(safe_path)
 
         if file_type == "text":
-            content = file_path.read_text(encoding="utf-8")
-            return {"path": path, "type": "text", "content": content}
+            data = await storage.read(safe_path)
+            content = data.decode("utf-8")
+            return {"path": safe_path, "type": "text", "content": content}
 
-        if path.startswith("public/"):
-            url = f"/{path}"
+        file_size = await storage.size(safe_path)
+
+        if safe_path.startswith("public/"):
+            url = f"/{safe_path}"
         else:
-            url = f"/api/files/download/{path}"
+            url = f"/api/files/download/{safe_path}"
 
         return {
-            "path": path,
+            "path": safe_path,
             "type": file_type,
             "mime": mime,
-            "size": file_path.stat().st_size,
+            "size": file_size,
             "url": url,
         }
     except AccessDeniedError:
@@ -171,12 +212,11 @@ async def read_file(path: str, request: Request):
 
 @router.put("/{path:path}")
 async def write_file(path: str, body: FileContent, request: Request):
-    root = _get_project_root(request)
+    storage = _get_storage(request)
     try:
-        file_path = _safe_path(root, path)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(body.content, encoding="utf-8")
-        return {"status": "ok", "path": path}
+        safe_path = _safe_storage_path(path)
+        await storage.write(safe_path, body.content.encode("utf-8"))
+        return {"status": "ok", "path": safe_path}
     except AccessDeniedError:
         return {"error": "Access denied"}
     except Exception as e:
@@ -184,13 +224,19 @@ async def write_file(path: str, body: FileContent, request: Request):
 
 
 @router.delete("/{path:path}")
-async def delete_file(path: str, request: Request):
-    root = _get_project_root(request)
+async def delete_path(path: str, request: Request):
+    storage = _get_storage(request)
     try:
-        file_path = _safe_path(root, path)
-        if not file_path.exists():
-            return {"error": "File not found"}
-        file_path.unlink()
+        safe_path = _safe_storage_path(path)
+        if not await storage.exists(safe_path):
+            is_dir = await storage.is_directory(safe_path)
+            if not is_dir:
+                return {"error": "Not found"}
+
+        if await storage.is_directory(safe_path):
+            await storage.delete_dir(safe_path)
+        else:
+            await storage.delete(safe_path)
         return {"status": "deleted"}
     except AccessDeniedError:
         return {"error": "Access denied"}

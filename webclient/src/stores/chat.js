@@ -78,6 +78,13 @@ export const useChatStore = defineStore('chat', () => {
     if (!_isCurrentSession(data)) return
     streaming.value = false
     currentToolUse.value = null
+    // Deduplicate — loadHistory may have already added this message
+    if (data.task_id) {
+      const exists = messages.value.some(
+        (m) => m.role === 'assistant' && m.task_id === data.task_id
+      )
+      if (exists) return
+    }
     messages.value.push({
       role: 'assistant',
       content: data.content,

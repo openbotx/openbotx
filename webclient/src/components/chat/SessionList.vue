@@ -183,6 +183,12 @@ function formatTime(iso) {
   opacity: 1;
 }
 
+@media (hover: none) {
+  .session-item-delete {
+    opacity: 1;
+  }
+}
+
 .session-list-empty {
   padding: 1.5rem;
   text-align: center;

@@ -84,6 +84,8 @@ Event types:
 | `chat:message`     | `{ content, chat_id, task_id }`            | Final response delivered to user   |
 | `task:created`     | Full task object                           | New task created                   |
 | `task:updated`     | Full task object                           | Task state change                  |
+| `sessions:updated` | `{}`                                       | Session list changed (reload sidebar) |
+| `channel:status`   | `{ name, running }`                        | Channel connection status changed  |
 
 The WebSocket endpoint also accepts `chat:send` messages from the browser, which are converted to `InboundMessage` objects and published to the message bus.
 
@@ -105,12 +107,12 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `routes/auth.py`    | Login endpoint. Issues JWT tokens.                                                          |
 | `routes/chat.py`    | Chat API (send messages, list/manage sessions).                                             |
 | `routes/tasks.py`   | Task CRUD and state management.                                                             |
-| `routes/files.py`   | File API: tree listing, read (returns JSON with type-based content or metadata), download (raw binary), write, and delete. Classifies files as `text`, `image`, `video`, `audio`, or `binary`. |
+| `routes/files.py`   | File API: tree listing, read (returns JSON with type-based content or metadata), download (raw binary), create file, create directory, write, and delete (files and directories). Uses `StorageProvider` abstraction for all operations. Classifies files as `text`, `image`, `video`, `audio`, or `binary`. |
 | `routes/skills.py`  | List and load skills.                                                                       |
-| `routes/channels.py`| Channel status, start/stop control.                                                         |
+| `routes/channels.py`| Channel status, configuration, start/stop control. Persists `enabled` state on start/stop for auto-start on boot. |
 | `routes/providers.py`| Provider listing and configuration.                                                        |
 | `routes/scheduler.py`| Cron job management API.                                                                   |
-| `routes/config.py`  | Read and update platform configuration.                                                     |
+| `routes/config.py`  | Read and update platform configuration. Includes YAML export, YAML validation, and service restart. |
 | `routes/system.py`  | System info (version, health).                                                              |
 
 The built web client (`webclient/dist/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles).
@@ -318,13 +320,13 @@ Key configuration sections:
 
 **Location:** `openbotx/storage/`
 
-Pluggable storage backends for workspace files.
+Pluggable storage backends for workspace files. The `StorageProvider` abstraction supports both file and directory operations, allowing the Files API and other components to work uniformly across all backends.
 
 | File        | Purpose                                                |
 | ----------- | ------------------------------------------------------ |
-| `base.py`   | Abstract storage interface.                            |
-| `local.py`  | Local filesystem storage within the workspace.         |
-| `s3.py`     | AWS S3 storage backend.                                |
+| `base.py`   | Abstract `StorageProvider` interface and `DirEntry` dataclass. Defines methods for file I/O (`read`, `write`, `delete`, `list`, `exists`, `size`) and directory operations (`list_dir`, `create_dir`, `delete_dir`, `is_directory`). |
+| `local.py`  | Local filesystem storage. Uses `Path` operations and `shutil.rmtree` for recursive directory deletion. |
+| `s3.py`     | AWS S3 storage backend. Uses `list_objects_v2` with `Delimiter` for directory listing, paginated batch deletion for directories. |
 
 ### Web Client
 
@@ -346,12 +348,10 @@ Pages:
 | ---------- | ----------------------------------------------- |
 | Chat       | Main conversation interface with session list panel, real-time updates, and session-aware message filtering. Users can switch between sessions (including heartbeat). |
 | TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns |
-| Files      | File browser with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. |
+| Files      | File manager with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. Supports creating files, creating folders, and deleting files/folders with confirmation dialogs. |
 | Skills     | View and manage agent skills                    |
-| Channels   | Monitor and control communication channels      |
-| Providers  | Configure LLM providers and API keys            |
 | Scheduler  | Manage cron jobs                                |
-| Settings   | Platform configuration                          |
+| Settings   | Platform configuration with tabs: Bot, Channels (Telegram start/stop and config), Storage, Tools, Auth, and Advanced (YAML editor with validation and confirmation dialogs). Providers and agents are managed via the Advanced YAML editor. |
 | Login      | Authentication                                  |
 
 ---

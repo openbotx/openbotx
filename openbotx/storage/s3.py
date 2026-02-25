@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import mimetypes
 from pathlib import Path
 
-from openbotx.storage.base import StorageProvider
+from openbotx.storage.base import DirEntry, StorageProvider
 
 
 class S3Storage(StorageProvider):
@@ -49,6 +51,79 @@ class S3Storage(StorageProvider):
             return True
         except Exception:
             return False
+
+    async def list_dir(self, path: str = "") -> list[DirEntry]:
+        prefix = f"{path}/" if path and not path.endswith("/") else path
+        entries: list[DirEntry] = []
+        continuation_token = None
+
+        while True:
+            kwargs: dict = {"Bucket": self.bucket, "Prefix": prefix, "Delimiter": "/"}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+
+            response = await asyncio.to_thread(self._client.list_objects_v2, **kwargs)
+
+            for cp in response.get("CommonPrefixes", []):
+                dir_path = cp["Prefix"].rstrip("/")
+                name = dir_path.rsplit("/", 1)[-1]
+                entries.append(DirEntry(name=name, path=dir_path, is_dir=True))
+
+            for obj in response.get("Contents", []):
+                key = obj["Key"]
+                if key == prefix:
+                    continue
+                name = key.rsplit("/", 1)[-1]
+                if not name:
+                    continue
+                entries.append(DirEntry(name=name, path=key, is_dir=False, size=obj.get("Size", 0)))
+
+            if response.get("IsTruncated"):
+                continuation_token = response.get("NextContinuationToken")
+            else:
+                break
+
+        entries.sort(key=lambda e: e.name)
+        return entries
+
+    async def create_dir(self, path: str) -> None:
+        key = f"{path}/" if not path.endswith("/") else path
+        await asyncio.to_thread(self._client.put_object, Bucket=self.bucket, Key=key, Body=b"")
+
+    async def delete_dir(self, path: str) -> None:
+        prefix = f"{path}/" if not path.endswith("/") else path
+        continuation_token = None
+
+        while True:
+            kwargs: dict = {"Bucket": self.bucket, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+
+            response = await asyncio.to_thread(self._client.list_objects_v2, **kwargs)
+            objects = [{"Key": obj["Key"]} for obj in response.get("Contents", [])]
+
+            if objects:
+                await asyncio.to_thread(
+                    self._client.delete_objects,
+                    Bucket=self.bucket,
+                    Delete={"Objects": objects},
+                )
+
+            if response.get("IsTruncated"):
+                continuation_token = response.get("NextContinuationToken")
+            else:
+                break
+
+    async def size(self, path: str) -> int:
+        response = await asyncio.to_thread(self._client.head_object, Bucket=self.bucket, Key=path)
+        return response.get("ContentLength", 0)
+
+    async def is_directory(self, path: str) -> bool:
+        prefix = f"{path}/" if not path.endswith("/") else path
+        response = await asyncio.to_thread(
+            self._client.list_objects_v2, Bucket=self.bucket, Prefix=prefix, MaxKeys=1
+        )
+        return response.get("KeyCount", 0) > 0
 
     def get_url(self, path: str) -> str:
         return f"https://{self.bucket}.s3.{self._region}.amazonaws.com/{path}"

@@ -179,6 +179,8 @@ class AgentLoop:
             session.clear()
             self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.DONE)
+            if self._ws_manager:
+                await self._ws_manager.broadcast("sessions:updated", {})
             await self._bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,

@@ -1,43 +1,54 @@
 import asyncio
 import logging
 
+import yaml
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from openbotx.helpers.secrets import is_masked_or_empty, is_sensitive_key, mask_dict
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def _is_sensitive_key(name: str) -> bool:
-    n = name.lower()
-    return "key" in n or "token" in n or "secret" in n or "password" in n
-
-
-def _mask_keys(d) -> dict | list:
-    if isinstance(d, list):
-        return [_mask_keys(v) for v in d]
-    if not isinstance(d, dict):
-        return d
-    masked = {}
-    for k, v in d.items():
-        if isinstance(v, (dict, list)):
-            masked[k] = _mask_keys(v)
-        elif _is_sensitive_key(k):
-            masked[k] = "***" if v else ""
-        else:
-            masked[k] = v
-    return masked
 
 
 @router.get("")
 async def get_config(request: Request):
     config = request.app.state.config
     raw = config.model_dump()
-    return _mask_keys(raw)
+    return mask_dict(raw)
+
+
+@router.get("/yaml")
+async def get_config_yaml(request: Request):
+    config = request.app.state.config
+    raw = config.model_dump(mode="json")
+    masked = mask_dict(raw)
+    return {"yaml": yaml.safe_dump(masked, default_flow_style=False, sort_keys=False)}
 
 
 class ConfigSection(BaseModel):
     data: dict
+
+
+class YamlBody(BaseModel):
+    yaml: str
+
+
+@router.post("/validate")
+async def validate_config(body: YamlBody):
+    from openbotx.config.schema import Config
+
+    try:
+        data = yaml.safe_load(body.yaml)
+        if not isinstance(data, dict):
+            return {"valid": False, "error": "YAML must be a mapping"}
+        Config.model_validate(data)
+        return {"valid": True}
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        return {"valid": False, "error": str(e), "line": mark.line + 1 if mark else None}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
 
 
 @router.put("/{section}")
@@ -47,6 +58,10 @@ async def update_section(section: str, body: ConfigSection, request: Request):
     config = request.app.state.config
 
     if section == "advanced":
+        yaml_str = body.data.get("yaml")
+        if yaml_str:
+            return await _save_advanced_yaml(yaml_str, config)
+
         for sect_name, sect_data in body.data.items():
             if not hasattr(config, sect_name) or sect_name.startswith("_"):
                 continue
@@ -77,6 +92,37 @@ async def update_section(section: str, body: ConfigSection, request: Request):
     return {"status": "ok"}
 
 
+async def _save_advanced_yaml(yaml_str: str, config):
+    from openbotx.config.loader import save_config
+    from openbotx.config.schema import Config
+
+    try:
+        data = yaml.safe_load(yaml_str)
+        if not isinstance(data, dict):
+            return {"error": "YAML must be a mapping"}
+        Config.model_validate(data)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        return {"error": str(e), "line": mark.line + 1 if mark else None}
+    except Exception as e:
+        return {"error": str(e)}
+
+    for sect_name, sect_data in data.items():
+        if not hasattr(config, sect_name) or sect_name.startswith("_"):
+            continue
+        if sect_name == "agents" and isinstance(sect_data, dict):
+            _update_agents(config, sect_data)
+        elif sect_name == "providers" and isinstance(sect_data, dict):
+            _update_providers(config, sect_data)
+        elif isinstance(sect_data, dict):
+            current = getattr(config, sect_name, None)
+            if current is not None:
+                _update_section(current, sect_data)
+
+    save_config(config, config._config_path)
+    return {"status": "ok"}
+
+
 def _update_section(current, data: dict) -> None:
     """Update a config section, preserving sensitive fields when masked or empty."""
     for key, value in data.items():
@@ -89,7 +135,7 @@ def _update_section(current, data: dict) -> None:
             else:
                 setattr(current, key, value)
             continue
-        if _is_sensitive_key(key) and (not value or value == "***"):
+        if is_sensitive_key(key) and is_masked_or_empty(value):
             continue
         setattr(current, key, value)
 
@@ -130,7 +176,7 @@ def _update_providers(config, data):
             continue
         existing = config.providers.get(name)
         api_key = pdata.get("api_key", "")
-        if not api_key or api_key == "***":
+        if is_masked_or_empty(api_key):
             api_key = existing.api_key if existing else ""
         api_base = pdata.get("api_base") or (existing.api_base if existing else None)
         headers = pdata.get("headers", existing.headers if existing else {})

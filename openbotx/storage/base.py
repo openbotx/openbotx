@@ -1,4 +1,15 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass
+class DirEntry:
+    name: str
+    path: str
+    is_dir: bool
+    size: int = 0
 
 
 class StorageProvider(ABC):
@@ -18,6 +29,21 @@ class StorageProvider(ABC):
 
     @abstractmethod
     async def exists(self, path: str) -> bool: ...
+
+    @abstractmethod
+    async def list_dir(self, path: str = "") -> list[DirEntry]: ...
+
+    @abstractmethod
+    async def create_dir(self, path: str) -> None: ...
+
+    @abstractmethod
+    async def delete_dir(self, path: str) -> None: ...
+
+    @abstractmethod
+    async def size(self, path: str) -> int: ...
+
+    @abstractmethod
+    async def is_directory(self, path: str) -> bool: ...
 
     @abstractmethod
     def get_url(self, path: str) -> str:

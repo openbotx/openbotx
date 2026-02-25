@@ -186,8 +186,10 @@ Request body:
 | GET | `/api/files` | Get workspace file tree |
 | GET | `/api/files/{path}` | Read file metadata or content |
 | GET | `/api/files/download/{path}` | Download raw file |
+| POST | `/api/files/create/{path}` | Create an empty file |
+| POST | `/api/files/mkdir/{path}` | Create a directory |
 | PUT | `/api/files/{path}` | Write content to a file |
-| DELETE | `/api/files/{path}` | Delete a file |
+| DELETE | `/api/files/{path}` | Delete a file or directory (recursive) |
 
 **GET /api/files**
 
@@ -221,9 +223,33 @@ For media and binary files (`image`, `video`, `audio`, `binary`):
 
 The `url` field points to `/public/{path}` for files under the `public/` directory (no auth required, suitable for `<img>`, `<video>`, `<audio>` tags), or `/api/files/download/{path}` for other files.
 
+**POST /api/files/create/{path}**
+
+Creates an empty file at the specified path. Parent directories are created automatically.
+
+Response:
+
+```json
+{
+  "status": "created"
+}
+```
+
+**POST /api/files/mkdir/{path}**
+
+Creates a directory at the specified path. Parent directories are created automatically.
+
+Response:
+
+```json
+{
+  "status": "created"
+}
+```
+
 **GET /api/files/download/{path}**
 
-Returns the raw file as a `FileResponse` (binary download). Requires authentication.
+Returns the raw file as a binary download. Requires authentication.
 
 **PUT /api/files/{path}**
 
@@ -236,6 +262,8 @@ Request body:
 ```
 
 **DELETE /api/files/{path}**
+
+Deletes a file or directory. Directories are deleted recursively.
 
 Response:
 
@@ -333,6 +361,30 @@ Request body:
 }
 ```
 
+**POST /api/channels/{name}/start**
+
+Starts the channel. For Telegram, also persists `enabled: true` to `config.yml` so the channel auto-starts on the next server boot.
+
+Response:
+
+```json
+{
+  "status": "started"
+}
+```
+
+**POST /api/channels/{name}/stop**
+
+Stops the channel. For Telegram, also persists `enabled: false` to `config.yml` so the channel stays stopped on the next server boot.
+
+Response:
+
+```json
+{
+  "status": "stopped"
+}
+```
+
 ---
 
 ### Providers
@@ -408,8 +460,52 @@ Provide exactly one scheduling strategy: `cron_expr`, `every_seconds`, or `at`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/config` | Get full configuration (sensitive values masked) |
+| GET | `/api/config/yaml` | Get full configuration as YAML string (sensitive values masked) |
+| POST | `/api/config/validate` | Validate a YAML configuration string |
 | PUT | `/api/config/{section}` | Update a configuration section |
 | POST | `/api/config/restart` | Restart all services |
+
+**GET /api/config/yaml**
+
+Returns the full configuration as a YAML string with sensitive values masked.
+
+Response:
+
+```json
+{
+  "yaml": "string"
+}
+```
+
+**POST /api/config/validate**
+
+Validates a YAML configuration string against the Config schema.
+
+Request body:
+
+```json
+{
+  "yaml": "string"
+}
+```
+
+Response (valid):
+
+```json
+{
+  "valid": true
+}
+```
+
+Response (invalid):
+
+```json
+{
+  "valid": false,
+  "error": "string",
+  "line": "number (optional)"
+}
+```
 
 **PUT /api/config/{section}**
 
@@ -420,6 +516,16 @@ Request body:
 ```json
 {
   "data": {}
+}
+```
+
+For the `advanced` section, the `data` field can contain a `yaml` key with the full YAML configuration string:
+
+```json
+{
+  "data": {
+    "yaml": "bot:\n  name: MyBot\n..."
+  }
 }
 ```
 
@@ -451,6 +557,7 @@ ws://host:port/ws?token=JWT_TOKEN
 | `task:created` | Task object | New task was created |
 | `task:updated` | Task object | Task state changed |
 | `channel:status` | `{ name, running }` | Channel connection status changed |
+| `sessions:updated` | `{}` | Session list changed (reload sidebar) |
 
 **chat:message**
 

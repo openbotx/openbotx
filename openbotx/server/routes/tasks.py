@@ -7,7 +7,7 @@ from openbotx.tasks.models import TaskState
 
 router = APIRouter()
 
-DONE_RETENTION = timedelta(hours=24)
+STALE_RETENTION = timedelta(hours=24)
 
 
 class TaskUpdate(BaseModel):
@@ -17,10 +17,10 @@ class TaskUpdate(BaseModel):
 @router.get("")
 async def list_tasks(request: Request):
     task_manager = request.app.state.task_manager
-    cutoff = (datetime.now() - DONE_RETENTION).isoformat()
+    cutoff = (datetime.now() - STALE_RETENTION).isoformat()
     tasks = []
     for t in task_manager.list_tasks():
-        if t.state in (TaskState.DONE, TaskState.ERROR) and t.updated_at < cutoff:
+        if t.state in (TaskState.TODO, TaskState.DONE, TaskState.ERROR) and t.updated_at < cutoff:
             continue
         tasks.append(t.to_dict())
     return tasks

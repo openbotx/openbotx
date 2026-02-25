@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from openbotx.server.websocket import WebSocketManager
@@ -53,16 +53,23 @@ class TaskManager:
 
         # recover tasks that were interrupted mid-execution
         recovered = 0
-        now = datetime.now().isoformat()
+        now = datetime.now()
+        now_iso = now.isoformat()
+        requeue_cutoff = (now - timedelta(hours=1)).isoformat()
+
         for task in self._tasks.values():
             if task.state == TaskState.DOING:
-                task.updated_at = now
+                task.updated_at = now_iso
                 if task.agent_type == "subagent":
                     task.state = TaskState.ERROR
                     task.error = "interrupted by server shutdown"
                 else:
                     task.state = TaskState.TODO
                     self._recovered_ids.append(task.id)
+                recovered += 1
+            elif task.state == TaskState.TODO and task.created_at > requeue_cutoff:
+                # TODO tasks with no message in the queue (lost on shutdown)
+                self._recovered_ids.append(task.id)
                 recovered += 1
 
         if recovered:

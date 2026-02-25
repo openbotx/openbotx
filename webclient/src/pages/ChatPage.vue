@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue'
 import Button from 'primevue/button'
+import Dialog from 'primevue/dialog'
 import ChatMessages from '../components/chat/ChatMessages.vue'
 import ChatInput from '../components/chat/ChatInput.vue'
 import SessionList from '../components/chat/SessionList.vue'
@@ -9,6 +10,8 @@ import { useChatStore, sessionLabel } from '../stores/chat'
 const chatStore = useChatStore()
 const isMobile = window.innerWidth <= 768
 const showSessions = ref(!isMobile)
+const showDeleteConfirm = ref(false)
+const deleteTargetKey = ref('')
 
 const currentLabel = computed(() => {
   const match = chatStore.sessions.find(
@@ -16,6 +19,8 @@ const currentLabel = computed(() => {
   )
   return match ? sessionLabel(match.key) : 'Chat'
 })
+
+const deleteTargetLabel = computed(() => sessionLabel(deleteTargetKey.value))
 
 onMounted(async () => {
   await chatStore.loadHistory(chatStore.currentSessionId)
@@ -32,11 +37,17 @@ function handleNewSession() {
 
 async function handleSelectSession(key) {
   await chatStore.switchSession(key)
-  showSessions.value = false
+  if (isMobile) showSessions.value = false
 }
 
-async function handleDeleteSession(sessionKey) {
-  await chatStore.clearSession(sessionKey)
+function handleDeleteSession(sessionKey) {
+  deleteTargetKey.value = sessionKey
+  showDeleteConfirm.value = true
+}
+
+async function confirmDeleteSession() {
+  showDeleteConfirm.value = false
+  await chatStore.clearSession(deleteTargetKey.value)
 }
 
 function toggleSessions() {
@@ -88,6 +99,14 @@ function toggleSessions() {
       />
       <ChatInput @send="handleSend" />
     </div>
+
+    <Dialog v-model:visible="showDeleteConfirm" header="Delete Session" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <p>Delete session <strong>{{ deleteTargetLabel }}</strong>?</p>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showDeleteConfirm = false" />
+        <Button label="Delete" icon="pi pi-trash" severity="danger" size="small" @click="confirmDeleteSession" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
