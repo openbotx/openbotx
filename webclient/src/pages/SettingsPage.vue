@@ -153,7 +153,7 @@ async function restartServices() {
       <h2>Settings</h2>
     </div>
     <div class="settings-content">
-      <Tabs value="bot">
+      <Tabs value="bot" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
         <TabList>
           <Tab value="bot">Bot</Tab>
           <Tab value="agents">Agents</Tab>
@@ -162,8 +162,8 @@ async function restartServices() {
           <Tab value="auth">Auth</Tab>
           <Tab value="advanced">Advanced</Tab>
         </TabList>
-        <TabPanels>
-          <TabPanel value="bot">
+        <TabPanels :pt="{ root: { style: { flex: '1' } } }">
+          <TabPanel value="bot" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <div class="form-group">
                 <label>Name</label>
@@ -177,7 +177,7 @@ async function restartServices() {
             </div>
           </TabPanel>
 
-          <TabPanel value="agents">
+          <TabPanel value="agents" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <div v-for="([key, agent]) in agentEntries" :key="key" class="agent-block">
                 <div class="agent-header">
@@ -239,7 +239,7 @@ async function restartServices() {
             </div>
           </TabPanel>
 
-          <TabPanel value="storage">
+          <TabPanel value="storage" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <div class="form-group">
                 <label>Type</label>
@@ -270,7 +270,7 @@ async function restartServices() {
             </div>
           </TabPanel>
 
-          <TabPanel value="tools">
+          <TabPanel value="tools" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <div class="form-group">
                 <label>Restrict to Workspace</label>
@@ -294,7 +294,7 @@ async function restartServices() {
             </div>
           </TabPanel>
 
-          <TabPanel value="auth">
+          <TabPanel value="auth" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <Message severity="info" :closable="false" class="tab-message">Changes take effect on next server restart.</Message>
               <div class="form-group">
@@ -309,7 +309,7 @@ async function restartServices() {
             </div>
           </TabPanel>
 
-          <TabPanel value="advanced">
+          <TabPanel value="advanced" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <Message severity="warn" :closable="false" class="tab-message">Edit raw config with care. Invalid changes may break the application.</Message>
               <div class="form-group">
@@ -352,20 +352,6 @@ async function restartServices() {
   overflow: auto;
   display: flex;
   flex-direction: column;
-}
-
-.settings-content :deep(.p-tabs) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.settings-content :deep(.p-tabpanels) {
-  flex: 1;
-}
-
-.settings-content :deep(.p-tabpanel) {
-  min-height: 100%;
 }
 
 .tab-content {

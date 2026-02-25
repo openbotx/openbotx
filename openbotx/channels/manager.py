@@ -68,8 +68,10 @@ class ChannelManager:
 
         for name, channel in self._channels.items():
             try:
-                await channel.stop()
+                await asyncio.wait_for(channel.stop(), timeout=10)
                 logger.info("Channel stopped: %s", name)
+            except TimeoutError:
+                logger.warning("Channel %s stop timed out, forcing", name)
             except Exception as e:
                 logger.error("Failed to stop channel %s: %s", name, e)
 
@@ -106,9 +108,7 @@ class ChannelManager:
     def _broadcast_channel_status(self, name: str, running: bool) -> None:
         if self._ws_manager:
             asyncio.create_task(
-                self._ws_manager.broadcast(
-                    "channel:status", {"name": name, "running": running}
-                )
+                self._ws_manager.broadcast("channel:status", {"name": name, "running": running})
             )
 
     def get_status(self) -> dict[str, Any]:

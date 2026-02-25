@@ -25,10 +25,17 @@ async function saveTelegram() {
 }
 
 async function toggleTelegram(running) {
-  if (running) {
-    await channelsStore.stopChannel('telegram')
-  } else {
-    await channelsStore.startChannel('telegram')
+  try {
+    if (running) {
+      await channelsStore.stopChannel('telegram')
+      toast.add({ severity: 'success', summary: 'Stopped', detail: 'Telegram channel stopped', life: 2000 })
+    } else {
+      await channelsStore.startChannel('telegram')
+      toast.add({ severity: 'success', summary: 'Started', detail: 'Telegram channel started', life: 2000 })
+    }
+  } catch {
+    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to toggle Telegram channel', life: 3000 })
+    await channelsStore.loadChannels()
   }
 }
 </script>

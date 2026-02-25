@@ -69,6 +69,7 @@ function onNodeSelect(node) {
   <Tree
     :value="toTreeNodes(files)"
     selection-mode="single"
+    :pt="{ nodeLabel: { style: { overflowWrap: 'break-word', wordBreak: 'break-all', minWidth: '0' } } }"
     @node-select="onNodeSelect"
     class="file-tree"
   />
@@ -79,11 +80,5 @@ function onNodeSelect(node) {
   border: none;
   background: transparent;
   padding: 0;
-}
-
-.file-tree :deep(.p-tree-node-label) {
-  overflow-wrap: break-word;
-  word-break: break-all;
-  min-width: 0;
 }
 </style>

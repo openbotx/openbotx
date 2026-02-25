@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -49,17 +50,23 @@ async def update_channel(name: str, body: ChannelUpdate, request: Request):
 async def start_channel(name: str, request: Request):
     channel_manager = request.app.state.channel_manager
     try:
-        await channel_manager.start_channel(name)
+        started = await channel_manager.start_channel(name)
+        if not started:
+            return JSONResponse(
+                {"error": "Channel already running or not available"}, status_code=409
+            )
         return {"status": "started"}
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/{name}/stop")
 async def stop_channel(name: str, request: Request):
     channel_manager = request.app.state.channel_manager
     try:
-        await channel_manager.stop_channel(name)
+        stopped = await channel_manager.stop_channel(name)
+        if not stopped:
+            return JSONResponse({"error": "Channel not running"}, status_code=409)
         return {"status": "stopped"}
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse({"error": str(e)}, status_code=500)
