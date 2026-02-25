@@ -61,6 +61,7 @@ dependencies = [
     # web extraction
     "readability-lxml>=0.8.0",
     "lxml>=5.0.0",
+    "chardet>=3.0.2,<6.0.0",
 
     # auth
     "pyjwt>=2.9.0",
