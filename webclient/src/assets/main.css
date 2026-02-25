@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@plugin "tailwindcss-primeui";
+@custom-variant dark (&:where(.dark-mode, .dark-mode *));
+
+body {
+  background: var(--p-surface-0);
+  color: var(--p-text-color);
+}
+
+.dark-mode body {
+  background: var(--p-surface-950);
+}

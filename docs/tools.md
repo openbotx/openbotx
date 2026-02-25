@@ -1,197 +1,245 @@
-# Tools Documentation
+# Tools Reference
 
-Tools are Python functions that the AI agent can call to perform actions.
+OpenBotX is an AI assistant platform. Tools are Python functions the AI agent can call during conversations. This document provides a complete reference for all built-in tools, their parameters, and access rules.
 
-## Creating Tools
+## Overview
 
-### Using the Decorator
+All tools are registered in `openbotx/tools/`. The `ToolRegistry` manages them and generates OpenAI-compatible function definitions for the LLM. Tools are registered during agent initialization in `AgentLoop._register_tools()`.
 
-```python
-from openbotx.core.tools_registry import tool
+The registry:
 
-@tool(
-    name="my_tool",
-    description="Does something useful",
-)
-def tool_my_tool(param1: str, param2: int = 10) -> str:
-    """Tool docstring.
+1. Stores tool instances.
+2. Generates OpenAI-compatible function definitions (sent to the LLM).
+3. Executes tool calls by name with arguments.
+4. Returns string results back to the agent loop.
 
-    Args:
-        param1: First parameter
-        param2: Second parameter with default
+---
 
-    Returns:
-        Result string
-    """
-    return f"Result: {param1}, {param2}"
-```
-
-### Using Naming Convention
-
-Functions starting with `tool_` are automatically registered:
-
-```python
-def tool_calculate(expression: str) -> str:
-    """Calculate a math expression."""
-    return str(eval(expression))
-```
-
-### Manual Registration
-
-```python
-from openbotx.core.tools_registry import get_tools_registry
-
-registry = get_tools_registry()
-registry.register(
-    name="my_tool",
-    func=my_function,
-    description="What it does",
-)
-```
-
-## Tool Parameters
-
-Parameters are extracted from the function signature:
-
-```python
-@tool(name="example")
-def tool_example(
-    required_param: str,           # Required
-    optional_param: int = 10,      # Optional with default
-    flag: bool = False,            # Boolean flag
-) -> str:
-    ...
-```
-
-Supported types:
-- `str`: String
-- `int`: Integer
-- `float`: Float
-- `bool`: Boolean
-- `list`: List/array
-- `dict`: Dictionary/object
-
-## Async Tools
-
-Tools can be async:
-
-```python
-@tool(name="async_tool")
-async def tool_async_example(url: str) -> str:
-    """Fetch data from URL."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        return response.text
-```
-
-## Tool Security
-
-Mark sensitive tools:
-
-```python
-@tool(
-    name="dangerous_tool",
-    security={"approval_required": True, "dangerous": True},
-)
-def tool_dangerous(cmd: str) -> str:
-    """Execute a command (requires approval)."""
-    ...
-```
-
-Security options:
-- `approval_required`: User must approve before execution
-- `admin_only`: Only admins can use
-- `dangerous`: Marked as potentially dangerous
-- `rate_limit`: Maximum calls per minute
-
-## Tool Location
-
-Place tools in `openbotx/tools/`:
-
-```
-openbotx/tools/
-├── __init__.py
-├── example_tool.py
-├── file_tools.py
-├── web_tools.py
-└── custom_tools.py
-```
-
-All tools are loaded automatically on startup.
-
-## API Access
-
-### List Tools
-
-```bash
-curl http://localhost:8000/api/tools
-```
-
-### Get Tool Details
-
-```bash
-curl http://localhost:8000/api/tools/my_tool
-```
-
-## Example Tools
+## Built-in Tools
 
 ### File Operations
 
-```python
-@tool(name="read_file")
-async def tool_read_file(path: str) -> str:
-    """Read contents of a file."""
-    from openbotx.providers.filesystem.local import LocalFilesystemProvider
+**Source:** `openbotx/tools/filesystem.py`
 
-    fs = LocalFilesystemProvider()
-    return await fs.read(path)
+All file tools respect the `restrict_to_workspace` setting. When enabled, operations are sandboxed to the workspace directory.
 
-@tool(name="write_file")
-async def tool_write_file(path: str, content: str) -> str:
-    """Write content to a file."""
-    from openbotx.providers.filesystem.local import LocalFilesystemProvider
+#### read_file
 
-    fs = LocalFilesystemProvider()
-    await fs.write(path, content)
-    return f"Written to {path}"
-```
+Read the contents of a file.
 
-### Web Operations
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path, relative to workspace. |
 
-```python
-@tool(name="fetch_url")
-async def tool_fetch_url(url: str) -> str:
-    """Fetch content from a URL."""
-    import httpx
+#### write_file
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        return response.text[:5000]  # Limit response size
-```
+Create or overwrite a file.
 
-### Data Operations
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path, relative to workspace. |
+| `content` | string | Yes | The content to write. |
 
-```python
-@tool(name="json_parse")
-def tool_json_parse(json_string: str) -> dict:
-    """Parse a JSON string."""
-    import json
-    return json.loads(json_string)
+#### edit_file
 
-@tool(name="format_date")
-def tool_format_date(date_str: str, format: str = "%Y-%m-%d") -> str:
-    """Format a date string."""
-    from datetime import datetime
-    dt = datetime.fromisoformat(date_str)
-    return dt.strftime(format)
-```
+Search and replace within a file.
 
-## Best Practices
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path, relative to workspace. |
+| `old_text` | string | Yes | The text to find. |
+| `new_text` | string | Yes | The replacement text. |
 
-1. **Clear Names**: Use descriptive, action-oriented names
-2. **Docstrings**: Always include detailed docstrings
-3. **Type Hints**: Use type hints for all parameters
-4. **Error Handling**: Handle errors gracefully
-5. **Size Limits**: Limit output size to avoid context overflow
-6. **Security**: Mark dangerous tools appropriately
-7. **Async**: Use async for I/O operations
+#### list_dir
+
+List the contents of a directory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | No | Directory path, relative to workspace. Defaults to workspace root. |
+
+---
+
+### Shell
+
+**Source:** `openbotx/tools/shell.py`
+
+#### exec
+
+Execute a shell command.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `command` | string | Yes | The shell command to execute. |
+
+The command runs with a configurable timeout (default 60 seconds). When `restrict_to_workspace` is enabled, the working directory is locked to the workspace.
+
+---
+
+### Web
+
+**Source:** `openbotx/tools/web.py`
+
+#### web_search
+
+Search the web using the Brave Search API.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | The search query. |
+
+Requires the `BRAVE_API_KEY` environment variable to be set.
+
+#### web_fetch
+
+Fetch and extract content from a URL.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | Yes | The URL to fetch. |
+
+Uses `readability-lxml` for content extraction.
+
+---
+
+### Communication
+
+**Source:** `openbotx/tools/message.py`
+
+#### message
+
+Send a message to the user via the current channel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `content` | string | Yes | The message content. |
+
+Only available to the main agent (not subagents).
+
+---
+
+### Background Tasks
+
+**Source:** `openbotx/tools/spawn.py`
+
+#### spawn
+
+Launch a subagent for independent background tasks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task` | string | Yes | Description of the task for the subagent. |
+| `context` | string | Yes | Additional context for the subagent. |
+
+Only available to the main agent. Creates a child task on the task board.
+
+---
+
+### Scheduling
+
+**Source:** `openbotx/tools/cron.py`
+
+#### cron
+
+Schedule reminders and recurring tasks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | One of `add`, `list`, or `remove`. |
+| `name` | string | Yes | Unique name for the scheduled task. |
+| `message` | string | Yes | The message or task description. |
+| schedule params | various | Conditional | Schedule parameters (depends on action). |
+
+Only available to the main agent.
+
+---
+
+### Memory
+
+**Source:** `openbotx/tools/memory_tool.py`
+
+#### save_memory
+
+Persist important facts or conversation summaries.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | A unique key for the memory entry. |
+| `content` | string | Yes | The content to persist. |
+
+Memory entries are saved to the `workspace/memory/` directory.
+
+---
+
+### Browser
+
+**Source:** `openbotx/tools/browser.py`
+
+#### browser
+
+Chrome automation via the Chrome DevTools Protocol (CDP).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | One of `navigate`, `click`, `type`, `screenshot`, `get_text`, `scroll`, `wait`, or `evaluate`. |
+
+Additional parameters depend on the action. Requires Chrome to be installed on the host system.
+
+---
+
+### HTTP Client
+
+**Source:** `openbotx/tools/http_client.py`
+
+#### http_client
+
+Make HTTP requests.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `method` | string | Yes | HTTP method: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, or `HEAD`. |
+| `url` | string | Yes | The request URL. |
+| `headers` | object | No | HTTP headers as key-value pairs. |
+| `body` | string | No | The request body. |
+
+---
+
+### Image Generation
+
+**Source:** `openbotx/tools/image.py`
+
+#### image_generation
+
+Generate images using AI models.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prompt` | string | Yes | Description of the image to generate. |
+| `filename` | string | Yes | Output filename for the generated image. |
+
+Requires image generation configuration with an API key.
+
+---
+
+## Tool Access by Agent Type
+
+Not all tools are available to every agent type. The main agent has full access, while subagents are restricted to a subset of tools.
+
+| Tool | Main Agent | Subagent |
+|------|------------|----------|
+| `read_file` | Yes | Yes |
+| `write_file` | Yes | Yes |
+| `edit_file` | Yes | Yes |
+| `list_dir` | Yes | Yes |
+| `exec` | Yes | Yes |
+| `web_search` | Yes | Yes |
+| `web_fetch` | Yes | Yes |
+| `http_client` | Yes | Yes |
+| `browser` | Yes | No |
+| `message` | Yes | No |
+| `spawn` | Yes | No |
+| `cron` | Yes | No |
+| `save_memory` | Yes | No |
+| `image_generation` | Yes | No |
+
+Subagents have access to file operations, shell execution, web tools, and the HTTP client. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), persist state (`save_memory`), control the browser (`browser`), or generate images (`image_generation`) are restricted to the main agent.

@@ -1,329 +1,385 @@
-# Configuration Guide
+# Configuration Reference
 
-OpenBotX uses a `config.yml` file for all configuration. All values support environment variable expansion using the `${VAR_NAME}` syntax.
+OpenBotX is configured through a `config.yml` file located in the project root directory. This document describes every configuration section, field, default value, and provides practical examples.
 
-## Complete Configuration Reference
-
-### LLM Configuration
-
-Configure the language model provider.
-
-```yaml
-llm:
-  provider: "anthropic"  # Required: any PydanticAI-supported provider
-  model: "claude-sonnet-4-20250514"  # Required: model name
-  # Optional ModelSettings (passed to PydanticAI):
-  max_tokens: 4096
-  temperature: 0.7
-  top_p: 1.0
-  timeout: 30.0
-  # Any other settings supported by PydanticAI ModelSettings
-```
-
-All fields except `provider` and `model` are passed directly to PydanticAI's `ModelSettings`.
-
-**Supported Providers:**
-
-PydanticAI automatically loads API keys from environment variables:
-
-- `anthropic`: Anthropic Claude models
-  - Models: `claude-sonnet-4-20250514`, `claude-opus-4-20250514`, etc
-  - Environment Variable: `ANTHROPIC_API_KEY`
-- `openai`: OpenAI GPT models
-  - Models: `gpt-4o`, `gpt-3.5-turbo`, etc
-  - Environment Variable: `OPENAI_API_KEY`
-- `openrouter`: OpenRouter (access to multiple LLM providers)
-  - Models: `moonshotai/kimi-k2.5`, `anthropic/claude-3.5-sonnet`, `openai/gpt-4`, etc
-  - Environment Variable: `OPENROUTER_API_KEY`
-
-Set API keys in your `.env` file:
-```bash
-ANTHROPIC_API_KEY=your_key_here
-OPENAI_API_KEY=your_key_here
-OPENROUTER_API_KEY=your_key_here
-```
-
-**OpenRouter Configuration:**
-
-```yaml
-llm:
-  provider: "openrouter"
-  model: "moonshotai/kimi-k2.5"  # or any model from openrouter.ai
-  api_key: "${OPENROUTER_API_KEY}"
-  max_tokens: 4096
-  temperature: 0.7
-```
-
-**OpenAI-Compatible Endpoints:**
-
-For custom OpenAI-compatible endpoints (like local LLMs, vLLM, LM Studio, etc):
-
-```yaml
-llm:
-  provider: "openai"  # provider is ignored when base_url is set
-  model: "your-model-name"
-  base_url: "http://localhost:8000/v1"  # your OpenAI-compatible endpoint
-  api_key: "your-api-key"  # or "dummy" if not required
-  max_tokens: 4096
-  temperature: 0.7
-```
-
-**Note:** When `base_url` is specified, OpenBotX uses OpenAI-compatible mode regardless of the provider value.
-
-### Database Configuration
-
-```yaml
-database:
-  type: "sqlite"  # Optional: "sqlite" (default), "postgres" or others
-  path: "./db/openbotx.db"  # SQLite: path to .db file
-  # Optional, for remote database:
-  # host: "localhost"
-  # port: 5432
-  # database: "openbotx"
-  # user: "openbotx"
-  # password: "${POSTGRES_PASSWORD}"
-```
-
-### Storage Configuration
-
-Configure where media and attachments are stored.
-
-```yaml
-storage:
-  type: "local"  # Required: "local" or "s3"
-  
-  # Local filesystem settings (used when type="local")
-  local:
-    path: "./media"  # Optional: default "./media"
-  
-  # S3 settings (used when type="s3")
-  s3:
-    bucket: "${S3_BUCKET}"  # Required for S3
-    region: "us-east-1"  # Optional: default "us-east-1"
-    access_key: "${AWS_ACCESS_KEY}"  # Required for S3
-    secret_key: "${AWS_SECRET_KEY}"  # Required for S3
-```
-
-### Gateway Configuration
-
-Configure communication channels.
-
-```yaml
-gateways:
-  # CLI Gateway (terminal interface)
-  cli:
-    enabled: true  # Optional: default true
-  
-  # WebSocket Gateway
-  websocket:
-    enabled: true  # Optional: default true
-    host: "0.0.0.0"  # Optional: default "0.0.0.0"
-    port: 8765  # Optional: default 8765
-  
-  # Telegram Gateway
-  telegram:
-    enabled: false  # Optional: default false
-    token: "${TELEGRAM_BOT_TOKEN}"  # Required when enabled
-    allowed_users: []  # Optional: list of allowed Telegram user IDs
-```
-
-### Background services
-
-Services that run when the application starts and stop when it shuts down (same pattern as gateways and providers). Start/stop are handled in one place: `start_background_services(config)` and `stop_background_services()`.
-
-Currently:
-- **relay** – browser relay for the Chrome extension (see below).
-
-### Browser Relay (background service)
-
-Configures the relay server used by the Chrome extension to attach tabs. When `relay.enabled` is true, the relay is started by `start_background_services` with OpenBotX (API or CLI) and stopped by `stop_background_services` on shutdown; it does not block the application.
-
-```yaml
-relay:
-  enabled: false  # Optional: default false; set true to start relay with OpenBotX
-  host: "127.0.0.1"  # Optional: default "127.0.0.1" (loopback only)
-  port: 18792  # Optional: default 18792; must match extension options
-```
-
-When `relay.enabled` is true, start OpenBotX with `openbotx start` or `openbotx start --cli-mode`; the relay runs in the background. Set the same port in the extension options, then click the toolbar button to attach a tab.
-
-### Transcription Configuration
-
-Configure audio-to-text conversion.
-
-```yaml
-transcription:
-  provider: "whisper"  # Required: "whisper", etc
-  model: "base"  # Required: model size ("tiny", "base", "small", "medium", "large")
-```
-
-**Supported Providers:**
-- `whisper`: OpenAI Whisper (faster-whisper)
-  - Models: `tiny`, `base`, `small`, `medium`, `large`, `large-v2`, `large-v3`
-
-### Text-to-Speech Configuration
-
-```yaml
-tts:
-  provider: "openai"  # Required: "openai", "edge", etc
-  voice: "alloy"  # Required: voice identifier
-```
-
-**Supported Providers:**
-- `openai`: OpenAI TTS API
-  - Voices: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`
-- `edge`: Microsoft Edge TTS (free)
-  - Voices: `en-US-AriaNeural`, `en-US-GuyNeural`, etc
-
-### API Server Configuration
-
-```yaml
-api:
-  host: "0.0.0.0"  # Optional: default "0.0.0.0"
-  port: 8000  # Optional: default 8000
-  debug: false  # Optional: default false
-```
-
-### MCP (Model Context Protocol) Configuration
-
-```yaml
-mcp:
-  servers:
-    - name: "filesystem"
-      command: "mcp-server-filesystem"
-      args: ["--path", "/path/to/files"]
-      env:
-        KEY: "value"
-```
-
-### Security Configuration
-
-```yaml
-security:
-  prompt_injection_detection: true  # Optional: default true
-  tool_approval_required: false  # Optional: default false
-  max_tokens_per_request: 100000  # Optional: default 100000
-  allowed_tools: []  # Optional: whitelist of allowed tools
-  denied_tools: []  # Optional: blacklist of denied tools
-```
-
-### Logging Configuration
-
-```yaml
-logging:
-  level: "info"  # Optional: "debug", "info", "warning", "error" (default: "info")
-  format: "json"  # Optional: "json" or "text" (default: "json")
-  file: "./logs/openbotx.log"  # Optional: default "./logs/openbotx.log"
-  max_size_mb: 100  # Optional: default 100
-  backup_count: 5  # Optional: default 5
-```
-
-### Paths Configuration
-
-```yaml
-paths:
-  skills: "./skills"    # Optional: default "./skills"
-  memory: "./memory"    # Optional: default "./memory"
-  media: "./media"      # Optional: default "./media"
-  logs: "./logs"       # Optional: default "./logs"
-  db: "./db"           # Optional: default "./db"
-  workspace: ""        # Optional: workspace dir for bootstrap files (nanobot-style). If set, AGENTS.md, SOUL.md, USER.md, TOOLS.md, IDENTITY.md are loaded into the system prompt.
-```
-
-#### Where to put workspace files (in your application)
-
-OpenBotX is a Python tool you use inside **your** application. Paths under `paths` are relative to the process working directory when it runs (typically the project root where `config.yml` lives).
-
-**Typical project layout:**
-
-```
-my-app/                    # your project root (where you run openbotx)
-├── config.yml             # here you set paths.workspace
-├── .env
-├── workspace/             # folder you create for bootstrap files
-│   ├── AGENTS.md          # agent instructions (optional)
-│   ├── SOUL.md            # personality/values (optional)
-│   ├── USER.md            # user context (optional)
-│   ├── TOOLS.md           # tool usage guidelines (optional)
-│   └── IDENTITY.md        # extra identity (optional)
-├── skills/                # openbotx skills (paths.skills)
-├── memory/
-└── ...
-```
-
-In your application's `config.yml`:
-
-```yaml
-paths:
-  workspace: "./workspace"   # relative to project root (where config.yml is)
-  # or absolute path:
-  # workspace: "/home/you/my-app/workspace"
-```
-
-- Create the `workspace` folder (or another name) at **your application root** (next to `config.yml`).
-- Put inside only the files you want to use; you don't need all of them. The agent loads whatever is present.
-- If `paths.workspace` is empty or the folder doesn't exist, bootstrap is skipped and the agent uses only the default system prompt.
-
-### Memory (Vector Index)
-
-Memory is always enabled. OpenBotX uses a single memory system: local embeddings (sentence-transformers) and tiktoken for chunking. No remote embedding API.
-
-| Environment variable | Description | Default |
-|----------------------|-------------|---------|
-| `OPENBOTX_MEMORY_DB_PATH` | SQLite path for memory index | `data/memory.db` |
-| `OPENBOTX_MEMORY_PATHS` | Comma-separated paths to index (e.g. `./memory,./docs`) | (none) |
-| `OPENBOTX_EMBEDDING_MODEL` | sentence-transformers model name | `all-MiniLM-L6-v2` |
-| `OPENBOTX_CHUNK_SIZE` | Chunk size in tokens | `500` |
-| `OPENBOTX_CHUNK_OVERLAP` | Overlap between chunks in tokens | `50` |
-
-Requires: `sentence-transformers`, `tiktoken`. Hybrid search (vector + full-text) is always used. With the `sqlite-vec` loadable extension, vector search uses the index (fast); without it, vector search runs in memory over stored embeddings.
-
-### Bot Identity Configuration
-
-```yaml
-bot:
-  name: "OpenBotX"  # Optional: default "OpenBotX"
-  description: "Personal AI Assistant"  # Optional
-```
+---
 
 ## Environment Variables
 
-Create a `.env` file in your project directory with your secrets:
+Environment variables can be referenced anywhere in `config.yml` using the `${VAR_NAME}` syntax. OpenBotX automatically loads a `.env` file from the project directory if one is present, so you can keep secrets out of version control.
 
-```bash
-# LLM API Keys (choose based on your provider)
+Example `.env` file:
+
+```
 ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-OPENROUTER_API_KEY=sk-or-v1-...
-
-# Storage (if using S3)
-S3_BUCKET=my-bucket
-AWS_ACCESS_KEY=AKIA...
-AWS_SECRET_KEY=...
-
-# Telegram (if using Telegram gateway)
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+AUTH_SECRET=my-secret-key
 ```
 
-## Minimal Configuration Example
+Referencing them in `config.yml`:
 
 ```yaml
-version: "1.0.0"
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
 
-llm:
-  provider: "anthropic"
-  model: "claude-sonnet-4-20250514"
-  api_key: "${ANTHROPIC_API_KEY}"
+channels:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
 
-database:
-  type: "sqlite"
-
-storage:
-  type: "local"
-
-gateways:
-  cli:
-    enabled: true
+auth:
+  secret_key: ${AUTH_SECRET}
 ```
 
-This is all you need to get started!
+---
+
+## Complete YAML Reference
+
+Below is the full configuration schema with every field, its type, default value, and a description.
+
+```yaml
+# ---------------------------------------------------------------------------
+# Bot
+# ---------------------------------------------------------------------------
+bot:
+  name: "OpenBotX"                # str  -- Display name of the bot.
+  description: "Your personal AI assistant"  # str  -- Short description shown in the UI and metadata.
+
+# ---------------------------------------------------------------------------
+# Server
+# ---------------------------------------------------------------------------
+server:
+  host: "0.0.0.0"                 # str  -- Bind address for the HTTP server.
+  port: 8000                      # int  -- Port the server listens on.
+  public_url: ""                  # str  -- Public URL for external access. Used for generating file URLs, opening the browser, and injected into the agent's system prompt so it knows its own base URL. Falls back to http://localhost:{port} if empty.
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
+# A dictionary of named agent configurations. Each key is an arbitrary name
+# (e.g. "main", "researcher", "coder"). You must define at least one agent.
+agents:
+  main:                           # Agent name (used as identifier).
+    workspace: "./workspace"      # str  -- Working directory for this agent's files.
+    model: "anthropic/claude-sonnet-4-20250514"  # str  -- Model identifier in "provider/model" format.
+    params:
+      max_tokens: 8192            # int  -- Maximum tokens in the model response.
+      temperature: 0.1            # float -- Sampling temperature (0.0 = deterministic, higher = more creative).
+      max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
+      memory_window: 100          # int  -- Number of recent messages to keep in context.
+
+# ---------------------------------------------------------------------------
+# Image Generation
+# ---------------------------------------------------------------------------
+image:
+  model: "gemini-3-pro-image-preview"  # str  -- Model name for image generation.
+  provider:                            # ProviderConfig -- Provider connection settings (same schema as providers.*).
+    name: "gemini"                     # str  -- Image generation backend (e.g. "gemini", "openai").
+    api_key: ""                        # str  -- API key for the image provider.
+    api_base: null                     # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
+    headers: {}                        # dict[str, str] -- Custom HTTP headers sent with every API request.
+    options: {}                        # dict -- Additional provider-specific parameters merged into the request body.
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+auth:
+  username: "admin"               # str  -- Username for the web UI login.
+  password: "admin"               # str  -- Password for the web UI login.
+  secret_key: ""                  # str  -- Secret used for signing tokens. Auto-generated at startup if left empty.
+
+# ---------------------------------------------------------------------------
+# Providers
+# ---------------------------------------------------------------------------
+# A dictionary of LLM provider configurations. Each key is the provider name.
+# Supported providers: custom, openrouter, anthropic, openai, deepseek, gemini, groq.
+providers:
+  anthropic:                      # Provider name (must match prefix used in agent model field).
+    api_key: ""                   # str  -- API key for this provider.
+    api_base: null                # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
+    headers: {}                   # dict[str, str] -- Custom HTTP headers sent with every API request.
+    options: {}                   # dict -- Additional provider-specific parameters merged into the request body.
+
+# ---------------------------------------------------------------------------
+# Channels
+# ---------------------------------------------------------------------------
+channels:
+  send_progress: true             # bool -- Send progress/status updates to the client during processing.
+  send_tool_hints: false          # bool -- Send tool invocation hints to the client (useful for debugging).
+  telegram:
+    enabled: false                # bool -- Enable the Telegram bot integration.
+    token: ""                     # str  -- Telegram Bot API token (obtain from @BotFather).
+    allowed_users: []             # list[str] -- Telegram usernames or user IDs allowed to interact. Empty list allows everyone.
+    proxy: null                   # str | null -- SOCKS5 or HTTP proxy URL for Telegram API requests.
+    reply_to_message: false       # bool -- Whether the bot replies in-thread to the original message.
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+tools:
+  web_search:
+    api_key: ""                   # str  -- Brave Search API key for the web search tool.
+    max_results: 5                # int  -- Maximum number of search results to return per query.
+  exec:
+    timeout: 60                   # int  -- Maximum execution time in seconds for the exec tool.
+  restrict_to_workspace: true     # bool -- When true, file-related tools are restricted to the agent's workspace directory.
+
+# ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+storage:
+  type: "local"                   # str  -- Storage backend: "local" for filesystem, "s3" for Amazon S3.
+  local_path: "./workspace"       # str  -- Directory path when using local storage.
+  s3_bucket: ""                   # str  -- S3 bucket name (required when type is "s3").
+  s3_region: "us-east-1"         # str  -- AWS region for the S3 bucket.
+  s3_access_key: ""              # str  -- AWS access key ID.
+  s3_secret_key: ""              # str  -- AWS secret access key.
+
+# ---------------------------------------------------------------------------
+# Heartbeat
+# ---------------------------------------------------------------------------
+heartbeat:
+  enabled: true                   # bool -- Enable the periodic heartbeat service.
+  interval: 1800                  # int  -- Seconds between checks (default: 30 minutes).
+
+# ---------------------------------------------------------------------------
+# Cron
+# ---------------------------------------------------------------------------
+cron:
+  enabled: true                   # bool -- Enable or disable the built-in cron scheduler.
+```
+
+---
+
+## Examples
+
+### 1. Basic Setup with Anthropic
+
+A minimal configuration using Anthropic as the sole provider.
+
+```yaml
+bot:
+  name: "MyAssistant"
+  description: "A helpful AI assistant"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+
+agents:
+  main:
+    model: "anthropic/claude-sonnet-4-20250514"
+    params:
+      max_tokens: 4096
+      temperature: 0.2
+
+auth:
+  username: "admin"
+  password: ${AUTH_PASSWORD}
+```
+
+### 2. OpenRouter Setup
+
+Using OpenRouter to access models from multiple vendors through a single API key.
+
+```yaml
+providers:
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+
+agents:
+  main:
+    model: "openrouter/anthropic/claude-sonnet-4-20250514"
+    params:
+      max_tokens: 8192
+      temperature: 0.1
+```
+
+### 3. Multiple Agents
+
+Define several agents, each with a different model and tuning, for specialized tasks.
+
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+  openai:
+    api_key: ${OPENAI_API_KEY}
+  deepseek:
+    api_key: ${DEEPSEEK_API_KEY}
+
+agents:
+  main:
+    workspace: "./workspace"
+    model: "anthropic/claude-sonnet-4-20250514"
+    params:
+      max_tokens: 8192
+      temperature: 0.1
+      max_iterations: 40
+      memory_window: 100
+
+  researcher:
+    workspace: "./workspace/research"
+    model: "openai/gpt-4o"
+    params:
+      max_tokens: 4096
+      temperature: 0.3
+      max_iterations: 20
+      memory_window: 50
+
+  coder:
+    workspace: "./workspace/code"
+    model: "deepseek/deepseek-coder"
+    params:
+      max_tokens: 16384
+      temperature: 0.0
+      max_iterations: 60
+      memory_window: 80
+```
+
+### 4. Telegram Channel
+
+Enable the Telegram bot and restrict access to specific users.
+
+```yaml
+channels:
+  send_progress: true
+  send_tool_hints: false
+  telegram:
+    enabled: true
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users:
+      - "alice"
+      - "bob"
+      - "123456789"
+    proxy: "socks5://127.0.0.1:1080"
+    reply_to_message: true
+```
+
+### 5. S3 Storage
+
+Use Amazon S3 as the storage backend instead of the local filesystem.
+
+```yaml
+storage:
+  type: "s3"
+  s3_bucket: "my-openbotx-storage"
+  s3_region: "eu-west-1"
+  s3_access_key: ${AWS_ACCESS_KEY_ID}
+  s3_secret_key: ${AWS_SECRET_ACCESS_KEY}
+```
+
+### 6. Environment Variable References
+
+A comprehensive example showing `${VAR_NAME}` references throughout the configuration. All values below are resolved at startup from the `.env` file or the shell environment.
+
+```yaml
+bot:
+  name: ${BOT_NAME}
+  description: ${BOT_DESCRIPTION}
+
+server:
+  host: ${SERVER_HOST}
+  port: 8000
+
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+  gemini:
+    api_key: ${GEMINI_API_KEY}
+
+agents:
+  main:
+    workspace: ${AGENT_WORKSPACE}
+    model: "anthropic/claude-sonnet-4-20250514"
+
+image:
+  model: "gemini-3-pro-image-preview"
+  provider:
+    name: "gemini"
+    api_key: ${GEMINI_API_KEY}
+
+auth:
+  username: ${AUTH_USERNAME}
+  password: ${AUTH_PASSWORD}
+  secret_key: ${AUTH_SECRET_KEY}
+
+channels:
+  telegram:
+    enabled: true
+    token: ${TELEGRAM_BOT_TOKEN}
+
+tools:
+  web_search:
+    api_key: ${BRAVE_SEARCH_API_KEY}
+
+storage:
+  type: "s3"
+  s3_bucket: ${S3_BUCKET}
+  s3_region: ${S3_REGION}
+  s3_access_key: ${AWS_ACCESS_KEY_ID}
+  s3_secret_key: ${AWS_SECRET_ACCESS_KEY}
+```
+
+Corresponding `.env` file:
+
+```
+BOT_NAME=MyAssistant
+BOT_DESCRIPTION=A helpful AI assistant
+SERVER_HOST=0.0.0.0
+AGENT_WORKSPACE=./workspace
+
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=AIza...
+
+AUTH_USERNAME=admin
+AUTH_PASSWORD=changeme
+AUTH_SECRET_KEY=a-long-random-string
+
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+
+BRAVE_SEARCH_API_KEY=BSA...
+
+S3_BUCKET=my-openbotx-storage
+S3_REGION=us-east-1
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=wJal...
+```
+
+---
+
+## Supported Providers
+
+| Provider     | Key              | Description                                      |
+|--------------|------------------|--------------------------------------------------|
+| `anthropic`  | `anthropic`      | Anthropic (Claude models) via the native API.    |
+| `openai`     | `openai`         | OpenAI (GPT models) via the native API.          |
+| `openrouter` | `openrouter`     | OpenRouter proxy -- access multiple vendors.     |
+| `gemini`     | `gemini`         | Google Gemini models.                            |
+| `deepseek`   | `deepseek`       | DeepSeek models.                                 |
+| `groq`       | `groq`           | Groq inference engine for supported models.      |
+| `custom`     | `custom`         | Any OpenAI-compatible endpoint via `api_base`.   |
+
+When using the `custom` provider, set `api_base` to the base URL of your endpoint:
+
+```yaml
+providers:
+  custom:
+    api_key: ${CUSTOM_API_KEY}
+    api_base: "https://my-llm-server.example.com/v1"
+```
+
+---
+
+## Notes
+
+- **Defaults are applied automatically.** You only need to include the sections and fields you want to override. Any omitted field falls back to its default value.
+- **Secret key auto-generation.** If `auth.secret_key` is left empty, a random key is generated each time the server starts. Set it explicitly if you need stable tokens across restarts.
+- **Workspace isolation.** When `tools.restrict_to_workspace` is `true`, file operations performed by the agent are confined to its configured `workspace` directory. Disable this only if you understand the security implications.
+- **Cron scheduler.** The cron system is enabled by default. Disable it with `cron.enabled: false` if you do not need scheduled tasks.
+- **Heartbeat service.** When enabled, the agent periodically reads `HEARTBEAT.md` from the workspace for tasks. Results are stored in a dedicated `heartbeat` session, accessible from the web interface session list. Set `heartbeat.enabled: false` to disable.
+- **Model identifier format.** The `model` field in agent configurations uses the format `provider/model-name`. The prefix before the slash must match a key defined under `providers`.
