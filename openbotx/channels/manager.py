@@ -19,12 +19,12 @@ class ChannelManager:
         config: ChannelsConfig,
         bus: MessageBus,
         storage: StorageProvider,
-        ws_manager=None,
+        dispatcher=None,
     ):
         self.config = config
         self.bus = bus
         self._storage = storage
-        self._ws_manager = ws_manager
+        self._dispatcher = dispatcher
         self._channels: dict[str, BaseChannel] = {}
         self._outbound_task: asyncio.Task | None = None
         self._send_progress = config.send_progress
@@ -106,9 +106,9 @@ class ChannelManager:
         return False
 
     def _broadcast_channel_status(self, name: str, running: bool) -> None:
-        if self._ws_manager:
+        if self._dispatcher:
             asyncio.create_task(
-                self._ws_manager.broadcast("channel:status", {"name": name, "running": running})
+                self._dispatcher.broadcast("channel:status", {"name": name, "running": running})
             )
 
     def get_status(self) -> dict[str, Any]:
@@ -166,8 +166,8 @@ class ChannelManager:
             return
 
         # Always broadcast to WebSocket so the web UI mirrors all sessions
-        if self._ws_manager:
-            await self._ws_manager.broadcast(
+        if self._dispatcher:
+            await self._dispatcher.broadcast(
                 "chat:message",
                 {
                     "content": msg.content,

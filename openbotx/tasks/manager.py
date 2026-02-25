@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from openbotx.server.websocket import WebSocketManager
+from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.tasks.models import Task, TaskState
 
 logger = logging.getLogger(__name__)
@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 class TaskManager:
     """CRUD for tasks with WebSocket broadcasting on state changes."""
 
-    def __init__(self, workspace: Path, ws_manager: WebSocketManager | None = None):
+    def __init__(self, workspace: Path, dispatcher: EventDispatcher | None = None):
         self.store_path = workspace / "tasks.jsonl"
-        self.ws_manager = ws_manager
+        self._dispatcher = dispatcher
         self._tasks: dict[str, Task] = {}
         self._recovered_ids: list[str] = []
         self._load()
@@ -89,8 +89,8 @@ class TaskManager:
                 f.write(json.dumps(task.to_dict(), ensure_ascii=False) + "\n")
 
     async def _broadcast(self, event_type: str, task: Task) -> None:
-        if self.ws_manager:
-            await self.ws_manager.broadcast(event_type, task.to_dict())
+        if self._dispatcher:
+            await self._dispatcher.broadcast(event_type, task.to_dict())
 
     async def create_task(
         self,

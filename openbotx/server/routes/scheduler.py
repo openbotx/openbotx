@@ -75,6 +75,7 @@ async def create_job(body: JobCreate, request: Request):
         message=body.message,
         channel=body.channel,
         to=body.to,
+        delete_after_run=schedule.kind == "at",
     )
     return {"status": "ok", "id": job.id}
 

@@ -84,6 +84,7 @@ Response:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/chat` | Send a message to the agent |
+| POST | `/api/chat/upload` | Upload media files (images, audio) |
 | GET | `/api/chat/sessions` | List all chat sessions |
 | GET | `/api/chat/sessions/{session_id}` | Get a single session with messages |
 | DELETE | `/api/chat/sessions/{session_id}` | Delete a session |
@@ -97,9 +98,12 @@ Request body:
 ```json
 {
   "message": "string",
-  "session_id": "string (optional)"
+  "session_id": "string (optional)",
+  "media": ["string (optional)"]
 }
 ```
+
+The `media` field accepts an array of storage paths (e.g., from `/api/chat/upload`). Images are sent to the LLM as data URIs. Audio files are transcribed via faster-whisper and the transcript is prepended to the message content.
 
 Response:
 
@@ -109,6 +113,22 @@ Response:
   "session_id": "string"
 }
 ```
+
+**POST /api/chat/upload**
+
+Upload media files (images, audio). Accepts multipart form data. Files are stored in `public/media/` with a generated filename.
+
+Request: `multipart/form-data` with one or more file fields.
+
+Response:
+
+```json
+{
+  "paths": ["public/media/abc123def456.jpg"]
+}
+```
+
+The returned paths can be passed in the `media` field of `POST /api/chat`.
 
 **GET /api/chat/sessions**
 
@@ -188,6 +208,8 @@ Request body:
 | GET | `/api/files/download/{path}` | Download raw file |
 | POST | `/api/files/create/{path}` | Create an empty file |
 | POST | `/api/files/mkdir/{path}` | Create a directory |
+| POST | `/api/files/upload/{path}` | Upload files to a directory |
+| POST | `/api/files/upload` | Upload files to the root directory |
 | PUT | `/api/files/{path}` | Write content to a file |
 | DELETE | `/api/files/{path}` | Delete a file or directory (recursive) |
 
@@ -244,6 +266,21 @@ Response:
 ```json
 {
   "status": "created"
+}
+```
+
+**POST /api/files/upload/{path}**
+
+Upload files to the specified directory. Accepts multipart form data. `POST /api/files/upload` uploads to the root directory.
+
+Request: `multipart/form-data` with one or more file fields.
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "paths": ["path/to/uploaded_file.txt"]
 }
 ```
 

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import mimetypes
-from pathlib import Path
 
-from openbotx.storage.base import DirEntry, StorageProvider
+from openbotx.storage.base import DirEntry, StorageProvider, detect_mime
 
 
 class S3Storage(StorageProvider):
@@ -131,8 +129,6 @@ class S3Storage(StorageProvider):
     def get_data_uri(self, path: str) -> str:
         response = self._client.get_object(Bucket=self.bucket, Key=path)
         data = response["Body"].read()
-        mime, _ = mimetypes.guess_type(Path(path).name)
-        if not mime:
-            mime = "application/octet-stream"
+        mime = detect_mime(data)
         encoded = base64.b64encode(data).decode("ascii")
         return f"data:{mime};base64,{encoded}"

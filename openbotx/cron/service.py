@@ -199,11 +199,19 @@ class CronService:
             except Exception as e:
                 logger.error("cron tick error: %s", e, exc_info=True)
 
+    def _active_job_ids(self) -> set[str]:
+        return {j.id for j in self._store.jobs}
+
     async def _tick(self) -> None:
         now_ms = int(time.time() * 1000)
         to_delete: list[str] = []
+        dirty = False
 
-        for job in self._store.jobs:
+        snapshot = list(self._store.jobs)
+
+        for job in snapshot:
+            if job.id not in self._active_job_ids():
+                continue
             if job.state.status != "active":
                 continue
             if job.state.next_run_ms > now_ms:
@@ -215,10 +223,15 @@ class CronService:
                 if self._on_job_callback:
                     await self._on_job_callback(job)
 
+                if job.id not in self._active_job_ids():
+                    logger.info("cron job %s was removed during execution, skipping", job.id)
+                    continue
+
                 job.state.last_run_ms = now_ms
                 job.state.run_count += 1
+                dirty = True
 
-                if job.delete_after_run:
+                if job.delete_after_run or job.schedule.kind == "at":
                     to_delete.append(job.id)
                 else:
                     job.state.next_run_ms = self._compute_next_run_ms(job.schedule)
@@ -226,13 +239,12 @@ class CronService:
             except Exception as e:
                 logger.error("cron job %s failed: %s", job.id, e)
                 job.state.errors += 1
+                dirty = True
 
         for job_id in to_delete:
             self._store.jobs = [j for j in self._store.jobs if j.id != job_id]
 
-        if to_delete or any(
-            j.state.last_run_ms == int(time.time() * 1000) for j in self._store.jobs
-        ):
+        if dirty or to_delete:
             self._persist()
 
     async def stop(self) -> None:

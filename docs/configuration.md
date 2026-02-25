@@ -51,6 +51,7 @@ bot:
 server:
   host: "0.0.0.0"                 # str  -- Bind address for the HTTP server.
   port: 8000                      # int  -- Port the server listens on.
+  public_url: ""                  # str  -- Public URL for external access. Used for generating file URLs, opening the browser, and injected into the agent's system prompt so it knows its own base URL. Falls back to http://localhost:{port} if empty.
 
 # ---------------------------------------------------------------------------
 # Agents

@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 export const useTasksStore = defineStore('tasks', () => {
   const api = useApi()
   const tasks = ref(new Map())
+  const activeTools = ref(new Map())
 
   const todoTasks = computed(() =>
     [...tasks.value.values()].filter((t) => t.state === 'TODO')
@@ -32,7 +33,28 @@ export const useTasksStore = defineStore('tasks', () => {
     } else {
       tasks.value.set(data.id, data)
     }
+    if (data.state === 'DONE' || data.state === 'ERROR') {
+      activeTools.value.delete(data.id)
+    }
   }
 
-  return { tasks, todoTasks, doingTasks, doneTasks, loadTasks, onTaskCreated, onTaskUpdated }
+  function onToolUse(data) {
+    if (data.task_id) {
+      activeTools.value.set(data.task_id, {
+        tool: data.tool,
+        description: data.description,
+      })
+    }
+  }
+
+  function onThinking(data) {
+    if (data.task_id) {
+      activeTools.value.set(data.task_id, { tool: null, description: 'Thinking...' })
+    }
+  }
+
+  return {
+    tasks, activeTools, todoTasks, doingTasks, doneTasks,
+    loadTasks, onTaskCreated, onTaskUpdated, onToolUse, onThinking,
+  }
 })

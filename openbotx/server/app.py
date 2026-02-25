@@ -13,6 +13,7 @@ from openbotx.agent.loop import AgentLoop
 from openbotx.agent.skills import SkillsLoader
 from openbotx.agent.subagent import SubagentManager
 from openbotx.bus.events import InboundMessage
+from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.manager import ChannelManager
 from openbotx.config.loader import load_config
@@ -33,10 +34,11 @@ WEBCLIENT_DIR = Path(__file__).parent.parent.parent / "webclient" / "dist"
 
 def _build_cron_callback(bus: MessageBus):
     async def _on_job(job: CronJob) -> None:
+        chat_id = f"cron-{job.id}-{uuid4().hex[:6]}"
         msg = InboundMessage(
-            channel=job.payload.channel or "web",
+            channel="cron",
             sender_id="cron",
-            chat_id=job.payload.to or "direct",
+            chat_id=chat_id,
             content=job.payload.message,
             metadata={"cron_job_id": job.id, "cron_job_name": job.name},
         )
@@ -98,9 +100,12 @@ async def lifespan(app: FastAPI):
     app.state.auth_secret = config.auth.secret_key
 
     ws_manager = WebSocketManager()
+    dispatcher = EventDispatcher()
+    dispatcher.add_handler(ws_manager)
+
     bus = MessageBus()
     session_manager = SessionManager(workspace)
-    task_manager = TaskManager(workspace, ws_manager)
+    task_manager = TaskManager(workspace, dispatcher)
     skills_loader = SkillsLoader(workspace)
     cron_service = CronService(workspace, on_job_callback=_build_cron_callback(bus))
 
@@ -123,7 +128,6 @@ async def lifespan(app: FastAPI):
         provider=provider,
         workspace=workspace,
         bus=bus,
-        ws_manager=ws_manager,
         task_manager=task_manager,
         model=main_agent.model,
         brave_api_key=config.tools.web_search.api_key,
@@ -137,7 +141,7 @@ async def lifespan(app: FastAPI):
         bus=bus,
         provider=provider,
         workspace=workspace,
-        ws_manager=ws_manager,
+        dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,
         skills_loader=skills_loader,
@@ -153,13 +157,14 @@ async def lifespan(app: FastAPI):
         restrict_to_workspace=config.tools.restrict_to_workspace,
         image_config=config.image,
         storage=storage,
+        public_url=public_url,
     )
 
     channel_manager = ChannelManager(
         config.channels,
         bus,
         storage=storage,
-        ws_manager=ws_manager,
+        dispatcher=dispatcher,
     )
 
     heartbeat = HeartbeatService(
@@ -172,6 +177,7 @@ async def lifespan(app: FastAPI):
     app.state.config = config
     app.state.storage = storage
     app.state.ws_manager = ws_manager
+    app.state.dispatcher = dispatcher
     app.state.bus = bus
     app.state.session_manager = session_manager
     app.state.task_manager = task_manager

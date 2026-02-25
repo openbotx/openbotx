@@ -19,16 +19,21 @@ class ContextBuilder:
         workspace: Path,
         memory: MemoryStore,
         skills_loader: SkillsLoader,
+        public_url: str = "",
     ):
         self._workspace = workspace
         self._memory = memory
         self._skills_loader = skills_loader
+        self._public_url = public_url
 
     def build_system_prompt(self) -> str:
         parts = [IDENTITY]
 
         now = datetime.now()
         parts.append(f"\nCurrent date and time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
+
+        if self._public_url:
+            parts.append(f"\nPublic URL: {self._public_url}")
 
         for filename in BOOTSTRAP_FILES:
             filepath = self._workspace / filename

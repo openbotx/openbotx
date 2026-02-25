@@ -39,7 +39,7 @@ OpenBotX is composed of the following layers:
 2. **Message Bus** -- Async queue pair (`inbound` / `outbound`) that decouples channels from the agent.
 3. **Agent Loop** -- Consumes inbound messages, runs an agentic LLM loop (call model, execute tools, repeat), and publishes the final response to the outbound queue.
 4. **Channel Manager** -- Consumes outbound messages and routes them back to the originating channel.
-5. **WebSocket Manager** -- Broadcasts real-time events (thinking, tool use, messages, task updates) to all connected browser clients.
+5. **Event Dispatcher** -- Broadcasts real-time events (thinking, tool use, messages, task updates) through registered handlers (e.g. `WebSocketManager`). Decouples event producers from the transport layer.
 
 Supporting services include task management, session persistence, memory consolidation, scheduled jobs (cron), and a configurable tool registry.
 
@@ -125,10 +125,11 @@ Files under the project's `public/` directory are served at `/public/{path}` wit
 
 The `MessageBus` is the backbone of the platform. It holds two `asyncio.Queue` instances that fully decouple message producers (channels) from the consumer (agent loop).
 
-| File        | Purpose                                                                                   |
-| ----------- | ----------------------------------------------------------------------------------------- |
-| `queue.py`  | `MessageBus` with `inbound` and `outbound` async queues. Provides `publish_*` / `consume_*` methods. |
-| `events.py` | Message data classes: `InboundMessage` (channel -> agent) and `OutboundMessage` (agent -> channel). |
+| File            | Purpose                                                                                   |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| `queue.py`      | `MessageBus` with `inbound` and `outbound` async queues. Provides `publish_*` / `consume_*` methods. |
+| `events.py`     | Message data classes: `InboundMessage` (channel -> agent) and `OutboundMessage` (agent -> channel). |
+| `dispatcher.py` | `EventDispatcher` -- protocol-based event broadcasting. Components call `dispatcher.broadcast(event, data)` instead of coupling directly to WebSocketManager. Handlers (like WebSocketManager) register via `add_handler()`. |
 
 **Session key derivation:** Each `InboundMessage` derives its session key as `{channel}:{chat_id}`, which ties all messages from the same chat to the same conversation session. This can be overridden via `session_key_override`.
 
@@ -141,7 +142,7 @@ The agent subsystem is the intelligence layer of the platform.
 | File           | Purpose                                                                                        |
 | -------------- | ---------------------------------------------------------------------------------------------- |
 | `loop.py`      | `AgentLoop` -- the main agentic loop. Consumes inbound messages, builds context, calls the LLM, executes tool calls, and repeats until a plain text response is returned or `max_iterations` (default: 40) is reached. Streams `chat:thinking` and `chat:tool_use` events via WebSocket. |
-| `context.py`   | `ContextBuilder` -- assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, and a skills summary. Provides static helpers for building OpenAI-compatible message arrays. |
+| `context.py`   | `ContextBuilder` -- assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, and the public URL (when configured). Provides static helpers for building OpenAI-compatible message arrays with multimodal support (text + images). |
 | `memory.py`    | `MemoryStore` -- reads/writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. |
 | `skills.py`    | `SkillsLoader` -- discovers SKILL.md files from both built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Skills marked `always: true` are injected into every system prompt. |
 | `subagent.py`  | `SubagentManager` -- spawns independent background agent loops for delegated tasks. Subagents run with a restricted tool set (no `message`, `spawn`, or `cron` tools) and a lower iteration cap (15). On completion, they announce results back to the main agent via the inbound queue. |
@@ -264,7 +265,7 @@ The cron service enables scheduled task execution.
 
 | File          | Purpose                                                                            |
 | ------------- | ---------------------------------------------------------------------------------- |
-| `service.py`  | `CronService` -- runs a background tick loop (every 5 seconds), checks for due jobs, and fires them by publishing an `InboundMessage` to the message bus. Persists jobs to `workspace/cron_jobs.json`. |
+| `service.py`  | `CronService` -- runs a background tick loop (every 5 seconds), checks for due jobs, and fires them by publishing an `InboundMessage` to the message bus with `channel="cron"` and a unique `chat_id` per execution (`cron-{job_id}-{hex}`). Persists jobs to `workspace/cron_jobs.json`. |
 | `types.py`    | Data classes: `CronJob`, `CronSchedule` (kinds: `at`, `every`, `cron`), `CronPayload` (message, channel, recipient), `CronJobState` (next/last run, run count, errors), `CronStore`. |
 
 Schedule kinds:
@@ -305,7 +306,7 @@ Key configuration sections:
 | Section     | Controls                                                     |
 | ----------- | ------------------------------------------------------------ |
 | `bot`       | Name and description                                         |
-| `server`    | Host and port                                                |
+| `server`    | Host, port, and public URL                                   |
 | `agents`    | Named agent configs (model, workspace, params)               |
 | `auth`      | Username, password, JWT secret                               |
 | `providers` | API keys, base URLs, headers, and options per provider       |
@@ -346,9 +347,9 @@ Pages:
 
 | Page       | Function                                        |
 | ---------- | ----------------------------------------------- |
-| Chat       | Main conversation interface with session list panel, real-time updates, and session-aware message filtering. Users can switch between sessions (including heartbeat). |
-| TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns |
-| Files      | File manager with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. Supports creating files, creating folders, and deleting files/folders with confirmation dialogs. |
+| Chat       | Main conversation interface with session list panel, real-time updates, and session-aware message filtering. Users can switch between sessions (including heartbeat). Supports media attachments (images, audio files) and microphone audio recording. Audio files are transcribed via faster-whisper before being sent to the LLM. Links in messages open in a new tab. |
+| TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns. Task cards display duration, channel, error details, result preview, and real-time active tool status (spinner + tool name + description) for DOING tasks. Clicking a task title opens a confirmation dialog to navigate to the associated chat session. |
+| Files      | File manager with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. Supports creating files, creating folders, uploading files (to root or selected folder), and deleting files/folders with confirmation dialogs. |
 | Skills     | View and manage agent skills                    |
 | Scheduler  | Manage cron jobs                                |
 | Settings   | Platform configuration with tabs: Bot, Channels (Telegram start/stop and config), Storage, Tools, Auth, and Advanced (YAML editor with validation and confirmation dialogs). Providers and agents are managed via the Advanced YAML editor. |
@@ -366,9 +367,10 @@ openbotx/
 │   ├── memory.py        # MemoryStore - conversation memory persistence
 │   ├── skills.py        # SkillsLoader - SKILL.md discovery and loading
 │   └── subagent.py      # SubagentManager - background task delegation
-├── bus/             # Async message bus
+├── bus/             # Async message bus and event dispatching
 │   ├── queue.py         # MessageBus with inbound/outbound queues
-│   └── events.py        # InboundMessage, OutboundMessage data classes
+│   ├── events.py        # InboundMessage, OutboundMessage data classes
+│   └── dispatcher.py    # EventDispatcher - protocol-based event broadcasting
 ├── channels/        # Communication channel implementations
 │   ├── base.py          # BaseChannel abstract interface
 │   ├── manager.py       # ChannelManager - lifecycle and routing
@@ -382,6 +384,9 @@ openbotx/
 │   └── types.py         # CronJob, CronSchedule, CronPayload data classes
 ├── heartbeat/       # Periodic HEARTBEAT.md checker
 │   └── service.py       # HeartbeatService - reads workspace/HEARTBEAT.md
+├── helpers/         # Utility modules
+│   ├── transcription.py # Audio transcription via faster-whisper
+│   └── text.py          # Text formatting utilities
 ├── providers/       # LLM provider abstraction
 │   ├── base.py          # LLMProvider and LLMResponse
 │   ├── litellm_provider.py  # LiteLLM wrapper for multi-provider access
@@ -429,7 +434,7 @@ The FastAPI lifespan context manager in `app.py` orchestrates the full startup s
 2. Ensure workspace directory exists
 3. Generate JWT secret if not configured
 4. Initialize services:
-   a. WebSocketManager
+   a. WebSocketManager + EventDispatcher (dispatcher wraps ws_manager)
    b. MessageBus
    c. SessionManager
    d. TaskManager (with WebSocket reference)

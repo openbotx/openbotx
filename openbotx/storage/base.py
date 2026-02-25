@@ -3,6 +3,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import filetype
+
+
+def detect_mime(data: bytes) -> str:
+    """Detect MIME type from file bytes."""
+    kind = filetype.guess(data)
+    if kind is not None:
+        return kind.mime
+    return "application/octet-stream"
+
 
 @dataclass
 class DirEntry:

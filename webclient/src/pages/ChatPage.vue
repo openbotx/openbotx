@@ -6,7 +6,9 @@ import ChatMessages from '../components/chat/ChatMessages.vue'
 import ChatInput from '../components/chat/ChatInput.vue'
 import SessionList from '../components/chat/SessionList.vue'
 import { useChatStore, sessionLabel } from '../stores/chat'
+import { useApi } from '../composables/useApi'
 
+const api = useApi()
 const chatStore = useChatStore()
 const isMobile = window.innerWidth <= 768
 const showSessions = ref(!isMobile)
@@ -27,8 +29,13 @@ onMounted(async () => {
   chatStore.loadSessions()
 })
 
-async function handleSend(text) {
-  await chatStore.sendMessage(text)
+async function handleSend({ text, files }) {
+  let media = []
+  if (files?.length) {
+    const res = await api.upload('/chat/upload', files)
+    media = res.paths || []
+  }
+  await chatStore.sendMessage(text, media)
 }
 
 function handleNewSession() {

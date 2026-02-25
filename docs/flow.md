@@ -233,7 +233,7 @@ In all cases, the message becomes an `InboundMessage` with these fields:
 
 | Field | Description |
 |---|---|
-| `channel` | Source: `"web"` or `"telegram"` |
+| `channel` | Source: `"web"`, `"telegram"`, `"cron"`, or `"heartbeat"` |
 | `sender_id` | Who sent it (e.g., `"web_user"`, `"telegram_12345"`) |
 | `chat_id` | Conversation identifier |
 | `content` | Message text |
@@ -1101,7 +1101,7 @@ Examples:
 - **Web (default):** `web:a1b2c3d4-...` — when the frontend sends a message with a UUID `session_id`
 - **Web (custom):** `web:project-alpha` — when the frontend sends `session_id="project-alpha"`
 - **Telegram:** `telegram:123456789` — the Telegram chat ID
-- **Cron:** `web:direct` — cron jobs use `channel="web"` and `chat_id="direct"` by default
+- **Cron:** `cron:cron-{job_id}-{hex}` — each cron job execution gets a unique session with `channel="cron"` and a generated `chat_id`
 - **Heartbeat:** `heartbeat:heartbeat` — the heartbeat service uses `channel="heartbeat"` and `chat_id="heartbeat"`
 
 This key determines which JSONL file is loaded and which conversation history the agent sees.
@@ -1548,42 +1548,35 @@ sequenceDiagram
     participant AL as Agent Loop
     participant CRON as CronService
     participant BUS as Message Bus
-    participant CM as Channel Manager
 
-    Note over U,AL: User creates the job from web chat (session "direct")
+    Note over U,AL: User creates the job from web chat
     U->>AL: "Remind me every hour to drink water"
-    AL->>CRON: add_job(channel="web", to="direct", message="Drink water!")
+    AL->>CRON: add_job(message="Drink water!")
 
     Note over CRON: 1 hour later...
-    CRON->>BUS: InboundMessage(channel="web", chat_id="direct", sender="cron")
+    CRON->>BUS: InboundMessage(channel="cron", chat_id="cron-abc-f1e2d3")
     BUS->>AL: Agent loop processes the message
-    Note over AL: session_key = "web:direct" — same session as the original conversation
-    AL->>BUS: OutboundMessage(channel="web", chat_id="direct", content="...")
-    BUS->>CM: Route by channel
-    CM->>U: WebSocket broadcast → message appears in the web chat
+    Note over AL: Fresh session "cron:cron-abc-f1e2d3"
+    AL->>BUS: OutboundMessage(channel="cron", content="...")
+    BUS->>U: WebSocket broadcast (no dedicated cron channel handler)
 ```
 
-The key detail: when the `cron` tool creates a job, it saves the current `channel` and `chat_id` from `set_context()` (set by the agent loop before each message — see section 7.3). When the job fires, `_build_cron_callback()` uses these saved values to construct the `InboundMessage`:
+The key detail: when the job fires, `_build_cron_callback()` generates a **unique session per execution** by constructing a `chat_id` from the job ID and a random hex suffix:
 
 ```python
+chat_id = f"cron-{job.id}-{uuid4().hex[:6]}"
 InboundMessage(
-    channel=job.payload.channel or "web",   # origin channel
+    channel="cron",
     sender_id="cron",
-    chat_id=job.payload.to or "direct",      # origin chat_id
+    chat_id=chat_id,
     content=job.payload.message,
+    metadata={"cron_job_id": job.id, "cron_job_name": job.name},
 )
 ```
 
-This message enters the bus like any user message. The agent loop computes `session_key = "web:direct"`, loads the **same session history** from that conversation, processes it through the LLM, and publishes an `OutboundMessage` with the same `channel` and `chat_id`. The ChannelManager then routes it to the correct destination:
+Each execution creates a fresh session (e.g., `cron:cron-abc123-f1e2d3`), so recurring jobs don't accumulate context from previous runs. The cron job metadata (`cron_job_id`, `cron_job_name`) is passed through so the agent can identify which job triggered the execution.
 
-| Job created from | `channel` | `chat_id` | Response appears in |
-|---|---|---|---|
-| Web chat (default session) | `web` | `direct` | Browser via WebSocket |
-| Web chat (custom session) | `web` | `project-alpha` | Browser via WebSocket (same session) |
-| Telegram private chat | `telegram` | `123456789` | Telegram chat via API |
-| Telegram group | `telegram` | `-100987654` | Telegram group via API |
-
-The agent processes cron messages with the full session context, so it can reference previous conversations. For example, if the user discussed a project earlier in the same session, the agent's cron response can reference that context.
+Since `channel="cron"` has no dedicated channel handler, responses are routed to the WebSocket (the default fallback), where the user can view them by switching to the corresponding session in the web interface.
 
 ---
 
@@ -1645,7 +1638,7 @@ The `TelegramChannel` has special handling for Telegram:
 
 ## 23. Media Pipeline
 
-Media files (images, audio, documents) are stored with **relative paths only**. Each consumer resolves the file in the format it needs: base64 data URI for the LLM, raw bytes for Telegram, HTTP URL for the web interface.
+Media files (images, audio, documents) are stored with **relative paths only**. Each consumer resolves the file in the format it needs: base64 data URI for the LLM, raw bytes for Telegram, HTTP URL for the web interface. Audio files are transcribed to text via faster-whisper before being sent to the LLM.
 
 ### Design Principle
 
@@ -1698,15 +1691,26 @@ For `LocalStorage`, the `base_path` points to the **project root** directory. Al
 
 ```mermaid
 graph TD
-    A["Telegram downloads photo"] --> B["Save to project/public/media/abc123.jpg"]
+    A["Channel receives media"] --> B["Save to project/public/media/abc123.jpg"]
     B --> C["InboundMessage.media = ['public/media/abc123.jpg']"]
     C --> D["Agent Loop receives message"]
-    D --> E["storage.get_data_uri('public/media/abc123.jpg')"]
-    E --> F["data:image/jpeg;base64,/9j/4AAQ..."]
-    F --> G["ContextBuilder: {type: image, url: data:...}"]
-    G --> H["LLM Provider converts to OpenAI format"]
-    H --> I["LLM processes the image"]
+    D --> E{File type?}
+    E -->|Image| F["storage.get_data_uri('public/media/abc123.jpg')"]
+    F --> G["data:image/jpeg;base64,/9j/4AAQ..."]
+    G --> H["ContextBuilder: {type: image, url: data:...}"]
+    H --> I["LLM Provider converts to OpenAI format"]
+    I --> J["LLM processes the image"]
+    E -->|Audio| K["storage.read('public/media/voice.webm')"]
+    K --> L["faster-whisper transcribes audio to text"]
+    L --> M["Transcript prepended to message content"]
+    M --> N["LLM processes the text"]
 ```
+
+### Audio Transcription
+
+Audio files (`.mp3`, `.wav`, `.ogg`, `.m4a`, `.webm`, `.aac`, `.flac`) are transcribed to text using **faster-whisper** (`openbotx/helpers/transcription.py`). The Whisper model (`base`, CPU, int8) is lazy-loaded on first use. The transcript is prepended to the message content as `[Audio transcription]: ...`, so the LLM receives it as text rather than binary data.
+
+This applies to audio from any source — web uploads, Telegram voice messages, or any other channel that attaches audio files.
 
 Each consumer resolves the path differently:
 

@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
+import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
@@ -22,7 +23,7 @@ const newJob = ref({
   type: 'every',
   every_seconds: 3600,
   cron_expr: '',
-  at: '',
+  at: null,
 })
 
 const scheduleTypes = ref([
@@ -30,6 +31,17 @@ const scheduleTypes = ref([
   { label: 'Cron Expression', value: 'cron' },
   { label: 'One-time', value: 'at' },
 ])
+
+watch(() => newJob.value.type, (val) => {
+  if (val === 'at' && !newJob.value.at) {
+    newJob.value.at = new Date(Date.now() + 30 * 60 * 1000)
+  }
+})
+
+function toLocalISO(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
 
 onMounted(loadJobs)
 
@@ -44,12 +56,12 @@ async function createJob() {
   }
   if (newJob.value.type === 'every') body.every_seconds = newJob.value.every_seconds
   if (newJob.value.type === 'cron') body.cron_expr = newJob.value.cron_expr
-  if (newJob.value.type === 'at') body.at = newJob.value.at
+  if (newJob.value.type === 'at' && newJob.value.at) body.at = toLocalISO(newJob.value.at)
 
   await api.post('/scheduler/jobs', body)
   toast.add({ severity: 'success', summary: 'Created', detail: 'Job created', life: 2000 })
   showDialog.value = false
-  newJob.value = { name: '', message: '', type: 'every', every_seconds: 3600, cron_expr: '', at: '' }
+  newJob.value = { name: '', message: '', type: 'every', every_seconds: 3600, cron_expr: '', at: null }
   await loadJobs()
 }
 
@@ -130,8 +142,15 @@ function statusSeverity(status) {
         <InputText v-model="newJob.cron_expr" placeholder="0 9 * * *" class="w-full" />
       </div>
       <div v-if="newJob.type === 'at'" class="form-group">
-        <label>Date/Time (ISO)</label>
-        <InputText v-model="newJob.at" placeholder="2025-01-01T09:00:00" class="w-full" />
+        <label>Date/Time</label>
+        <DatePicker
+          v-model="newJob.at"
+          showTime
+          hourFormat="24"
+          showIcon
+          fluid
+          dateFormat="yy-mm-dd"
+        />
       </div>
       <div class="dialog-footer">
         <Button label="Cancel" severity="secondary" text @click="showDialog = false" />

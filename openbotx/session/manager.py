@@ -38,7 +38,7 @@ class Session:
         out: list[dict[str, Any]] = []
         for m in self.messages[-max_messages:]:
             entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
-            for k in ("tool_calls", "tool_call_id", "name"):
+            for k in ("tool_calls", "tool_call_id", "name", "media"):
                 if k in m:
                     entry[k] = m[k]
             out.append(entry)

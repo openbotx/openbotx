@@ -1,7 +1,7 @@
 import mimetypes
 import posixpath
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -182,6 +182,35 @@ async def create_file(path: str, request: Request):
         return {"error": "Access denied"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.post("/upload/{path:path}")
+async def upload_files(path: str, request: Request):
+    storage = _get_storage(request)
+    try:
+        target_dir = _safe_storage_path(path) if path else ""
+        form = await request.form()
+        uploaded = []
+        for key in form:
+            file = form[key]
+            if not hasattr(file, "read"):
+                continue
+            data = await file.read()
+            filename = posixpath.basename(file.filename or "upload.bin")
+            file_path = f"{target_dir}/{filename}" if target_dir else filename
+            safe_path = _safe_storage_path(file_path)
+            await storage.write(safe_path, data)
+            uploaded.append(safe_path)
+        return {"status": "ok", "paths": uploaded}
+    except AccessDeniedError:
+        return {"error": "Access denied"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/upload")
+async def upload_files_root(request: Request):
+    return await upload_files("", request)
 
 
 @router.get("/{path:path}")

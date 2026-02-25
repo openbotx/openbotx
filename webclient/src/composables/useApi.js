@@ -52,5 +52,18 @@ export function useApi() {
     return request(path, { method: 'DELETE' })
   }
 
-  return { get, post, put, patch, del }
+  async function upload(path, files) {
+    const form = new FormData()
+    files.forEach((f, i) => form.append(`file_${i}`, f))
+    const url = `${BASE_URL}${path}`
+    const auth = useAuthStore()
+    const headers = {}
+    if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`
+    const res = await fetch(url, { method: 'POST', headers, body: form })
+    if (res.status === 401) { auth.logout(); throw new Error('Session expired') }
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+    return res.json()
+  }
+
+  return { get, post, put, patch, del, upload }
 }

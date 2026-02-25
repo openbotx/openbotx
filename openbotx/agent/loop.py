@@ -14,8 +14,8 @@ from openbotx.bus.events import InboundMessage, OutboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.cron.service import CronService
 from openbotx.helpers.text import describe_tool_use, humanize
+from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.providers.base import LLMProvider
-from openbotx.server.websocket import WebSocketManager
 from openbotx.session.manager import SessionManager
 from openbotx.tasks.manager import TaskManager
 from openbotx.tasks.models import TaskState
@@ -49,7 +49,7 @@ class AgentLoop:
         bus: MessageBus,
         provider: LLMProvider,
         workspace: Path,
-        ws_manager: WebSocketManager | None,
+        dispatcher: EventDispatcher | None,
         task_manager: TaskManager,
         session_manager: SessionManager,
         skills_loader: SkillsLoader,
@@ -65,12 +65,13 @@ class AgentLoop:
         restrict_to_workspace: bool = True,
         image_config=None,
         storage=None,
+        public_url: str = "",
     ):
         self._bus = bus
         self._provider = provider
         self._workspace = workspace
         self._storage = storage
-        self._ws_manager = ws_manager
+        self._dispatcher = dispatcher
         self._task_manager = task_manager
         self._session_manager = session_manager
         self._skills_loader = skills_loader
@@ -87,7 +88,7 @@ class AgentLoop:
         self._image_config = image_config
 
         self._memory = MemoryStore(workspace)
-        self._context_builder = ContextBuilder(workspace, self._memory, skills_loader)
+        self._context_builder = ContextBuilder(workspace, self._memory, skills_loader, public_url=public_url)
         self._registry = ToolRegistry()
         self._stop_event = asyncio.Event()
 
@@ -171,6 +172,17 @@ class AgentLoop:
 
         await self._task_manager.update_state(task_id, TaskState.DOING)
 
+        if msg.channel != "web" and self._dispatcher:
+            await self._dispatcher.broadcast(
+                "chat:user_message",
+                {
+                    "chat_id": msg.chat_id,
+                    "content": msg.content,
+                    "media": msg.media,
+                    "channel": msg.channel,
+                },
+            )
+
         session = self._session_manager.get_or_create(msg.session_key)
 
         content = msg.content.strip()
@@ -179,8 +191,8 @@ class AgentLoop:
             session.clear()
             self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.DONE)
-            if self._ws_manager:
-                await self._ws_manager.broadcast("sessions:updated", {})
+            if self._dispatcher:
+                await self._dispatcher.broadcast("sessions:updated", {})
             await self._bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
@@ -213,7 +225,19 @@ class AgentLoop:
         if self._cron_tool:
             self._cron_tool.set_context(msg.channel, msg.chat_id)
 
-        media_urls = await self._resolve_media(msg.media) if msg.media else None
+        extra_content = ""
+        media_urls = None
+        if msg.media:
+            extra_content, image_uris = await self._resolve_media(msg.media)
+            media_urls = image_uris or None
+
+        if extra_content:
+            content = f"{content}\n\n{extra_content}"
+            if self._dispatcher:
+                await self._dispatcher.broadcast(
+                    "chat:transcription",
+                    {"chat_id": msg.chat_id, "content": extra_content},
+                )
 
         system_prompt = self._context_builder.build_system_prompt()
         history = session.get_history()
@@ -235,12 +259,15 @@ class AgentLoop:
             )
             return
 
-        session.add_message("user", content)
+        user_kwargs = {}
+        if msg.media:
+            user_kwargs["media"] = msg.media
+        session.add_message("user", content, **user_kwargs)
         session.add_message("assistant", response_text)
         self._session_manager.save(session)
 
-        if self._ws_manager:
-            await self._ws_manager.broadcast("sessions:updated", {})
+        if self._dispatcher:
+            await self._dispatcher.broadcast("sessions:updated", {})
 
         await self._bus.publish_outbound(
             OutboundMessage(
@@ -267,8 +294,8 @@ class AgentLoop:
                 temperature=self._temperature,
             )
 
-            if response.reasoning_content and self._ws_manager:
-                await self._ws_manager.broadcast(
+            if response.reasoning_content and self._dispatcher:
+                await self._dispatcher.broadcast(
                     "chat:thinking",
                     {
                         "task_id": task_id,
@@ -300,10 +327,10 @@ class AgentLoop:
                 for tc in response.tool_calls:
                     result = await self._registry.execute(tc.name, tc.arguments)
 
-                    if self._ws_manager:
+                    if self._dispatcher:
                         display_name = humanize(tc.name)
                         description = describe_tool_use(tc.name, tc.arguments)
-                        await self._ws_manager.broadcast(
+                        await self._dispatcher.broadcast(
                             "chat:tool_use",
                             {
                                 "task_id": task_id,
@@ -393,14 +420,35 @@ class AgentLoop:
         except Exception as e:
             logger.error("memory consolidation failed: %s", e, exc_info=True)
 
-    async def _resolve_media(self, paths: list[str]) -> list[str]:
-        resolved = []
+    _AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a", ".webm", ".aac", ".flac"}
+
+    async def _resolve_media(
+        self, paths: list[str]
+    ) -> tuple[str, list[str]]:
+        """Resolve media paths: transcribe audio, convert images to data URIs.
+
+        Returns (transcription_text, image_data_uris).
+        """
+        transcriptions: list[str] = []
+        image_uris: list[str] = []
+
         for path in paths:
-            if path.startswith("data:"):
-                resolved.append(path)
-                continue
-            if self._storage:
-                resolved.append(self._storage.get_data_uri(path))
-            else:
-                resolved.append(path)
-        return resolved
+            ext = Path(path).suffix.lower()
+
+            if ext in self._AUDIO_EXTENSIONS:
+                if self._storage:
+                    try:
+                        data = await self._storage.read(path)
+                        from openbotx.helpers.transcription import transcribe
+
+                        text = transcribe(data)
+                        if text:
+                            transcriptions.append(f"[Audio transcription]: {text}")
+                    except Exception as e:
+                        logger.warning("audio transcription failed for %s: %s", path, e)
+            elif path.startswith("data:"):
+                image_uris.append(path)
+            elif self._storage:
+                image_uris.append(self._storage.get_data_uri(path))
+
+        return "\n".join(transcriptions), image_uris

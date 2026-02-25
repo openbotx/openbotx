@@ -28,6 +28,7 @@ function sessionLabel(key) {
   const chatId = chatIdFromKey(key)
 
   if (channel === 'heartbeat') return 'Heartbeat'
+  if (channel === 'cron') return `Cron ${chatId}`
   if (channel === 'telegram') return `Telegram ${chatId}`
   if (channel === 'web') {
     return chatId.length > 12 ? `Chat ${chatId.slice(0, 8)}` : chatId
@@ -52,8 +53,8 @@ export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
   const currentToolUse = ref(null)
 
-  async function sendMessage(text) {
-    messages.value.push({ role: 'user', content: text, timestamp: Date.now() })
+  async function sendMessage(text, media = []) {
+    messages.value.push({ role: 'user', content: text, media, timestamp: Date.now() })
     streaming.value = true
     currentToolUse.value = null
 
@@ -61,6 +62,7 @@ export const useChatStore = defineStore('chat', () => {
       const res = await api.post('/chat', {
         message: text,
         session_id: currentSessionId.value,
+        media,
       })
       return res
     } catch (e) {
@@ -72,6 +74,18 @@ export const useChatStore = defineStore('chat', () => {
   function _isCurrentSession(data) {
     if (!data.chat_id) return true
     return data.chat_id === chatIdFromKey(currentSessionId.value)
+  }
+
+  function onUserMessage(data) {
+    if (!_isCurrentSession(data)) return
+    messages.value.push({
+      role: 'user',
+      content: data.content,
+      media: data.media,
+      channel: data.channel,
+      timestamp: Date.now(),
+    })
+    streaming.value = true
   }
 
   function onMessage(data) {
@@ -96,6 +110,20 @@ export const useChatStore = defineStore('chat', () => {
   function onThinking(data) {
     if (!_isCurrentSession(data)) return
     streaming.value = true
+  }
+
+  function onTranscription(data) {
+    if (!_isCurrentSession(data)) return
+    // Find the last user message and append the transcription
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (messages.value[i].role === 'user') {
+        const msg = messages.value[i]
+        msg.content = msg.content
+          ? `${msg.content}\n\n${data.content}`
+          : data.content
+        break
+      }
+    }
   }
 
   function onToolUse(data) {
@@ -167,9 +195,11 @@ export const useChatStore = defineStore('chat', () => {
     streaming,
     currentToolUse,
     sendMessage,
+    onUserMessage,
     onMessage,
     onThinking,
     onToolUse,
+    onTranscription,
     onSessionsUpdated,
     loadSessions,
     loadHistory,

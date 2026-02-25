@@ -9,7 +9,6 @@ from typing import Any
 from openbotx.bus.events import InboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.providers.base import LLMProvider
-from openbotx.server.websocket import WebSocketManager
 from openbotx.tasks.manager import TaskManager
 from openbotx.tools.browser import BrowserTool
 from openbotx.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
@@ -29,7 +28,6 @@ class SubagentManager:
         provider: LLMProvider,
         workspace: Path,
         bus: MessageBus,
-        ws_manager: WebSocketManager | None,
         task_manager: TaskManager,
         model: str,
         brave_api_key: str = "",
@@ -41,7 +39,6 @@ class SubagentManager:
         self._provider = provider
         self._workspace = workspace
         self._bus = bus
-        self._ws_manager = ws_manager
         self._task_manager = task_manager
         self._model = model
         self._brave_api_key = brave_api_key

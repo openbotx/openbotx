@@ -6,6 +6,8 @@ defineProps({
   tasks: { type: Array, default: () => [] },
   severity: { type: String, default: 'info' },
 })
+
+const emit = defineEmits(['go-to-session'])
 </script>
 
 <template>
@@ -15,7 +17,7 @@ defineProps({
       <span class="column-count">{{ tasks.length }}</span>
     </div>
     <div class="column-cards">
-      <TaskCard v-for="task in tasks" :key="task.id" :task="task" />
+      <TaskCard v-for="task in tasks" :key="task.id" :task="task" @go-to-session="emit('go-to-session', $event)" />
       <div v-if="tasks.length === 0" class="empty-column">
         No tasks
       </div>
@@ -44,7 +46,8 @@ defineProps({
 }
 
 .column-count {
-  background: var(--p-surface-100);
+  background: color-mix(in srgb, var(--p-text-color) 10%, transparent);
+  color: var(--p-text-muted-color);
   border-radius: 1rem;
   padding: 0.15rem 0.6rem;
   font-size: 0.8rem;

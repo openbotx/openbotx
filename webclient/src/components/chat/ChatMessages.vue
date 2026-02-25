@@ -10,9 +10,29 @@ const props = defineProps({
 
 const container = ref(null)
 
+const renderer = new marked.Renderer()
+const defaultLinkRenderer = renderer.link.bind(renderer)
+renderer.link = function (args) {
+  const html = defaultLinkRenderer(args)
+  return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ')
+}
+
 function renderMarkdown(text) {
   if (!text) return ''
-  return marked(text, { breaks: true })
+  return marked(text, { breaks: true, renderer })
+}
+
+function isImage(path) {
+  return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path)
+}
+
+function isAudio(path) {
+  return /\.(mp3|wav|ogg|m4a|webm|aac|flac)$/i.test(path)
+}
+
+function mediaUrl(path) {
+  if (path.startsWith('public/')) return `/${path}`
+  return `/api/files/download/${path}`
 }
 
 watch(
@@ -38,13 +58,17 @@ watch(
         <i v-else class="pi pi-sparkles"></i>
       </div>
       <div class="message-body">
+        <div v-if="msg.media?.length" class="message-media">
+          <template v-for="(path, k) in msg.media" :key="k">
+            <img v-if="isImage(path)" :src="mediaUrl(path)" class="media-thumb" />
+            <audio v-else-if="isAudio(path)" :src="mediaUrl(path)" controls class="media-audio" />
+          </template>
+        </div>
         <div v-if="msg.content" class="message-content" v-html="renderMarkdown(msg.content)"></div>
         <div v-if="msg.tool_uses" class="tool-uses">
           <div v-for="(tu, j) in msg.tool_uses" :key="j" class="tool-use-item">
-            <div class="tool-use-header">
-              <i class="pi pi-cog"></i>
-              <span class="tool-name">{{ tu.tool }} Tool</span>
-            </div>
+            <i class="pi pi-cog tool-icon"></i>
+            <span class="tool-name">{{ tu.tool }}</span>
             <span v-if="tu.description" class="tool-desc">{{ tu.description }}</span>
           </div>
         </div>
@@ -151,6 +175,27 @@ watch(
   font-size: 0.85em;
 }
 
+.message-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.media-thumb {
+  max-width: 240px;
+  max-height: 200px;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  cursor: pointer;
+}
+
+.media-audio {
+  min-width: 250px;
+  max-width: 300px;
+  height: 36px;
+}
+
 .tool-uses {
   margin-top: 0.5rem;
   display: flex;
@@ -163,18 +208,20 @@ watch(
   color: var(--p-text-muted-color);
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
-.tool-use-header {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+.tool-icon {
+  flex-shrink: 0;
+  font-size: 0.75rem;
 }
 
 .tool-name {
   font-weight: 600;
   color: var(--p-primary-color);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tool-desc {
@@ -182,7 +229,7 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .tool-indicator {
@@ -251,13 +298,20 @@ watch(
   }
 
   .tool-use-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
+    flex-wrap: wrap;
   }
 
   .tool-desc {
     white-space: normal;
+  }
+
+  .media-thumb {
+    max-width: 180px;
+    max-height: 150px;
+  }
+
+  .media-audio {
+    max-width: 100%;
   }
 
   .message-content :deep(pre) {
