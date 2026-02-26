@@ -17,22 +17,112 @@
 </p>
 
 <p align="center">
-    OpenBotX is an open-source AI assistant platform with a web interface, task board, multi-channel support, and a skills system — all manageable through the browser.
+    An open-source platform for orchestrating AI agents — secure, simple, and built for everyone.<br>
+    Multi-agent, real-time task board, web control panel, skills system, browser automation, multi-provider, scheduler, and more.<br>
+    One command to start. Everything from the browser. No coding required.
 </p>
+
+---
+
+## What is OpenBotX?
+
+OpenBotX is a platform for creating, managing, and orchestrating AI agents and their subagents. Everything runs from a single web control panel that works on your phone, tablet, or computer.
+
+**The mission is simple:** let anyone — even non-developers — build AI agents, automations, and workflows that do real work, without complex setups or coding.
+
+### Why OpenBotX?
+
+- **One command to start.** Install, init, start. No Docker, no infrastructure, no complex configuration. Your control panel is ready in seconds.
+- **Security first.** Agents run in sandboxed workspaces with restricted file access, shell safety guards, and per-agent isolation. This isn't an afterthought — it's built into the foundation.
+- **Everything from the browser.** Chat, files, skills, tools, agents, scheduler, settings — all managed through a responsive web panel. No terminal required after the initial setup.
+- **Real-time task board.** A Kanban board shows every task across all agents. See what's running, what finished, what failed — with live tool execution status and duration timers.
+- **Multi-agent with full visibility.** Run multiple specialized agents, each with its own model, workspace, and tools. Filter and monitor what each one is doing in real time.
+- **Built for non-developers.** Skills are Markdown files. Configuration is YAML with a visual editor. The goal is to make AI accessible to everyone.
 
 ## Features
 
-- **Web Interface** — Chat, task board (Kanban), file manager, settings, all in one place
-- **Multi-Channel** — Web, Telegram (more coming)
-- **Task Board** — Real-time Kanban view of agent tasks (TODO / DOING / DONE / ERROR)
-- **Skills System** — Define AI capabilities with Markdown files
-- **Tools** — File operations, shell, web search, HTTP client, browser automation, and more
-- **Multiple Agents** — Configure named agents with different models and parameters
-- **Scheduler** — Cron jobs and one-time scheduled tasks
-- **Heartbeat** — Periodic agent wake-up to check a user-managed task file (HEARTBEAT)
-- **Multi-Provider** — Anthropic, OpenAI, OpenRouter, Gemini, DeepSeek, Groq, and custom endpoints via LiteLLM
-- **Subagents** — Spawn background agents for parallel tasks
-- **Memory** — Automatic conversation memory with consolidation
+### Control Panel (Web)
+
+- Responsive interface — works on desktop, tablet, and smartphone
+- Real-time chat with session management and conversation history
+- Kanban task board with live tool execution status, duration timers, error details, and per-agent filtering
+- File manager with Markdown editor, text editor, media preview (image/video/audio), file upload, and folder management
+- Skills editor — view, create, and edit agent skills directly from the browser
+- Tools viewer with parameter schema documentation
+- Scheduler manager for cron jobs and one-time tasks
+- System info panel (OS, CPU, memory, disk, GPU, Python and OpenBotX versions)
+- Full configuration editor with YAML validation, organized in visual tabs (Bot, Channels, Storage, Tools, Auth, Advanced)
+
+### Agents
+
+- Multi-agent orchestration — named agents with independent models, workspaces, tools, and instructions
+- Automatic LLM-based message routing between agents (classifier with conversation continuity)
+- Subagents — spawn background agents for parallel tasks with isolated browser tabs and restricted tool access
+- Per-agent workspace isolation and tool whitelisting
+- Configurable model parameters per agent (temperature, max tokens, max iterations)
+
+### Tools
+
+- **File operations** — read, write, edit, and list directories (with workspace sandboxing)
+- **Shell execution** — run commands with timeout, safety guards, and path restrictions
+- **Web search** — Brave Search API integration
+- **Web fetch** — extract content from URLs
+- **HTTP client** — GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS with download/upload support
+- **RSS reader** — RSS 2.0 and Atom feed parsing
+- **Browser automation** — Chrome headless via CDP, multi-tab architecture, navigate, click, type, screenshot, evaluate JavaScript
+- **Image generation** — configurable provider and model
+- **Twitter/X posting** — text, media, and threads via OAuth 1.0a
+- **Message** — send intermediate messages to the user during processing
+- **Spawn** — delegate tasks to background subagents
+- **Cron** — create, list, and remove scheduled jobs
+- **Save memory** — persist facts to long-term memory
+
+### Channels
+
+- Web (WebSocket with real-time events)
+- Telegram (polling, media support, typing indicator, message splitting)
+- Unified message bus — all channels share the same processing pipeline
+
+### AI Providers
+
+- Anthropic, OpenAI, OpenRouter, Gemini, DeepSeek, Groq, and custom endpoints via LiteLLM
+- Prompt caching support (Anthropic, OpenRouter)
+- Extended thinking / reasoning content support
+
+### Memory and Sessions
+
+- Automatic conversation consolidation (long-term memory + timestamped history)
+- Per-session JSONL persistence with in-memory caching
+- Transient live state for real-time tool tracking (survives page refresh during execution)
+- Configurable memory window for consolidation threshold
+
+### Skills
+
+- Markdown-based skill definitions with YAML frontmatter
+- Always-on or on-demand activation
+- Dependency checks (required binaries and environment variables)
+- Built-in and project-level skills (project overrides built-in)
+- Create and edit skills from the web panel
+
+### Scheduler and Heartbeat
+
+- Cron expressions, fixed intervals, and one-time scheduled tasks
+- Persistent job storage with automatic origin tracking
+- Heartbeat service — periodic agent wake-up from a user-managed Markdown task file
+
+### Storage
+
+- Local filesystem or AWS S3
+- Date-organized media storage (YYYY/MM/DD)
+- Public file serving without authentication
+- Data URI generation for LLM image processing
+
+### Security
+
+- JWT authentication with configurable credentials
+- Sandboxed workspaces with per-agent directory restrictions
+- Shell safety guards (blocked destructive commands, path traversal protection)
+- Tool access control (subagents have restricted tool sets)
 
 ## Quick Start
 
