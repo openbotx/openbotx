@@ -59,6 +59,11 @@ async function loadFiles() {
   files.value = await api.get('/files')
 }
 
+async function refreshFiles() {
+  clearSelection()
+  await loadFiles()
+}
+
 function onSelect(item) {
   selectedItem.value = item
   if (item.type === 'file') {
@@ -211,6 +216,7 @@ async function confirmDelete() {
           <span>Back</span>
         </button>
         <h2 v-else class="header-title" @click="clearSelection" title="Click to deselect">Files</h2>
+        <Button icon="pi pi-refresh" size="small" text severity="secondary" title="Refresh" @click="refreshFiles" />
       </div>
 
       <div v-if="selectedItem" class="header-center">

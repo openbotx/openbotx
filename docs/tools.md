@@ -74,11 +74,15 @@ All file tools receive a `PathResolver` instance at construction. When `tools.ge
 
 #### read_file
 
-Read the contents of a file.
+Read the contents of a file. Supports line-based pagination for large files.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | File path, relative to workspace or absolute. |
+| `offset` | integer | No | Line number to start reading from (1-based). Use to continue truncated reads. |
+| `limit` | integer | No | Maximum number of lines to read. Defaults to entire file. |
+
+**Output limit:** Each read returns up to **50 KB** of content. When a file exceeds this limit, the output includes the line range shown and the `offset` value needed to continue reading the next chunk. The agent can call `read_file` multiple times with increasing offsets to read the full file.
 
 #### write_file
 
@@ -122,6 +126,8 @@ Execute a shell command.
 | `command` | string | Yes | The shell command to execute. |
 
 The command runs with a configurable timeout (`tools.exec.timeout`, default 60 seconds). When `tools.general.restrict_to_workspace` is enabled (detected via `PathResolver.is_restricted`), the working directory is locked to the workspace.
+
+**Output limit:** Output larger than **200 KB** is truncated using tail-based truncation — only the last 200 KB of output is kept, prefixed with a warning: `[Output truncated: showing last 200000 of N chars]`. This preserves the most recent output (where errors and results typically appear) while discarding older output.
 
 ---
 
@@ -266,7 +272,7 @@ Full HTTP client with download and upload support. Uses a `PathResolver` for fil
 | `text` | `text/plain` |
 | `xml` | `application/xml` |
 
-**Response format:** Returns JSON with `status`, `headers`, `body`, and `truncated` fields. Response bodies larger than 10,000 characters are truncated.
+**Response format:** Returns JSON with `status`, `headers`, `body`, and `truncated` fields. Response bodies larger than **50,000 characters** (50 KB) are truncated.
 
 **Download mode:** When `download_path` is set, the file is saved and the response returns `status`, `path`, `size`, and `content_type` instead of the body.
 

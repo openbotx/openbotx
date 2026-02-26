@@ -456,13 +456,13 @@ Skills marked with `always: true` are automatically loaded and added to the prom
 
 ### 8.6. Available Skills Summary
 
-An XML list of all available skills is added, so the LLM knows what it can request:
+An XML list of all available skills is added, so the LLM knows what it can request. Each skill includes its name, description, file location (so the LLM can read it if needed), and availability status:
 
 ```xml
-<skills>
-  <skill name="code-review" status="available">Review code for issues</skill>
-  <skill name="git" status="available" always="true">Git operations</skill>
-</skills>
+<available_skills>
+  <skill><name>code-review</name><description>Review code for issues</description><location>/path/to/skills/code-review/SKILL.md</location><status>available</status></skill>
+  <skill always="true"><name>git</name><description>Git operations</description><location>/path/to/skills/git/SKILL.md</location><status>available</status></skill>
+</available_skills>
 ```
 
 ### 8.7. Agent Instructions
@@ -763,9 +763,16 @@ The loop has a maximum iteration limit (default: **40**, configurable via `param
 "I've reached my processing limit. Please try again or simplify your request."
 ```
 
-### Result Truncation
+### Output Limits
 
-Tool results are truncated to **500 characters** before being added back to the LLM messages. This is performed by `ContextBuilder.add_tool_result()`, which is called after each tool execution in the agent loop. Subagents perform the same 500-character truncation inline (not via `ContextBuilder`). This prevents excessively large results from consuming tokens unnecessarily.
+Each tool manages its own output limits internally. There is no global truncation applied by the agent loop or `ContextBuilder` — tool results are passed through as-is. This design ensures each tool controls the size and format of its results appropriately:
+
+- **read_file** — 50 KB per read, with line-based pagination (offset/limit parameters)
+- **exec** — 200 KB, tail-based truncation (keeps the last 200 KB, where errors and results typically appear)
+- **http_client** — 50 KB response body truncation
+- **web_fetch** — 50 KB content extraction limit
+
+Other tools (file operations, web search, memory, etc.) return naturally small results and don't need truncation.
 
 ### Practical Example
 
@@ -941,7 +948,7 @@ The `exec` tool (`openbotx/tools/shell.py`) has multiple layers of protection:
 
 **Timeout** — Commands exceeding the timeout (default: 60s) are automatically killed with `process.kill()`
 
-**Truncation** — Output larger than **10,000 characters** is truncated with a warning
+**Truncation** — Output larger than **200 KB** (200,000 characters) is truncated using tail-based truncation: only the last 200 KB is kept, prefixed with `[Output truncated: showing last 200000 of N chars]`. This preserves the most recent output where errors and results typically appear
 
 ### Browser (CDP Automation)
 
@@ -1046,7 +1053,7 @@ This prevents subagents from multiplying uncontrollably, sending unexpected mess
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
 | Tools | All (16) | **12** (no message, spawn, cron, save_memory) |
-| Tool result truncation | Via `ContextBuilder.add_tool_result()` (500 chars) | **Inline** (500 chars, not via ContextBuilder) |
+| Tool result truncation | Per-tool (each tool manages its own output limits) | **500 chars** (inline truncation after tool execution) |
 | Model | Configurable per agent | **Inherits from parent agent** |
 | PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |
 
