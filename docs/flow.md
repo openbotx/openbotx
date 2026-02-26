@@ -237,7 +237,7 @@ The route (`openbotx/server/routes/chat.py`) creates a task beforehand and injec
 
 1. The `TelegramChannel` performs periodic **polling** on the Telegram API to fetch new messages
 2. Upon receiving a message, it creates an `InboundMessage` with `channel="telegram"` and Telegram metadata (`user_id`, `username`, `first_name`, `is_group`, `message_id`)
-3. If the message contains media (photos, documents), the file is downloaded to the `public/media/` directory inside the project folder and a **relative path** (e.g., `public/media/abc123.jpg`) is added to the `media` list
+3. If the message contains media (photos, documents), the file is downloaded to a date-organized subdirectory under `public/media/` (e.g., `public/media/2026/02/26/abc123.jpg`) and the **relative path** is added to the `media` list
 4. The message is published to the same bus inbound queue
 
 ### InboundMessage Structure
@@ -430,7 +430,7 @@ Workspace: /home/user/myproject/workspace
 
 Public: /home/user/myproject/public
   Web-accessible at /public/ URL. Use for anything the user needs to access:
-  - /home/user/myproject/public/media — images, audio, video
+  - /home/user/myproject/public/media — images, audio, video (organized by date: YYYY/MM/DD)
   - /home/user/myproject/public/documents — PDFs, spreadsheets, exports
 ```
 
@@ -1750,7 +1750,9 @@ Media files (images, audio, documents) are stored with **relative paths only**. 
 
 ### Design Principle
 
-The system never stores absolute URLs or encoded data in the message. Instead, it stores a **relative path** (e.g., `public/media/abc123.jpg`) and resolves on demand via the storage provider. This ensures compatibility across all consumers — cloud LLMs can't access `localhost` URLs, but they can process base64 data URIs.
+The system never stores absolute URLs or encoded data in the message. Instead, it stores a **relative path** (e.g., `public/media/2026/02/26/abc123.jpg`) and resolves on demand via the storage provider. This ensures compatibility across all consumers — cloud LLMs can't access `localhost` URLs, but they can process base64 data URIs.
+
+**Date-based organization:** All media files are saved in date-organized subdirectories under `public/media/` using the `media_path()` helper from `openbotx/helpers/path.py`. The path format is `public/media/YYYY/MM/DD/{filename}`. This prevents directory bloat by distributing files across daily folders. Both `ImageGenerationTool` and `TelegramChannel` use this helper. `LocalStorage.write()` creates intermediate directories automatically.
 
 ### The `public/` Folder
 
@@ -1793,22 +1795,22 @@ Two implementations:
 | `LocalStorage` | `"local"` (default) | `{public_url}/{path}` | Read file, detect MIME, encode base64 |
 | `S3Storage` | `"s3"` | `https://{bucket}.s3.{region}.amazonaws.com/{path}` | Download from S3, encode base64 |
 
-For `LocalStorage`, the `base_path` points to the **project root** directory. All paths are relative within it (e.g., `public/media/abc123.jpg` resolves to `project/public/media/abc123.jpg`). This allows the storage to handle any project file, not just public assets.
+For `LocalStorage`, the `base_path` points to the **project root** directory. All paths are relative within it (e.g., `public/media/2026/02/26/abc123.jpg` resolves to `project/public/media/2026/02/26/abc123.jpg`). This allows the storage to handle any project file, not just public assets.
 
 ### Data Flow
 
 ```mermaid
 graph TD
-    A["Channel receives media"] --> B["Save to project/public/media/abc123.jpg"]
-    B --> C["InboundMessage.media = ['public/media/abc123.jpg']"]
+    A["Channel receives media"] --> B["Save to project/public/media/YYYY/MM/DD/abc123.jpg"]
+    B --> C["InboundMessage.media = ['public/media/YYYY/MM/DD/abc123.jpg']"]
     C --> D["Agent Loop receives message"]
     D --> E{File type?}
-    E -->|Image| F["storage.get_data_uri('public/media/abc123.jpg')"]
+    E -->|Image| F["storage.get_data_uri('public/media/YYYY/MM/DD/abc123.jpg')"]
     F --> G["data:image/jpeg;base64,/9j/4AAQ..."]
     G --> H["ContextBuilder: {type: image, url: data:...}"]
     H --> I["LLM Provider converts to OpenAI format"]
     I --> J["LLM processes the image"]
-    E -->|Audio| K["storage.read('public/media/voice.webm')"]
+    E -->|Audio| K["storage.read('public/media/YYYY/MM/DD/voice.webm')"]
     K --> L["faster-whisper transcribes audio to text"]
     L --> M["Transcript prepended to message content"]
     M --> N["LLM processes the text"]

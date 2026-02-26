@@ -7,6 +7,7 @@ import logging
 from litellm import aimage_edit, aimage_generation
 
 from openbotx.config.schema import ImageConfig
+from openbotx.helpers.path import media_path
 from openbotx.storage.base import StorageProvider
 from openbotx.tools.base import Tool
 
@@ -120,7 +121,7 @@ class ImageGenerationTool(Tool):
         if not image_b64:
             return "Error: empty image data"
 
-        path = f"public/media/{filename}"
+        path = media_path(filename)
         await self._storage.write(path, base64.b64decode(image_b64))
         url = self._storage.get_url(path)
 

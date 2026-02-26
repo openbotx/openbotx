@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from openbotx.bus.events import InboundMessage, OutboundMessage
+from openbotx.helpers.path import media_path
 
 router = APIRouter()
 
@@ -70,7 +71,7 @@ async def upload_media(request: Request):
             data = await file.read()
             ext = Path(file.filename).suffix or ".bin"
             filename = f"{uuid4().hex[:12]}{ext}"
-            path = f"public/media/{filename}"
+            path = media_path(filename)
             await storage.write(path, data)
             paths.append(path)
     return {"paths": paths}

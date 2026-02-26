@@ -17,6 +17,7 @@ from telegram.request import HTTPXRequest
 
 from openbotx.bus.events import InboundMessage, OutboundMessage
 from openbotx.channels.base import BaseChannel
+from openbotx.helpers.path import media_path as make_media_path
 from openbotx.storage.base import StorageProvider
 
 logger = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ class TelegramChannel(BaseChannel):
                 tg_file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, "mime_type", None))
                 filename = f"{media_file.file_id[:16]}{ext}"
-                storage_path = f"public/media/{filename}"
+                storage_path = make_media_path(filename)
 
                 data = await tg_file.download_as_bytearray()
                 await self._storage.write(storage_path, bytes(data))

@@ -389,7 +389,7 @@ Utility modules shared across the codebase.
 
 | File               | Purpose                                                                         |
 | ------------------ | ------------------------------------------------------------------------------- |
-| `path.py`          | `PathResolver` -- resolves file paths against a workspace directory and enforces allowed directory restrictions. Supports relative and absolute paths, home directory expansion (`~`), and multi-directory allowlists (workspace + public). Used by all file-based tools and the HTTP client. |
+| `path.py`          | `PathResolver` -- resolves file paths against a workspace directory and enforces allowed directory restrictions. Supports relative and absolute paths, home directory expansion (`~`), and multi-directory allowlists (workspace + public). Used by all file-based tools and the HTTP client. Also provides `media_path(filename)` -- generates date-organized storage paths (`public/media/YYYY/MM/DD/filename`), used by `ImageGenerationTool` and `TelegramChannel`. |
 | `transcription.py` | Audio transcription via faster-whisper. Lazy-loads the Whisper model on first use. |
 | `text.py`          | `humanize()` -- converts tool names to human-readable format. `describe_tool_use()` -- generates human-readable descriptions of tool calls for WebSocket events. |
 | `config.py`        | Configuration helper utilities.                                                  |

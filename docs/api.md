@@ -116,7 +116,7 @@ Response:
 
 **POST /api/chat/upload**
 
-Upload media files (images, audio). Accepts multipart form data. Files are stored in `public/media/` with a generated filename.
+Upload media files (images, audio). Accepts multipart form data. Files are stored in date-organized subdirectories under `public/media/` (e.g., `public/media/2026/02/26/`) with a generated filename.
 
 Request: `multipart/form-data` with one or more file fields.
 
@@ -124,7 +124,7 @@ Response:
 
 ```json
 {
-  "paths": ["public/media/abc123def456.jpg"]
+  "paths": ["public/media/2026/02/26/abc123def456.jpg"]
 }
 ```
 

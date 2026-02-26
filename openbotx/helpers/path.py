@@ -1,4 +1,11 @@
+from datetime import datetime
 from pathlib import Path
+
+
+def media_path(filename: str) -> str:
+    """Generate a date-organized media storage path (public/media/YYYY/MM/DD/filename)."""
+    today = datetime.now()
+    return f"public/media/{today.year}/{today.month:02d}/{today.day:02d}/{filename}"
 
 
 class PathResolver:
