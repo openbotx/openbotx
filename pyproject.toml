@@ -52,8 +52,9 @@ dependencies = [
     # scheduler
     "croniter>=5.0.0",
 
-    # browser
-    "python-cdp @ file:///Users/paulo/Developer/workspaces/python/python-cdp",
+    # browser (cdp)
+    "aiohttp>=3.9.0",
+    "deprecated>=1.2.0",
 
     # storage
     "boto3>=1.42.38",
@@ -107,6 +108,10 @@ openbotx = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+exclude = ["openbotx/cdp/protocol"]
+
+[tool.ruff.lint.per-file-ignores]
+"openbotx/cdp/**" = ["N818"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]

@@ -229,16 +229,47 @@ Memory entries are saved to the `workspace/memory/` directory.
 ### Browser
 
 **Source:** `openbotx/tools/browser.py`
+**CDP Library:** `openbotx/cdp/` (vendored from [python-cdp](https://github.com/niccokunzmann/python-cdp))
 
 #### browser
 
-Chrome automation via the Chrome DevTools Protocol (CDP).
+Chrome automation via the Chrome DevTools Protocol (CDP). Requires Google Chrome installed on the host system.
+
+**Architecture:** A singleton `_ChromeInstance` manages the Chrome process (launched with `--remote-debugging-port=9222` and a persistent profile at `~/.openbotx/chrome-profile`). Each `BrowserTool` instance gets its own tab via `target.create_target`, enabling concurrent use by the main agent and subagents. The Chrome process starts lazily on the first tool call and is terminated on server shutdown.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `action` | string | Yes | One of `navigate`, `click`, `type`, `screenshot`, `get_text`, `scroll`, `wait`, or `evaluate`. |
+| `action` | string | Yes | One of: `navigate`, `snapshot`, `screenshot`, `click`, `type`, `press`, `inspect`, `evaluate`, `wait`. |
+| `url` | string | Conditional | URL to navigate to. Required for `navigate`. |
+| `selector` | string | Conditional | CSS selector. Required for `click` and `type`. |
+| `text` | string | Conditional | Text to type. Required for `type`. |
+| `key` | string | Conditional | Key name to press. Required for `press`. Available: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, Space. |
+| `script` | string | Conditional | JavaScript expression. Required for `evaluate`. |
+| `seconds` | integer | No | Seconds to wait (default: 2). Used by `wait`. |
+| `max_chars` | integer | No | Max characters for snapshot (default: 50000). |
+| `headless` | boolean | No | Run browser in headless mode (default: false). |
 
-Additional parameters depend on the action. Requires Chrome to be installed on the host system. Each `BrowserTool` instance operates on its own tab within a shared Chrome process, enabling concurrent use by the main agent and subagents.
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `navigate` | Navigate to a URL via `cdp.page.navigate`. Waits 2 seconds for page load. |
+| `snapshot` | Extract visible text content (`document.body.innerText`). Truncated to `max_chars`. |
+| `screenshot` | Capture a PNG screenshot via `cdp.page.capture_screenshot`. |
+| `click` | Click an element by CSS selector. Uses pure CDP: resolves element to `RemoteObjectId`, scrolls into view, gets content quads for coordinates, then dispatches mouse events (mouseMoved → mousePressed → mouseReleased). Includes a hit-test via `elementFromPoint` — if an overlay covers the element, falls back to keyboard activation (`dom.focus` + Enter key). |
+| `type` | Click to focus an element, then type text character-by-character via CDP key events (`dispatch_key_event`). |
+| `press` | Press a special key (Enter, Tab, Escape, etc.) via CDP key events with correct virtual key codes. |
+| `inspect` | Discover interactive elements on the page (links, buttons, inputs, etc.). Returns up to 50 visible elements with their CSS selectors, element type, and label text. |
+| `evaluate` | Run arbitrary JavaScript and return the result. |
+| `wait` | Wait for a specified number of seconds. |
+
+**Click mechanism:** The `_click` method uses a multi-step pure CDP approach:
+
+1. **Resolve** — `runtime.evaluate` to get a `RemoteObjectId` handle for the CSS selector.
+2. **Scroll** — `dom.scroll_into_view_if_needed` to ensure the element is in the viewport.
+3. **Position** — `dom.get_content_quads` to get the element's bounding quad, then compute the center point.
+4. **Hit-test** — `elementFromPoint(x, y)` checks if the top element at those coordinates is inside the target. This detects overlays.
+5. **Activate** — If the hit-test passes, dispatch CDP mouse events at the coordinates. If an overlay is detected, fall back to `dom.focus` + Enter key press (standard accessibility interaction for buttons).
 
 ---
 

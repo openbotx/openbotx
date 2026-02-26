@@ -1,9 +1,14 @@
 import asyncio
+import json
 import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
+from openbotx.cdp import protocol as cdp
+from openbotx.cdp.browser import ChromeLauncher
+from openbotx.cdp.connection import CDPConnection, CDPSession, connect_cdp
+from openbotx.cdp.protocol.input_ import MouseButton
 from openbotx.tools.base import Tool
 
 logger = logging.getLogger(__name__)
@@ -23,8 +28,9 @@ class _ChromeInstance:
     _instance: "_ChromeInstance | None" = None
 
     def __init__(self):
-        self._process = None
-        self._connection = None
+        self._headless = False
+        self._launcher: ChromeLauncher | None = None
+        self._connection: CDPConnection | None = None
         self._lock = asyncio.Lock()
 
     @classmethod
@@ -33,54 +39,43 @@ class _ChromeInstance:
             cls._instance = cls()
         return cls._instance
 
-    async def _ensure_running(self) -> None:
+    async def _ensure_running(self, headless: bool = False) -> None:
         if self._connection is not None:
             return
 
-        from pycdp.browser import ChromeLauncher, ChromeSession
-
+        self._headless = headless
         chrome_path = self._find_chrome()
         if not chrome_path:
             raise RuntimeError("Google Chrome not found")
 
         self.PROFILE.mkdir(parents=True, exist_ok=True)
 
-        launcher = ChromeLauncher(
+        self._launcher = ChromeLauncher(
             binary=chrome_path,
-            args=[
-                "--no-first-run",
-                "--no-default-browser-check",
-                f"--user-data-dir={self.PROFILE}",
-                "--remote-debugging-port=9222",
-            ],
-            headless=True,
+            profile=str(self.PROFILE),
+            headless=self._headless,
+            args=["--remote-debugging-port=9222"],
+            log=False,
         )
 
-        self._process = await launcher.launch()
+        self._launcher.launch()
         await asyncio.sleep(1)
-        self._connection = await ChromeSession.connect(self.CDP_URL)
+        self._connection = await connect_cdp(self.CDP_URL)
 
-    async def open_tab(self):
+    async def open_tab(self, headless: bool = False) -> tuple[CDPSession, cdp.target.TargetID]:
         """Open a new browser tab. Returns (session, target_id)."""
         async with self._lock:
-            await self._ensure_running()
+            await self._ensure_running(headless=headless)
 
-            import httpx
+            target_id = await self._connection.execute(cdp.target.create_target("about:blank"))
+            session = await self._connection.connect_session(target_id)
+            return session, target_id
 
-            async with httpx.AsyncClient() as client:
-                resp = await client.put(f"{self.CDP_URL}/json/new")
-                target = resp.json()
-
-            session = await self._connection.connect_session(target["id"])
-            return session, target["id"]
-
-    async def close_tab(self, target_id: str) -> None:
+    async def close_tab(self, target_id: cdp.target.TargetID) -> None:
         """Close a browser tab by its target ID."""
         async with self._lock:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                await client.post(f"{self.CDP_URL}/json/close/{target_id}")
+            if self._connection is not None:
+                await self._connection.execute(cdp.target.close_target(target_id))
 
     async def cleanup(self) -> None:
         """Terminate the Chrome process."""
@@ -88,9 +83,9 @@ class _ChromeInstance:
             if self._connection:
                 await self._connection.close()
                 self._connection = None
-            if self._process:
-                self._process.terminate()
-                self._process = None
+            if self._launcher:
+                self._launcher.kill()
+                self._launcher = None
             _ChromeInstance._instance = None
 
     @staticmethod
@@ -129,7 +124,9 @@ class BrowserTool(Tool):
     name = "browser"
     description = (
         "Control Chrome browser. Actions: navigate, snapshot, screenshot, "
-        "click, type, evaluate, wait."
+        "click, type, press, inspect, evaluate, wait. Use inspect after navigating "
+        "to discover interactive elements and their selectors. "
+        "By default opens a visible browser window. Set headless=true for invisible mode."
     )
     parameters = {
         "type": "object",
@@ -142,6 +139,8 @@ class BrowserTool(Tool):
                     "screenshot",
                     "click",
                     "type",
+                    "press",
+                    "inspect",
                     "evaluate",
                     "wait",
                 ],
@@ -156,6 +155,10 @@ class BrowserTool(Tool):
                 "type": "string",
                 "description": "Text to type into element",
             },
+            "key": {
+                "type": "string",
+                "description": "Key to press: Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp, etc.",
+            },
             "script": {
                 "type": "string",
                 "description": "JavaScript to evaluate",
@@ -168,13 +171,17 @@ class BrowserTool(Tool):
                 "type": "integer",
                 "description": "Max characters for snapshot (default: 50000)",
             },
+            "headless": {
+                "type": "boolean",
+                "description": "Run browser in headless (invisible) mode. Default: false (visible).",
+            },
         },
         "required": ["action"],
     }
 
     def __init__(self):
-        self._session = None
-        self._target_id: str | None = None
+        self._session: CDPSession | None = None
+        self._target_id: cdp.target.TargetID | None = None
 
     async def execute(self, action: str, **kwargs: Any) -> str:
         if action == "wait":
@@ -182,7 +189,8 @@ class BrowserTool(Tool):
             await asyncio.sleep(seconds)
             return f"Waited {seconds} seconds."
 
-        await self._ensure_tab()
+        headless = kwargs.get("headless", False)
+        await self._ensure_tab(headless=headless)
 
         if action == "navigate":
             return await self._navigate(kwargs.get("url", ""))
@@ -194,27 +202,31 @@ class BrowserTool(Tool):
             return await self._click(kwargs.get("selector", ""))
         if action == "type":
             return await self._type_text(kwargs.get("selector", ""), kwargs.get("text", ""))
+        if action == "press":
+            return await self._press_key(kwargs.get("key", ""))
+        if action == "inspect":
+            return await self._inspect()
         if action == "evaluate":
             return await self._evaluate(kwargs.get("script", ""))
 
         return f"Unknown action: {action}"
 
-    async def _ensure_tab(self) -> None:
+    async def _ensure_tab(self, headless: bool = False) -> None:
         if self._session is not None:
             return
         chrome = _ChromeInstance.get()
-        self._session, self._target_id = await chrome.open_tab()
+        self._session, self._target_id = await chrome.open_tab(headless=headless)
 
     async def _navigate(self, url: str) -> str:
         if not url:
             return "Error: url is required for navigate"
-        await self._session.execute(self._session.cdp.page.navigate(url=url))
+        await self._session.execute(cdp.page.navigate(url=url))
         await asyncio.sleep(2)
         return f"Navigated to {url}"
 
     async def _snapshot(self, max_chars: int = 50000) -> str:
         result = await self._session.execute(
-            self._session.cdp.runtime.evaluate(expression="document.body.innerText")
+            cdp.runtime.evaluate(expression="document.body.innerText")
         )
         text = str(result[0].value) if result and result[0] else ""
         if len(text) > max_chars:
@@ -222,49 +234,254 @@ class BrowserTool(Tool):
         return text if text else "(empty page)"
 
     async def _screenshot(self) -> str:
-        import base64
-
-        result = await self._session.execute(
-            self._session.cdp.page.capture_screenshot(format_="png")
-        )
-        data = base64.b64encode(result[0]).decode() if result else ""
+        data = await self._session.execute(cdp.page.capture_screenshot(format_="png"))
         return f"Screenshot captured ({len(data)} bytes base64)"
+
+    async def _resolve_element(self, selector: str) -> cdp.runtime.RemoteObjectId | None:
+        """Resolve a CSS selector to a CDP RemoteObjectId."""
+        escaped = selector.replace("'", "\\'")
+        result = await self._session.execute(
+            cdp.runtime.evaluate(expression=f"document.querySelector('{escaped}')")
+        )
+        remote_obj = result[0]
+        if not remote_obj or not remote_obj.object_id:
+            return None
+        return remote_obj.object_id
+
+    async def _click_point(self, x: float, y: float) -> None:
+        """Dispatch a full CDP mouse click at the given coordinates."""
+        await self._session.execute(
+            cdp.input_.dispatch_mouse_event(
+                "mouseMoved",
+                x=x,
+                y=y,
+                pointer_type="mouse",
+            )
+        )
+        await self._session.execute(
+            cdp.input_.dispatch_mouse_event(
+                "mousePressed",
+                x=x,
+                y=y,
+                button=MouseButton.LEFT,
+                click_count=1,
+                buttons=1,
+                pointer_type="mouse",
+            )
+        )
+        await self._session.execute(
+            cdp.input_.dispatch_mouse_event(
+                "mouseReleased",
+                x=x,
+                y=y,
+                button=MouseButton.LEFT,
+                click_count=1,
+                pointer_type="mouse",
+            )
+        )
+
+    async def _is_hit_target(self, selector: str, x: float, y: float) -> bool:
+        """Check if the element at (x, y) is inside the target element."""
+        escaped_sel = selector.replace("'", "\\'")
+        hit_js = (
+            "(function(){"
+            f"var target = document.querySelector('{escaped_sel}');"
+            f"var hit = document.elementFromPoint({x},{y});"
+            "return !!(target && hit && target.contains(hit));"
+            "})()"
+        )
+        result = await self._session.execute(
+            cdp.runtime.evaluate(expression=hit_js, return_by_value=True)
+        )
+        return bool(result[0].value) if result and result[0] else False
+
+    async def _activate_by_keyboard(self, object_id: cdp.runtime.RemoteObjectId) -> None:
+        """Focus element via CDP and press Enter to activate it."""
+        await self._session.execute(cdp.dom.focus(object_id=object_id))
+        await self._session.execute(
+            cdp.input_.dispatch_key_event(
+                "keyDown",
+                key="Enter",
+                code="Enter",
+                windows_virtual_key_code=13,
+                native_virtual_key_code=13,
+            )
+        )
+        await self._session.execute(
+            cdp.input_.dispatch_key_event(
+                "keyUp",
+                key="Enter",
+                code="Enter",
+                windows_virtual_key_code=13,
+                native_virtual_key_code=13,
+            )
+        )
 
     async def _click(self, selector: str) -> str:
         if not selector:
             return "Error: selector is required for click"
-        js = f"""
-        (function() {{
-            var el = document.querySelector('{selector}');
-            if (!el) return 'Element not found: {selector}';
-            el.click();
-            return 'Clicked: {selector}';
-        }})()
-        """
-        result = await self._session.execute(self._session.cdp.runtime.evaluate(expression=js))
-        return str(result[0].value) if result and result[0] else "Click executed"
+
+        object_id = await self._resolve_element(selector)
+        if not object_id:
+            return f"Element not found: {selector}"
+
+        # Scroll into view via CDP
+        await self._session.execute(cdp.dom.scroll_into_view_if_needed(object_id=object_id))
+
+        # Get clickable point via CDP content quads
+        quads = await self._session.execute(cdp.dom.get_content_quads(object_id=object_id))
+        if not quads:
+            return f"Could not determine position of: {selector}"
+
+        # Calculate center from first quad (8 floats: x1,y1,x2,y2,x3,y3,x4,y4)
+        quad = quads[0]
+        x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4
+        y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4
+
+        # Verify the element is reachable at these coordinates
+        if await self._is_hit_target(selector, x, y):
+            await self._click_point(x, y)
+        else:
+            # Element is covered by an overlay — activate via keyboard (focus + Enter)
+            await self._activate_by_keyboard(object_id)
+
+        return f"Clicked: {selector}"
 
     async def _type_text(self, selector: str, text: str) -> str:
         if not selector:
             return "Error: selector is required for type"
-        escaped = text.replace("\\", "\\\\").replace("'", "\\'")
-        js = f"""
-        (function() {{
-            var el = document.querySelector('{selector}');
-            if (!el) return 'Element not found: {selector}';
-            el.focus();
-            el.value = '{escaped}';
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            return 'Typed into: {selector}';
-        }})()
+
+        # Click element to focus it via CDP
+        click_result = await self._click(selector)
+        if "not found" in click_result.lower() or "could not" in click_result.lower():
+            return click_result
+        await asyncio.sleep(0.1)
+
+        # Type each character using CDP keyboard events
+        for char in text:
+            await self._session.execute(
+                cdp.input_.dispatch_key_event("keyDown", text=char, key=char)
+            )
+            await self._session.execute(cdp.input_.dispatch_key_event("keyUp", key=char))
+        return f"Typed into: {selector}"
+
+    _KEY_MAP = {
+        "enter": ("Enter", "Enter", 13),
+        "tab": ("Tab", "Tab", 9),
+        "escape": ("Escape", "Escape", 27),
+        "backspace": ("Backspace", "Backspace", 8),
+        "delete": ("Delete", "Delete", 46),
+        "arrowup": ("ArrowUp", "ArrowUp", 38),
+        "arrowdown": ("ArrowDown", "ArrowDown", 40),
+        "arrowleft": ("ArrowLeft", "ArrowLeft", 37),
+        "arrowright": ("ArrowRight", "ArrowRight", 39),
+        "home": ("Home", "Home", 36),
+        "end": ("End", "End", 35),
+        "space": (" ", "Space", 32),
+    }
+
+    async def _press_key(self, key_name: str) -> str:
+        if not key_name:
+            return "Error: key is required for press"
+
+        mapped = self._KEY_MAP.get(key_name.lower())
+        if not mapped:
+            return (
+                f"Unknown key: {key_name}. Available: {', '.join(k.title() for k in self._KEY_MAP)}"
+            )
+
+        key, code, keycode = mapped
+        await self._session.execute(
+            cdp.input_.dispatch_key_event(
+                "keyDown",
+                key=key,
+                code=code,
+                windows_virtual_key_code=keycode,
+                native_virtual_key_code=keycode,
+            )
+        )
+        await self._session.execute(
+            cdp.input_.dispatch_key_event(
+                "keyUp",
+                key=key,
+                code=code,
+                windows_virtual_key_code=keycode,
+                native_virtual_key_code=keycode,
+            )
+        )
+        return f"Pressed: {key_name}"
+
+    async def _inspect(self) -> str:
+        js = """
+        (function() {
+            var items = [];
+            var seen = new Set();
+            var els = document.querySelectorAll(
+                'a, button, input, textarea, select, [role="button"], [role="link"], '
+                + '[role="textbox"], [contenteditable="true"], [tabindex]'
+            );
+            for (var i = 0; i < els.length && items.length < 50; i++) {
+                var el = els[i];
+                var rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) continue;
+                if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+
+                var selector = '';
+                if (el.id) {
+                    selector = '#' + el.id;
+                } else if (el.getAttribute('data-testid')) {
+                    selector = '[data-testid="' + el.getAttribute('data-testid') + '"]';
+                } else if (el.getAttribute('aria-label')) {
+                    selector = '[aria-label="' + el.getAttribute('aria-label') + '"]';
+                } else if (el.name) {
+                    selector = el.tagName.toLowerCase() + '[name="' + el.name + '"]';
+                } else if (el.className && typeof el.className === 'string') {
+                    var cls = el.className.trim().split(/\\s+/).slice(0, 2).join('.');
+                    selector = el.tagName.toLowerCase() + '.' + cls;
+                } else {
+                    selector = el.tagName.toLowerCase();
+                }
+
+                if (seen.has(selector)) continue;
+                seen.add(selector);
+
+                var label = (
+                    el.textContent || el.getAttribute('aria-label')
+                    || el.getAttribute('placeholder') || el.value || ''
+                ).trim().substring(0, 60);
+
+                var tag = el.tagName.toLowerCase();
+                var role = el.getAttribute('role') || '';
+                var type = el.type || '';
+                var desc = tag;
+                if (role) desc += '[' + role + ']';
+                if (type) desc += '[' + type + ']';
+
+                items.push({s: selector, t: desc, l: label});
+            }
+            return JSON.stringify(items);
+        })()
         """
-        result = await self._session.execute(self._session.cdp.runtime.evaluate(expression=js))
-        return str(result[0].value) if result and result[0] else "Type executed"
+        result = await self._session.execute(cdp.runtime.evaluate(expression=js))
+        raw = str(result[0].value) if result and result[0] else "[]"
+        try:
+            elements = json.loads(raw)
+        except Exception:
+            return f"Inspect failed: {raw}"
+
+        if not elements:
+            return "No interactive elements found on page."
+
+        lines = ["Interactive elements on page:", ""]
+        for el in elements:
+            label = f' "{el["l"]}"' if el["l"] else ""
+            lines.append(f"  {el['t']}{label}  →  selector: {el['s']}")
+        return "\n".join(lines)
 
     async def _evaluate(self, script: str) -> str:
         if not script:
             return "Error: script is required for evaluate"
-        result = await self._session.execute(self._session.cdp.runtime.evaluate(expression=script))
+        result = await self._session.execute(cdp.runtime.evaluate(expression=script))
         if result and result[0]:
             return str(result[0].value)
         return "(no result)"

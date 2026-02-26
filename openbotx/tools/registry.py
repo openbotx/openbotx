@@ -1,6 +1,9 @@
+import logging
 from typing import Any
 
 from openbotx.tools.base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -44,6 +47,7 @@ class ToolRegistry:
                 return result + self._HINT
             return result
         except Exception as e:
+            logger.error("tool %s failed: %s", name, e, exc_info=True)
             return f"Error executing {name}: {e}" + self._HINT
 
     @property

@@ -273,7 +273,7 @@ Tools are the actions the agent can perform in the world.
 | `spawn.py`         | `SpawnTool` -- delegate tasks to background subagents.                   |
 | `cron.py`          | `CronTool` -- create, list, and remove scheduled jobs.                   |
 | `memory_tool.py`   | `SaveMemoryTool` -- persist content to MEMORY.md and HISTORY.md.         |
-| `browser.py`       | `BrowserTool` -- browser automation via CDP (Chrome DevTools Protocol). Multi-tab architecture allows concurrent use by main agent and subagents. |
+| `browser.py`       | `BrowserTool` -- browser automation via CDP (Chrome DevTools Protocol) using the vendored `openbotx/cdp/` library. Singleton `_ChromeInstance` manages the Chrome process; each tool instance gets its own tab. Click uses pure CDP: resolve element → scroll into view → get content quads → hit-test via `elementFromPoint` → mouse events or keyboard activation (when overlays are detected). |
 | `http_client.py`   | `HttpClientTool` -- full HTTP client with download/upload support, content type mapping, and `PathResolver` integration. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. |
 | `rss.py`           | `RssReaderTool` -- read RSS 2.0 and Atom feeds. Auto-detects feed format, strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` -- generate images via configurable provider/model. |
@@ -452,6 +452,13 @@ openbotx/
 │   ├── memory.py          # MemoryStore - conversation memory persistence
 │   ├── skills.py          # SkillsLoader - SKILL.md discovery and loading
 │   └── subagent.py        # SubagentManager - background task delegation
+├── cdp/             # Vendored Chrome DevTools Protocol library (from python-cdp)
+│   ├── base.py          # IEventLoop protocol
+│   ├── exceptions.py    # CDP exception classes
+│   ├── utils.py         # LoggerMixin, Retry, Worker utilities
+│   ├── browser.py       # ChromeLauncher - Chrome process management
+│   ├── connection.py    # CDPConnection, CDPSession, connect_cdp (WebSocket)
+│   └── protocol/        # Auto-generated CDP domain modules (runtime, page, dom, input_, target, etc.)
 ├── bus/             # Async message bus and event dispatching
 │   ├── queue.py         # MessageBus with inbound/outbound queues
 │   ├── events.py        # InboundMessage, OutboundMessage data classes
