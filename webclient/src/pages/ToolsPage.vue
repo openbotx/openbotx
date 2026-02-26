@@ -9,9 +9,14 @@ const api = useApi()
 const tools = ref([])
 const selectedTool = ref(null)
 const dialogVisible = ref(false)
+const loading = ref(true)
 
 onMounted(async () => {
-  tools.value = await api.get('/tools')
+  try {
+    tools.value = await api.get('/tools')
+  } finally {
+    loading.value = false
+  }
 })
 
 function viewTool(tool) {
@@ -41,7 +46,11 @@ const toolParams = computed(() => {
       <h2>Tools</h2>
     </div>
 
-    <div v-if="tools.length" class="tools-grid">
+    <div v-if="loading" class="page-loading">
+      <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
+    </div>
+
+    <div v-else-if="tools.length" class="tools-grid">
       <Card v-for="tool in tools" :key="tool.name" class="tool-card" @click="viewTool(tool)">
         <template #title>
           <div class="tool-name">
@@ -184,6 +193,14 @@ const toolParams = computed(() => {
 .param-meta code {
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--p-text-muted-color);
 }
 
 .empty-state {

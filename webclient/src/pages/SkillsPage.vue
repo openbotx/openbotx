@@ -19,9 +19,14 @@ const dialogVisible = ref(false)
 const editing = ref(false)
 const editContent = ref('')
 const saving = ref(false)
+const loading = ref(true)
 
 onMounted(async () => {
-  skills.value = await api.get('/skills')
+  try {
+    skills.value = await api.get('/skills')
+  } finally {
+    loading.value = false
+  }
 })
 
 async function viewSkill(skill) {
@@ -66,7 +71,11 @@ async function saveSkill() {
       <h2>Skills</h2>
     </div>
 
-    <div v-if="skills.length" class="skills-grid">
+    <div v-if="loading" class="page-loading">
+      <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
+    </div>
+
+    <div v-else-if="skills.length" class="skills-grid">
       <Card v-for="skill in skills" :key="skill.name" class="skill-card" @click="viewSkill(skill)">
         <template #title>
           <div class="skill-header">
@@ -199,6 +208,14 @@ async function saveSkill() {
 .skill-content :deep(code) {
   font-family: ui-monospace, monospace;
   font-size: 0.85em;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--p-text-muted-color);
 }
 
 .empty-state {

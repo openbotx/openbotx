@@ -29,6 +29,7 @@ const createParentPath = ref('')
 const deleteTarget = ref(null)
 const uploadInput = ref(null)
 const uploading = ref(false)
+const loading = ref(true)
 
 const isMarkdown = computed(() => {
   const p = currentFile.value?.path || ''
@@ -48,7 +49,11 @@ function onResize() {
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  await loadFiles()
+  try {
+    await loadFiles()
+  } finally {
+    loading.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -252,7 +257,11 @@ async function confirmDelete() {
       </div>
     </div>
 
-    <div class="files-desktop">
+    <div v-if="loading" class="page-loading">
+      <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
+    </div>
+
+    <div v-else class="files-desktop">
       <Splitter class="files-splitter">
         <SplitterPanel :size="30" :min-size="20">
           <div class="tree-panel">
@@ -301,7 +310,7 @@ async function confirmDelete() {
       </Splitter>
     </div>
 
-    <div class="files-mobile">
+    <div v-if="!loading" class="files-mobile">
       <div v-if="!currentFile" class="tree-panel-mobile">
         <FileTree
           :files="files"
@@ -481,6 +490,15 @@ async function confirmDelete() {
 .download-link {
   display: inline-flex;
   text-decoration: none;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--p-text-muted-color);
+  flex: 1;
 }
 
 .files-desktop {

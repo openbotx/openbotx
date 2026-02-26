@@ -16,6 +16,7 @@ const api = useApi()
 const toast = useToast()
 const jobs = ref([])
 const showDialog = ref(false)
+const loading = ref(true)
 
 const newJob = ref({
   name: '',
@@ -46,7 +47,11 @@ function toLocalISO(date) {
 onMounted(loadJobs)
 
 async function loadJobs() {
-  jobs.value = await api.get('/scheduler/jobs')
+  try {
+    jobs.value = await api.get('/scheduler/jobs')
+  } finally {
+    loading.value = false
+  }
 }
 
 async function createJob() {
@@ -91,7 +96,11 @@ function statusSeverity(status) {
       <Button label="Add Job" icon="pi pi-plus" size="small" @click="showDialog = true" />
     </div>
 
-    <div class="table-container">
+    <div v-if="loading" class="page-loading">
+      <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
+    </div>
+
+    <div v-else class="table-container">
       <DataTable :value="jobs" striped-rows show-gridlines removable-sort>
         <template #empty>
           <div class="empty-state">
@@ -189,6 +198,14 @@ function statusSeverity(status) {
   background: var(--p-surface-100);
   padding: 0.2rem 0.5rem;
   border-radius: 0.25rem;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--p-text-muted-color);
 }
 
 .empty-state {

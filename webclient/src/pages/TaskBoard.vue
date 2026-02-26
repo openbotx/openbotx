@@ -16,14 +16,18 @@ const agentsStore = useAgentsStore()
 
 const showConfirm = ref(false)
 const targetTask = ref(null)
+const loading = ref(true)
 
 const agentOptions = computed(() =>
   agentsStore.agents.map((a) => ({ label: a.name, value: a.name }))
 )
 
-onMounted(() => {
-  tasksStore.loadTasks()
-  agentsStore.loadAgents()
+onMounted(async () => {
+  try {
+    await Promise.all([tasksStore.loadTasks(), agentsStore.loadAgents()])
+  } finally {
+    loading.value = false
+  }
 })
 
 function handleGoToSession(task) {
@@ -56,7 +60,10 @@ async function confirmGoToSession() {
         class="agent-filter"
       />
     </div>
-    <div class="board-columns">
+    <div v-if="loading" class="page-loading">
+      <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
+    </div>
+    <div v-else class="board-columns">
       <TaskColumn title="TODO" :tasks="tasksStore.todoTasks" @go-to-session="handleGoToSession" />
       <TaskColumn title="DOING" :tasks="tasksStore.doingTasks" @go-to-session="handleGoToSession" />
       <TaskColumn title="DONE" :tasks="tasksStore.doneTasks" @go-to-session="handleGoToSession" />
@@ -96,6 +103,14 @@ async function confirmGoToSession() {
 
 .agent-filter {
   width: 12rem;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--p-text-muted-color);
 }
 
 .board-columns {
