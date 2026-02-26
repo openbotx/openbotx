@@ -26,9 +26,10 @@ class Task:
     error: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    live_state: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "title": self.title,
             "description": self.description,
@@ -44,3 +45,6 @@ class Task:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+        if self.live_state:
+            d["live_state"] = self.live_state
+        return d

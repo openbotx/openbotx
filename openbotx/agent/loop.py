@@ -195,6 +195,7 @@ class AgentLoop:
         if task.agent_name != effective_name:
             task.agent_name = effective_name
 
+        task.live_state = {"tool_uses": []}
         await self._task_manager.update_state(task_id, TaskState.DOING)
 
         if msg.channel != "web" and self._dispatcher:
@@ -209,6 +210,7 @@ class AgentLoop:
             )
 
         session = self._session_manager.get_or_create(msg.session_key)
+        session.live_state = {"tool_uses": [], "agent_name": effective_name}
 
         content = msg.content.strip()
 
@@ -275,9 +277,11 @@ class AgentLoop:
 
         try:
             response_text = await self._run_agent_loop(
-                messages, task_id, msg.chat_id, effective_name
+                messages, task_id, msg.chat_id, effective_name, session
             )
         except Exception as e:
+            session.live_state = {}
+            task.live_state = {}
             logger.error("agent loop error for task %s: %s", task_id, e, exc_info=True)
             response_text = f"I encountered an error: {e}"
             await self._task_manager.update_state(task_id, TaskState.ERROR, error=str(e))
@@ -294,6 +298,8 @@ class AgentLoop:
         user_kwargs = {}
         if msg.media:
             user_kwargs["media"] = msg.media
+        session.live_state = {}
+        task.live_state = {}
         session.add_message("user", content, **user_kwargs)
         session.add_message("assistant", response_text, agent_name=effective_name)
         self._session_manager.save(session)
@@ -320,6 +326,7 @@ class AgentLoop:
         task_id: str,
         chat_id: str = "",
         agent_name: str = "",
+        session: Any = None,
     ) -> str:
         for iteration in range(self._max_iterations):
             response = await self._provider.chat(
@@ -364,9 +371,10 @@ class AgentLoop:
                 for tc in response.tool_calls:
                     result = await self._registry.execute(tc.name, tc.arguments)
 
+                    display_name = humanize(tc.name)
+                    description = describe_tool_use(tc.name, tc.arguments)
+
                     if self._dispatcher:
-                        display_name = humanize(tc.name)
-                        description = describe_tool_use(tc.name, tc.arguments)
                         await self._dispatcher.broadcast(
                             "chat:tool_use",
                             {
@@ -377,6 +385,13 @@ class AgentLoop:
                                 "agent_name": agent_name,
                             },
                         )
+
+                    tool_entry = {"tool": display_name, "description": description}
+                    if session is not None:
+                        session.live_state.setdefault("tool_uses", []).append(tool_entry)
+                    task = self._task_manager.get_task(task_id)
+                    if task is not None:
+                        task.live_state.setdefault("tool_uses", []).append(tool_entry)
 
                     ContextBuilder.add_tool_result(messages, tc.id, tc.name, result)
             else:

@@ -27,6 +27,14 @@ export const useTasksStore = defineStore('tasks', () => {
   async function loadTasks() {
     const list = await api.get('/tasks')
     tasks.value = new Map(list.map((t) => [t.id, t]))
+
+    for (const t of list) {
+      const toolUses = t.live_state?.tool_uses
+      if (t.state === 'DOING' && toolUses?.length) {
+        const last = toolUses[toolUses.length - 1]
+        activeTools.value.set(t.id, { tool: last.tool, description: last.description })
+      }
+    }
   }
 
   function onTaskCreated(data) {

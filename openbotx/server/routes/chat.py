@@ -102,6 +102,7 @@ async def get_session(session_id: str, request: Request):
     return {
         "key": session.key,
         "messages": session.get_history(),
+        "live_state": session.live_state,
         "created_at": session.created_at.isoformat(),
         "updated_at": session.updated_at.isoformat(),
     }

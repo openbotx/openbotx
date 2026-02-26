@@ -1200,6 +1200,7 @@ The `Session` dataclass holds:
 | `updated_at` | `datetime` | Last modification timestamp |
 | `metadata` | `dict` | Arbitrary metadata dictionary |
 | `last_consolidated` | `int` | Cursor position for memory consolidation (see section 16) |
+| `live_state` | `dict` | Transient runtime state (e.g., `tool_uses`, `agent_name`). Populated during agent execution and returned via the chat history API, but **never persisted** to JSONL. Cleared when the task completes. Allows the frontend to restore in-progress state on page refresh |
 
 ### Session Key
 
@@ -1404,6 +1405,7 @@ Each task stores the following fields:
 | `error` | Error message (on ERROR) |
 | `created_at` | ISO 8601 timestamp |
 | `updated_at` | ISO 8601 timestamp |
+| `live_state` | Transient runtime state (e.g., `tool_uses` list). Populated during agent execution and included in API responses when non-empty, but **never persisted** to JSONL. Cleared when the task completes. Allows the frontend to restore active tool status on page refresh |
 
 The `channel` and `chat_id` fields are set when the task is created and record which conversation originated it. This is essential for task recovery on restart — without them, the system wouldn't know where to route the re-queued message (see below).
 

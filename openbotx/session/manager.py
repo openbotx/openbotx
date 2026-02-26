@@ -23,6 +23,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0
+    live_state: dict[str, Any] = field(default_factory=dict)
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         msg = {

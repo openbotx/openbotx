@@ -157,6 +157,19 @@ export const useChatStore = defineStore('chat', () => {
       ...m,
       timestamp: Date.now(),
     }))
+
+    const toolUses = data.live_state?.tool_uses
+    if (toolUses?.length) {
+      messages.value.push({
+        role: 'assistant',
+        content: '',
+        tool_uses: toolUses,
+        timestamp: Date.now(),
+      })
+      streaming.value = true
+      currentToolUse.value = toolUses[toolUses.length - 1]
+    }
+
     currentSessionId.value = sessionKey
     localStorage.setItem('chat_session', sessionKey)
   }

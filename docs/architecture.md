@@ -120,7 +120,7 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `routes/providers.py`| Provider listing and configuration.                                                        |
 | `routes/scheduler.py`| Cron job management API.                                                                   |
 | `routes/config.py`  | Read and update platform configuration. Includes YAML export, YAML validation, and service restart. |
-| `routes/system.py`  | System info (version, health).                                                              |
+| `routes/system.py`  | System info endpoint (`GET /system/info`). Returns cross-platform data: OS, CPU, memory, disk, GPU (list with name/cores/vendor/metal), Python version, and OpenBotX version. Uses stdlib + subprocess fallbacks. |
 | `routes/agents.py`  | Agent listing and configuration.                                                            |
 
 **ServerFactory** encapsulates all dependency creation:
@@ -206,22 +206,26 @@ The orchestrator's `run()` loop catches exceptions per-message. If a single mess
 ```
 1. Receive InboundMessage from Orchestrator
 2. Create or resume Task (set state to DOING)
-3. Load or create Session
-4. Build system prompt (ContextBuilder)
-5. Build message array (system + history + new user message)
-6. Loop:
+3. Initialize task.live_state = {tool_uses: []}
+4. Load or create Session
+5. Initialize session.live_state = {tool_uses: [], agent_name: ...}
+6. Build system prompt (ContextBuilder)
+7. Build message array (system + history + new user message)
+8. Loop:
    a. Call LLM provider with messages + tool definitions
    b. If response contains tool_calls:
       - Execute each tool via ToolRegistry
       - Broadcast chat:tool_use via EventDispatcher
+      - Append tool entry to session.live_state and task.live_state
       - Append assistant message + tool results to messages
       - Continue loop
    c. If response is plain text:
       - Break loop, return response
-7. Save messages to session
-8. Publish OutboundMessage to bus
-9. Set Task state to DONE
-10. Check if memory consolidation is needed
+9. Clear session.live_state and task.live_state
+10. Save messages to session
+11. Publish OutboundMessage to bus
+12. Set Task state to DONE
+13. Check if memory consolidation is needed
 ```
 
 ### Channels
@@ -285,7 +289,7 @@ Tasks provide observability into what the agent is doing.
 
 | File          | Purpose                                                                             |
 | ------------- | ----------------------------------------------------------------------------------- |
-| `models.py`   | `Task` dataclass with fields: `id`, `title`, `description`, `state`, `agent_type`, `agent_name`, `parent_task_id`, `subagent_ids`, `result`, `error`, `created_at`, `updated_at`. |
+| `models.py`   | `Task` dataclass with fields: `id`, `title`, `description`, `state`, `agent_type`, `agent_name`, `parent_task_id`, `subagent_ids`, `result`, `error`, `created_at`, `updated_at`, `live_state`. The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory — it is included in API responses when non-empty but never persisted to JSONL. |
 | `manager.py`  | `TaskManager` -- creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events via the EventDispatcher. |
 
 Task states follow a Kanban model:
@@ -311,7 +315,7 @@ Sessions persist conversation history.
 | ------------- | --------------------------------------------------------------------------------- |
 | `manager.py`  | `SessionManager` -- manages `Session` objects stored as JSONL files in `workspace/sessions/`. Each session is keyed by `{channel}_{chat_id}`. Provides `get_or_create`, `save`, `delete`, and `list_sessions`. Uses an in-memory cache for fast access. |
 
-The `Session` dataclass holds a list of messages (role + content + metadata), tracks `last_consolidated` for memory consolidation, and provides `get_history()` for building LLM context (capped at 500 messages by default).
+The `Session` dataclass holds a list of messages (role + content + metadata), tracks `last_consolidated` for memory consolidation, and provides `get_history()` for building LLM context (capped at 500 messages by default). It also has a transient `live_state` dict that holds runtime data (e.g., `tool_uses`, `agent_name`) during execution — this is returned via the chat history API but never persisted to JSONL.
 
 ### Cron
 
@@ -427,11 +431,11 @@ Pages:
 | ---------- | ----------------------------------------------- |
 | Chat       | Main conversation interface with session list panel, real-time updates, and session-aware message filtering. Users can switch between sessions (including heartbeat). Supports media attachments (images, audio files) and microphone audio recording. Audio files are transcribed via faster-whisper before being sent to the LLM. Links in messages open in a new tab. Agent messages display the agent name with an icon when multi-agent is active. |
 | TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns. Task cards display duration, channel, error details, result preview, and real-time active tool status (spinner + tool name + description) for DOING tasks. Clicking a task title opens a confirmation dialog to navigate to the associated chat session. |
-| Files      | File manager with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. Supports creating files, creating folders, uploading files (to root or selected folder), deleting files/folders with confirmation dialogs, and a refresh button to force-reload the file tree. |
+| Files      | File manager with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. Supports creating files, creating folders, uploading files (to root or selected folder), deleting files/folders with confirmation dialogs, and a refresh button to force-reload the file tree (hidden when editing a file to avoid confusion). |
 | Skills     | View agent skills in a card grid. Each card shows the skill name, description, and tags for "always active" (when applicable) and source origin ("builtin" or "project"). Clicking a card opens a dialog with the full skill content rendered as Markdown. Project skills can be edited directly — an Edit button switches to a raw textarea editor with Save/Cancel actions. Builtin skills remain read-only. |
 | Tools      | View registered tools in a card grid. Each card shows the tool name and description. Clicking a card opens a dialog with the tool's parameter schema: parameter name, type, required status, description, enum values, and numeric ranges. |
 | Scheduler  | Manage cron jobs                                |
-| Settings   | Platform configuration with tabs: Bot, Channels (Telegram start/stop and config), Storage, Tools, Auth, and Advanced (YAML editor with validation and confirmation dialogs). Providers and agents are managed via the Advanced YAML editor. |
+| Settings   | Platform configuration with tabs: Info (system information — OS, CPU, memory, disk usage with progress bar, GPU, Python and OpenBotX versions), Bot, Channels (Telegram start/stop and config), Storage, Tools, Auth, and Advanced (YAML editor with validation and confirmation dialogs). The Info tab is the default tab and is read-only. Providers and agents are managed via the Advanced YAML editor. |
 | Login      | Authentication                                  |
 
 ---
