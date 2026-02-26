@@ -58,15 +58,28 @@ server:
 # ---------------------------------------------------------------------------
 # A dictionary of named agent configurations. Each key is an arbitrary name
 # (e.g. "main", "researcher", "coder"). You must define at least one agent.
+# The first agent in the dictionary is the default agent.
 agents:
   main:                           # Agent name (used as identifier).
-    workspace: "./workspace"      # str  -- Working directory for this agent's files.
+    workspace: "./workspace"      # str  -- Working directory for this agent's files. Resolved relative to the project root. Empty or null defaults to "./workspace".
     model: "anthropic/claude-sonnet-4-20250514"  # str  -- Model identifier in "provider/model" format.
+    description: ""               # str  -- Short description of this agent's purpose. Used by the AgentClassifier to route messages when multiple agents are configured.
+    instructions: ""              # str  -- Agent-specific instructions appended to the system prompt as a dedicated section. Use for behavioral rules, domain expertise, or role-specific guidelines.
+    tools: []                     # list[str] -- Whitelist of tool names available to this agent. When empty (default), all tools are registered. When set, only tools whose name appears in this list are available.
     params:
       max_tokens: 8192            # int  -- Maximum tokens in the model response.
       temperature: 0.1            # float -- Sampling temperature (0.0 = deterministic, higher = more creative).
       max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
-      memory_window: 100          # int  -- Number of recent messages to keep in context.
+      memory_window: 100          # int  -- Number of recent messages to keep in context before triggering consolidation.
+
+# ---------------------------------------------------------------------------
+# Classifier
+# ---------------------------------------------------------------------------
+# Controls the LLM-based agent classifier used when multiple agents are defined.
+# The classifier analyzes the user's message and recent conversation history to
+# select the best agent for each request.
+classifier:
+  model: ""                       # str  -- Model to use for classification. When empty, uses the default agent's model. A smaller/faster model is recommended since classification is a lightweight task.
 
 # ---------------------------------------------------------------------------
 # Image Generation
@@ -122,7 +135,7 @@ tools:
     max_results: 5                # int  -- Maximum number of search results to return per query.
   exec:
     timeout: 60                   # int  -- Maximum execution time in seconds for the exec tool.
-  restrict_to_workspace: true     # bool -- When true, file-related tools are restricted to the agent's workspace directory.
+  restrict_to_workspace: true     # bool -- When true, file-related tools are restricted to the agent's workspace directory and the shared public directory. When false, all filesystem paths are accessible.
 
 # ---------------------------------------------------------------------------
 # Storage
@@ -148,6 +161,67 @@ heartbeat:
 cron:
   enabled: true                   # bool -- Enable or disable the built-in cron scheduler.
 ```
+
+---
+
+## Agent Configuration Details
+
+### Workspace Resolution
+
+Each agent's workspace path is resolved at startup by `AgentConfig.resolve_workspace(project_path)`:
+
+1. If the workspace is a relative path (e.g., `./workspace`), it is resolved relative to the **project root** (where `config.yml` lives).
+2. If the workspace is an absolute path, it is used as-is.
+3. `~` is expanded to the user's home directory.
+4. Empty or null workspace values are automatically defaulted to `"./workspace"` by a Pydantic field validator.
+
+The workspace directory is created automatically at startup if it does not exist.
+
+### Workspace Restriction
+
+When `tools.restrict_to_workspace` is `true` (the default), the `PathResolver` enforces that all file operations are confined to two directories:
+
+1. The agent's own workspace directory.
+2. The shared `public/` directory at the project root.
+
+This means:
+
+- File tools (`read_file`, `write_file`, `edit_file`, `list_dir`) can only access files within the workspace or public directory.
+- The HTTP client's `download_path` and `upload_file` parameters are also resolved through the `PathResolver`.
+- The `exec` tool's working directory is locked to the workspace.
+- Attempts to access paths outside these directories raise a `PermissionError`.
+
+When `restrict_to_workspace` is `false`, all filesystem paths are accessible without restriction.
+
+### Tool Whitelisting
+
+The `tools` field accepts a list of tool names. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
+
+Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `save_memory`, `image_generation`.
+
+### Agent Instructions
+
+The `instructions` field is injected into the system prompt as a dedicated `# Agent Instructions` section, after all other context (bootstrap files, memory, skills). Use this for:
+
+- Domain-specific behavioral rules ("Always include disclaimers for financial data")
+- Role definition ("You are a market analyst specializing in cryptocurrency")
+- Output formatting guidelines ("Format reports as markdown tables")
+
+### Agent Description
+
+The `description` field is used by the `AgentClassifier` when routing messages in multi-agent setups. It should concisely describe what the agent does so the classifier can make informed routing decisions.
+
+### Multi-Agent Classification
+
+When multiple agents are configured, the `Orchestrator` uses the `AgentClassifier` to route each message. The classifier:
+
+1. Uses the model specified in `classifier.model` (or the default agent's model if empty).
+2. Reads agent descriptions from the `agents` dictionary.
+3. Analyzes the user's latest message plus the last 20 messages of conversation history.
+4. Calls a `route(agent_name, confidence)` tool to select the best agent.
+5. Falls back to the first (default) agent on error.
+
+For single-agent setups, no classification is performed — all messages go to the default agent.
 
 ---
 
@@ -201,7 +275,7 @@ agents:
 
 ### 3. Multiple Agents
 
-Define several agents, each with a different model and tuning, for specialized tasks.
+Define several agents, each with a different model, workspace, and specialization.
 
 ```yaml
 providers:
@@ -216,6 +290,8 @@ agents:
   main:
     workspace: "./workspace"
     model: "anthropic/claude-sonnet-4-20250514"
+    description: "General-purpose assistant for everyday tasks"
+    instructions: "You are a helpful general assistant. Route specialized requests to appropriate agents."
     params:
       max_tokens: 8192
       temperature: 0.1
@@ -225,6 +301,9 @@ agents:
   researcher:
     workspace: "./workspace/research"
     model: "openai/gpt-4o"
+    description: "Research specialist for deep analysis and information gathering"
+    instructions: "Focus on thorough research. Cite sources when possible. Save findings to reports."
+    tools: [read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, http_client, rss_reader, browser, message, save_memory]
     params:
       max_tokens: 4096
       temperature: 0.3
@@ -234,11 +313,17 @@ agents:
   coder:
     workspace: "./workspace/code"
     model: "deepseek/deepseek-coder"
+    description: "Code specialist for programming tasks"
+    instructions: "Write clean, well-structured code. Always test your changes."
+    tools: [read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, message]
     params:
       max_tokens: 16384
       temperature: 0.0
       max_iterations: 60
       memory_window: 80
+
+classifier:
+  model: "anthropic/claude-haiku-3"  # use a fast model for classification
 ```
 
 ### 4. Telegram Channel
@@ -379,7 +464,10 @@ providers:
 
 - **Defaults are applied automatically.** You only need to include the sections and fields you want to override. Any omitted field falls back to its default value.
 - **Secret key auto-generation.** If `auth.secret_key` is left empty, a random key is generated each time the server starts. Set it explicitly if you need stable tokens across restarts.
-- **Workspace isolation.** When `tools.restrict_to_workspace` is `true`, file operations performed by the agent are confined to its configured `workspace` directory. Disable this only if you understand the security implications.
+- **Workspace isolation.** When `tools.restrict_to_workspace` is `true`, file operations performed by each agent are confined to its configured `workspace` directory and the shared `public/` directory. The `PathResolver` enforces this by checking that all resolved paths fall within one of these allowed directories. Disable this only if you understand the security implications.
+- **Workspace defaulting.** If an agent's `workspace` field is empty, null, or whitespace, it automatically defaults to `"./workspace"`. This ensures every agent always has a valid workspace.
+- **Per-agent workspaces.** Each agent can have its own workspace directory. Workspaces are created automatically at startup. In multi-agent setups, this provides natural isolation between agents.
 - **Cron scheduler.** The cron system is enabled by default. Disable it with `cron.enabled: false` if you do not need scheduled tasks.
 - **Heartbeat service.** When enabled, the agent periodically reads `HEARTBEAT.md` from the workspace for tasks. Results are stored in a dedicated `heartbeat` session, accessible from the web interface session list. Set `heartbeat.enabled: false` to disable.
 - **Model identifier format.** The `model` field in agent configurations uses the format `provider/model-name`. The prefix before the slash must match a key defined under `providers`.
+- **Classifier model.** In multi-agent setups, use `classifier.model` to specify a fast/cheap model for message classification. The classifier only needs to select an agent, not generate full responses, so a smaller model reduces cost and latency.

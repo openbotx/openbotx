@@ -191,19 +191,16 @@ def _update_providers(config, data):
 
 @router.post("/restart")
 async def restart_services(request: Request):
-    from openbotx.agent.loop import AgentLoop
     from openbotx.agent.skills import SkillsLoader
-    from openbotx.agent.subagent import SubagentManager
     from openbotx.channels.manager import ChannelManager
     from openbotx.cron.service import CronService
-    from openbotx.providers.litellm_provider import LiteLLMProvider
 
     app = request.app
     config = app.state.config
 
     for name, service in [
         ("heartbeat", getattr(app.state, "heartbeat", None)),
-        ("agent_loop", app.state.agent_loop),
+        ("orchestrator", app.state.orchestrator),
         ("channel_manager", app.state.channel_manager),
         ("cron_service", app.state.cron_service),
     ]:
@@ -226,61 +223,12 @@ async def restart_services(request: Request):
     app.state.storage = storage
 
     bus = app.state.bus
-    ws_manager = app.state.ws_manager
+    dispatcher = app.state.dispatcher
     task_manager = app.state.task_manager
     session_manager = app.state.session_manager
 
-    provider_cfg = config.get_provider()
-    provider = LiteLLMProvider(
-        api_key=provider_cfg.api_key if provider_cfg else "",
-        api_base=provider_cfg.api_base if provider_cfg else None,
-        extra_headers=provider_cfg.headers if provider_cfg else None,
-    )
-    app.state.provider = provider
-
     skills_loader = SkillsLoader(workspace)
     app.state.skills_loader = skills_loader
-
-    main_agent = config.main_agent
-
-    subagent_manager = SubagentManager(
-        provider=provider,
-        workspace=workspace,
-        bus=bus,
-        ws_manager=ws_manager,
-        task_manager=task_manager,
-        model=main_agent.model,
-        brave_api_key=config.tools.web_search.api_key,
-        exec_timeout=config.tools.exec.timeout,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        image_config=config.image,
-        storage=storage,
-    )
-    app.state.subagent_manager = subagent_manager
-
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=workspace,
-        ws_manager=ws_manager,
-        task_manager=task_manager,
-        session_manager=session_manager,
-        skills_loader=skills_loader,
-        subagent_manager=subagent_manager,
-        cron_service=None,
-        model=main_agent.model,
-        max_iterations=main_agent.params.max_iterations,
-        temperature=main_agent.params.temperature,
-        max_tokens=main_agent.params.max_tokens,
-        memory_window=main_agent.params.memory_window,
-        brave_api_key=config.tools.web_search.api_key,
-        exec_timeout=config.tools.exec.timeout,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        image_config=config.image,
-        storage=storage,
-    )
-    app.state.agent_loop = agent_loop
-    asyncio.create_task(agent_loop.run())
 
     from openbotx.bus.events import InboundMessage
     from openbotx.cron.types import CronJob
@@ -300,14 +248,30 @@ async def restart_services(request: Request):
 
     cron_service = CronService(workspace, on_job_callback=_build_cron_callback())
     app.state.cron_service = cron_service
-    agent_loop._cron_service = cron_service
     asyncio.create_task(cron_service.run())
+
+    from openbotx.server.app import _create_orchestrator
+
+    orchestrator = _create_orchestrator(
+        config=config,
+        bus=bus,
+        workspace=workspace,
+        dispatcher=dispatcher,
+        task_manager=task_manager,
+        session_manager=session_manager,
+        skills_loader=skills_loader,
+        cron_service=cron_service,
+        storage=storage,
+        public_url=public_url,
+    )
+    app.state.orchestrator = orchestrator
+    asyncio.create_task(orchestrator.run())
 
     channel_manager = ChannelManager(
         config.channels,
         bus,
         storage=storage,
-        ws_manager=ws_manager,
+        dispatcher=dispatcher,
     )
     app.state.channel_manager = channel_manager
     await channel_manager.start()

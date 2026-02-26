@@ -101,7 +101,6 @@ version = {attr = "openbotx.version.__version__"}
 [tool.setuptools.package-data]
 openbotx = [
     "skills/**/*.md",
-    "templates/**/*",
 ]
 
 [tool.ruff]

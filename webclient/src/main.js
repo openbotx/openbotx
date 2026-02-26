@@ -27,3 +27,9 @@ app.use(PrimeVue, {
 app.use(ToastService)
 app.use(ConfirmationService)
 app.mount('#app')
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/app/sw.js', { scope: '/app/' })
+    })
+}

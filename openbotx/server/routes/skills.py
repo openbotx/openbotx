@@ -12,7 +12,7 @@ async def list_skills(request: Request):
             "name": s["name"],
             "description": s.get("description", ""),
             "always": s.get("always", False),
-            "requires": s.get("requires", []),
+            "source": s.get("source", "project"),
         }
         for s in skills
     ]

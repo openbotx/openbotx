@@ -30,6 +30,7 @@ const bot = ref({ name: '', description: '' })
 const auth = ref({ username: 'admin', password: '', secret_key: '' })
 const tools = ref({ restrict_to_workspace: true, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 } })
 const storage = ref({ type: 'local', s3_bucket: '', s3_region: 'us-east-1', s3_access_key: '', s3_secret_key: '' })
+const agentsConfig = ref({})
 const rawYaml = ref('')
 const restarting = ref(false)
 
@@ -70,6 +71,18 @@ onMounted(async () => {
       s3_access_key: '',
       s3_secret_key: '',
     }
+
+    const cfgAgents = configStore.config.agents || {}
+    const parsed = {}
+    for (const [name, agent] of Object.entries(cfgAgents)) {
+      parsed[name] = {
+        description: agent.description || '',
+        model: agent.model || '',
+        instructions: agent.instructions || '',
+        toolsStr: (agent.tools || []).join(', '),
+      }
+    }
+    agentsConfig.value = parsed
   }
 })
 
@@ -154,6 +167,54 @@ async function toggleTelegram(running) {
     await channelsStore.loadChannels()
   }
 }
+
+const newAgentName = ref('')
+const showAddAgent = ref(false)
+
+function addAgent() {
+  showAddAgent.value = true
+  newAgentName.value = ''
+}
+
+function confirmAddAgent() {
+  const name = newAgentName.value.trim().toLowerCase().replace(/\s+/g, '_')
+  if (!name) return
+  if (agentsConfig.value[name]) {
+    toast.add({ severity: 'warn', summary: 'Exists', detail: `Agent "${name}" already exists`, life: 2000 })
+    return
+  }
+  agentsConfig.value[name] = {
+    description: '',
+    model: '',
+    instructions: '',
+    toolsStr: '',
+  }
+  showAddAgent.value = false
+}
+
+function removeAgent(name) {
+  const updated = { ...agentsConfig.value }
+  delete updated[name]
+  agentsConfig.value = updated
+}
+
+async function saveAgents() {
+  const data = {}
+  for (const [name, agent] of Object.entries(agentsConfig.value)) {
+    data[name] = {
+      description: agent.description,
+      model: agent.model,
+      instructions: agent.instructions,
+      tools: agent.toolsStr ? agent.toolsStr.split(',').map((s) => s.trim()).filter(Boolean) : [],
+    }
+  }
+  try {
+    await configStore.saveSection('agents', data)
+    toast.add({ severity: 'success', summary: 'Saved', detail: 'Agents updated', life: 2000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: e.message, life: 3000 })
+  }
+}
 </script>
 
 <template>
@@ -165,6 +226,7 @@ async function toggleTelegram(running) {
       <Tabs value="bot" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
         <TabList>
           <Tab value="bot">Bot</Tab>
+          <Tab value="agents">Agents</Tab>
           <Tab value="channels">Channels</Tab>
           <Tab value="storage">Storage</Tab>
           <Tab value="tools">Tools</Tab>
@@ -183,6 +245,38 @@ async function toggleTelegram(running) {
                 <InputText v-model="bot.description" class="w-full" />
               </div>
               <Button label="Save" icon="pi pi-save" size="small" @click="saveSection('bot', bot)" />
+            </div>
+          </TabPanel>
+
+          <TabPanel value="agents" :pt="{ root: { style: { minHeight: '100%' } } }">
+            <div class="tab-content">
+              <div v-for="(agent, name) in agentsConfig" :key="name" class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-user"></i>
+                  <strong>{{ name }}</strong>
+                  <Button v-if="Object.keys(agentsConfig).length > 1" icon="pi pi-trash" severity="danger" text rounded size="small" @click="removeAgent(name)" />
+                </div>
+                <div class="form-group">
+                  <label>Description</label>
+                  <InputText v-model="agent.description" class="w-full" placeholder="What this agent specializes in" />
+                </div>
+                <div class="form-group">
+                  <label>Model</label>
+                  <InputText v-model="agent.model" class="w-full" placeholder="e.g. anthropic/claude-sonnet-4-20250514" />
+                </div>
+                <div class="form-group">
+                  <label>Instructions</label>
+                  <Textarea v-model="agent.instructions" rows="3" class="w-full" placeholder="Additional system prompt instructions for this agent" />
+                </div>
+                <div class="form-group">
+                  <label>Tools (comma-separated, empty for all)</label>
+                  <InputText v-model="agent.toolsStr" class="w-full" placeholder="tool_a, tool_b, tool_c, ..." />
+                </div>
+              </div>
+              <div class="button-row">
+                <Button label="Add Agent" icon="pi pi-plus" severity="secondary" size="small" @click="addAgent" />
+                <Button label="Save" icon="pi pi-save" size="small" @click="saveAgents" />
+              </div>
             </div>
           </TabPanel>
 
@@ -332,6 +426,17 @@ async function toggleTelegram(running) {
       <template #footer>
         <Button label="Cancel" severity="secondary" text size="small" @click="showRestartConfirm = false" />
         <Button label="Restart" icon="pi pi-replay" severity="warn" size="small" @click="restartServices" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showAddAgent" header="Add Agent" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <div class="form-group">
+        <label>Agent Name</label>
+        <InputText v-model="newAgentName" class="w-full" placeholder="e.g. researcher" @keyup.enter="confirmAddAgent" />
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showAddAgent = false" />
+        <Button label="Add" icon="pi pi-plus" size="small" @click="confirmAddAgent" :disabled="!newAgentName.trim()" />
       </template>
     </Dialog>
   </div>

@@ -17,17 +17,42 @@ class ContextBuilder:
     def __init__(
         self,
         workspace: Path,
+        public_dir: Path,
+        project_path: Path,
         memory: MemoryStore,
         skills_loader: SkillsLoader,
         public_url: str = "",
     ):
         self._workspace = workspace
+        self._public_dir = public_dir
+        self._project_path = project_path
         self._memory = memory
         self._skills_loader = skills_loader
         self._public_url = public_url
 
-    def build_system_prompt(self) -> str:
+    def _build_directory_context(self) -> str:
+        lines = [
+            "You have access to your workspace and the public directory. Always use absolute paths.",
+            "",
+            f"Workspace: {self._workspace}",
+            "  Internal files: reports, data, drafts.",
+            "",
+            f"Public: {self._public_dir}",
+            "  Web-accessible at /public/ URL. Use for anything the user needs to access:",
+            f"  - {self._public_dir / 'media'} — images, audio, video",
+            f"  - {self._public_dir / 'documents'} — PDFs, spreadsheets, exports",
+        ]
+        return "\n".join(lines)
+
+    def build_system_prompt(
+        self,
+        agent_name: str = "",
+        agent_instructions: str = "",
+    ) -> str:
         parts = [IDENTITY]
+
+        if agent_name:
+            parts.append(f"\nYou are acting as the **{agent_name}** agent.")
 
         now = datetime.now()
         parts.append(f"\nCurrent date and time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
@@ -35,8 +60,10 @@ class ContextBuilder:
         if self._public_url:
             parts.append(f"\nPublic URL: {self._public_url}")
 
+        parts.append(f"\n# Project Structure\n{self._build_directory_context()}")
+
         for filename in BOOTSTRAP_FILES:
-            filepath = self._workspace / filename
+            filepath = self._project_path / filename
             if filepath.exists():
                 try:
                     content = filepath.read_text(encoding="utf-8").strip()
@@ -55,6 +82,9 @@ class ContextBuilder:
         skills_summary = self._skills_loader.build_skills_summary()
         if skills_summary:
             parts.append(f"\n# Available Skills\n{skills_summary}")
+
+        if agent_instructions:
+            parts.append(f"\n# Agent Instructions\n{agent_instructions}")
 
         return "\n".join(parts)
 

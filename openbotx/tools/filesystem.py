@@ -1,24 +1,8 @@
 import difflib
-from pathlib import Path
 from typing import Any
 
+from openbotx.helpers.path import PathResolver
 from openbotx.tools.base import Tool
-
-
-def _resolve_path(
-    path: str, workspace: Path | None = None, allowed_dir: Path | None = None
-) -> Path:
-    """Resolve path against workspace and enforce directory restriction."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-    if allowed_dir:
-        try:
-            resolved.relative_to(allowed_dir.resolve())
-        except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
-    return resolved
 
 
 class ReadFileTool(Tool):
@@ -32,13 +16,12 @@ class ReadFileTool(Tool):
         "required": ["path"],
     }
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
+    def __init__(self, resolver: PathResolver):
+        self._resolver = resolver
 
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            file_path = self._resolver.resolve(path)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
@@ -62,13 +45,12 @@ class WriteFileTool(Tool):
         "required": ["path", "content"],
     }
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
+    def __init__(self, resolver: PathResolver):
+        self._resolver = resolver
 
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            file_path = self._resolver.resolve(path)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {file_path}"
@@ -100,13 +82,12 @@ class EditFileTool(Tool):
         "required": ["path", "old_text", "new_text"],
     }
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
+    def __init__(self, resolver: PathResolver):
+        self._resolver = resolver
 
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            file_path = self._resolver.resolve(path)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
 
@@ -175,13 +156,12 @@ class ListDirTool(Tool):
         "required": ["path"],
     }
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
+    def __init__(self, resolver: PathResolver):
+        self._resolver = resolver
 
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
-            dir_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            dir_path = self._resolver.resolve(path)
             if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
             if not dir_path.is_dir():

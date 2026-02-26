@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 
 class BotConfig(BaseModel):
@@ -24,7 +24,24 @@ class ModelParams(BaseModel):
 class AgentConfig(BaseModel):
     workspace: str = "./workspace"
     model: str = "anthropic/claude-sonnet-4-20250514"
+    description: str = ""
+    instructions: str = ""
+    tools: list[str] = Field(default_factory=list)
     params: ModelParams = Field(default_factory=ModelParams)
+
+    @field_validator("workspace", mode="before")
+    @classmethod
+    def default_workspace(cls, v: str | None) -> str:
+        if not v or not v.strip():
+            return "./workspace"
+        return v
+
+    def resolve_workspace(self, project_path: Path) -> Path:
+        """Resolve workspace path relative to project root."""
+        p = Path(self.workspace).expanduser()
+        if not p.is_absolute():
+            p = project_path / p
+        return p.resolve()
 
 
 class ProviderConfig(BaseModel):
@@ -93,6 +110,10 @@ class CronConfig(BaseModel):
     enabled: bool = True
 
 
+class ClassifierConfig(BaseModel):
+    model: str = ""
+
+
 class Config(BaseModel):
     _config_path: Path | None = PrivateAttr(default=None)
 
@@ -107,17 +128,19 @@ class Config(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     cron: CronConfig = Field(default_factory=CronConfig)
-
-    def get_agent(self, name: str = "main") -> AgentConfig:
-        return self.agents.get(name, self.agents["main"])
+    classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
 
     @property
     def main_agent(self) -> AgentConfig:
         return self.agents.get("main", AgentConfig())
 
     @property
+    def default_agent(self) -> AgentConfig:
+        return next(iter(self.agents.values()))
+
+    @property
     def workspace_path(self) -> Path:
-        return Path(self.main_agent.workspace).expanduser().resolve()
+        return self.default_agent.resolve_workspace(self.project_path)
 
     @property
     def project_path(self) -> Path:

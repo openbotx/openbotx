@@ -53,7 +53,7 @@ graph TD
     H -->|Telegram API| A
 ```
 
-Everything is wired together in `openbotx/server/app.py`, inside the `lifespan()` function, which runs when the server starts.
+Everything is wired together in `openbotx/server/app.py`. The `ServerFactory` class handles dependency creation, and the `lifespan()` function orchestrates the startup/shutdown sequence.
 
 ---
 
@@ -70,28 +70,41 @@ The FastAPI server uses an async **lifespan** that manages the entire lifecycle.
 
 ```mermaid
 graph TD
-    A[load_config] -->|Loads config.yml + .env| B[Create Workspace]
-    B --> C[Generate JWT Secret if needed]
-    C --> D[Create WebSocketManager]
-    D --> E[Create MessageBus]
-    E --> F[Create SessionManager]
-    F --> G[Create TaskManager]
-    G --> H[Create SkillsLoader]
-    H --> I[Create CronService]
-    I --> J[Create LiteLLMProvider]
-    J --> K[Create SubagentManager]
-    K --> L[Create AgentLoop]
-    L --> M[Create ChannelManager]
-    M --> N[Create HeartbeatService]
-    N --> O["Start AgentLoop (background task)"]
-    O --> P["Start CronService (background task)"]
-    P --> Q["Start ChannelManager (channels + dispatch)"]
-    Q --> R["Start HeartbeatService (background task)"]
-    R --> S[Re-queue recovered tasks]
-    S --> T[Server ready]
+    A[load_config] -->|Loads config.yml + .env| B[Create ServerFactory]
+    B --> C[Create Workspace + Setup Logging]
+    C --> D[Generate JWT Secret if needed]
+    D --> E[Create WebSocketManager + EventDispatcher]
+    E --> F[Create MessageBus]
+    F --> G[Create SessionManager]
+    G --> H[Create TaskManager]
+    H --> I[Create SkillsLoader]
+    I --> J[Create CronService]
+    J --> K[Create public/ directory structure]
+    K --> L[Create Storage backend]
+    L --> M["ServerFactory.create_orchestrator()"]
+    M --> M1["For each agent: Create Provider"]
+    M1 --> M2["Resolve workspace + Create PathResolver"]
+    M2 --> M3["Create SubagentManager + AgentLoop"]
+    M3 --> M4["Create AgentClassifier (if multi-agent)"]
+    M4 --> M5["Return Orchestrator"]
+    M5 --> N[Create ChannelManager]
+    N --> O[Create HeartbeatService]
+    O --> P["Start Orchestrator (background task)"]
+    P --> Q["Start CronService (background task)"]
+    Q --> R["Start ChannelManager (channels + dispatch)"]
+    R --> S["Start HeartbeatService (background task)"]
+    S --> T[Re-queue recovered tasks]
+    T --> U[Server ready]
 ```
 
-Each component receives references to previously created ones. For example, the `AgentLoop` receives the `bus`, `provider`, `task_manager`, `session_manager`, `skills_loader`, `subagent_manager`, and `cron_service`.
+The `ServerFactory` class encapsulates all dependency creation logic. It receives the `Config` object and provides methods to create providers, storage backends, cron callbacks, and the full orchestrator graph.
+
+Each agent gets its own `AgentLoop` with:
+- Its own `LiteLLMProvider` (configured for the agent's model)
+- Its own workspace directory (resolved via `AgentConfig.resolve_workspace()`)
+- Its own `PathResolver` with `allowed_dirs = [workspace, public_dir]`
+- Its own `SubagentManager` (sharing the parent's `PathResolver`)
+- Its own `ToolRegistry` (filtered by the agent's `tools` whitelist, if set)
 
 After all services are started, the server re-queues any tasks that were interrupted by a previous shutdown. Tasks that were in the DOING state are reset to TODO during `TaskManager` initialization, and then published back to the MessageBus so the agent can re-execute them (see section 18).
 
@@ -275,16 +288,27 @@ The bus **decouples** channels from the agent. Telegram knows nothing about the 
 
 ## 7. Message Processing
 
-The `AgentLoop` (`openbotx/agent/loop.py`) runs in the background, waiting for messages in the inbound queue:
+The `Orchestrator` (`openbotx/agent/orchestrator.py`) runs in the background, waiting for messages in the inbound queue:
 
 ```python
 async def run(self):
     while not self._stop_event.is_set():
-        msg = await self._bus.consume_inbound()  # wait for a message
-        await self._process_message(msg)          # process it
+        try:
+            msg = await asyncio.wait_for(self._bus.consume_inbound(), timeout=1.0)
+            agent_name = await self._route(msg)
+            agent = self._agents[agent_name]
+            await agent.process_message(msg, agent_name=agent_name)
+        except TimeoutError:
+            continue  # check stop_event again
+        except Exception as e:
+            logger.error("orchestrator error: %s", e)  # single message failure doesn't crash
 ```
 
-When a message arrives, `_process_message()` does the following in sequence:
+The 1-second timeout on `consume_inbound()` ensures the `_stop_event` is checked regularly, enabling graceful shutdown. Exceptions from individual message processing are caught and logged — a single bad message does not crash the orchestrator.
+
+**Message routing:** When multiple agents are configured, the `AgentClassifier` uses an LLM call to determine the best agent. It analyzes the user's message plus the last 20 messages of conversation history and calls a `route(agent_name, confidence)` tool. The classifier uses hardcoded `max_tokens=256` and `temperature=0.0` for deterministic, fast classification. Assistant messages in the history are prefixed with `[Agent: name]` so the classifier can see which agent handled previous turns and maintain conversation continuity (it keeps the same agent unless the topic clearly changes). If the classifier returns an unknown agent name, it falls back to the default (first) agent. For single-agent setups, messages go directly to the default agent with no classification overhead.
+
+When a message arrives, the selected `AgentLoop.process_message()` does the following in sequence:
 
 ```mermaid
 graph TD
@@ -293,16 +317,25 @@ graph TD
     B -->|No| D[Create new Task]
     C --> E[Mark Task as DOING]
     D --> E
-    E --> F{Is it a special command?}
-    F -->|/new| G[Clear session and respond]
+    E --> E1{Non-web channel?}
+    E1 -->|Yes| E2["Broadcast chat:user_message"]
+    E1 -->|No| F
+    E2 --> F
+    F{Is it a special command?}
+    F -->|/new| G["Clear session, broadcast sessions:updated, respond"]
     F -->|/help| H[Return command list]
     F -->|No| I[Configure tool contexts]
-    I --> J[Build System Prompt]
+    I --> I1{Has audio media?}
+    I1 -->|Yes| I2["Transcribe audio, broadcast chat:transcription"]
+    I1 -->|No| J
+    I2 --> J
+    J[Build System Prompt]
     J --> K[Retrieve session history]
     K --> L[Assemble messages]
     L --> M[Execute Agent Loop]
     M --> N[Save user + assistant to session]
-    N --> O[Publish response to Bus]
+    N --> N1["Broadcast sessions:updated"]
+    N1 --> O[Publish response to Bus]
     O --> P[Mark Task as DONE]
     P --> Q{Need memory consolidation?}
     Q -->|Yes| R[Run consolidation]
@@ -312,7 +345,7 @@ graph TD
 
 ### 7.1. Task Creation/Recovery
 
-Each user message becomes a **task**. If the message already has a `task_id` in its metadata (as with the REST API), it retrieves the existing task. Otherwise, it creates a new task with the title being the first 50 characters of the message. The task starts in the **DOING** state.
+Each user message becomes a **task**. The `process_message()` method accepts an optional `agent_name` parameter (set by the Orchestrator after classification). If provided, this overrides the agent loop's default name, and the task's `agent_name` is updated to match. If the message already has a `task_id` in its metadata (as with the REST API), it retrieves the existing task. Otherwise, it creates a new task with the title being the first 50 characters of the message. The task starts in the **DOING** state.
 
 ### 7.2. Special Commands
 
@@ -345,15 +378,19 @@ The `ContextBuilder` (`openbotx/agent/context.py`) is responsible for assembling
 
 ```mermaid
 graph TD
-    A[Base identity] --> B[Current date and time]
-    B --> C[AGENTS.md]
+    A[Base identity] --> A1[Agent name]
+    A1 --> B[Current date and time]
+    B --> B1[Public URL]
+    B1 --> B2[Project Structure - workspace and public paths]
+    B2 --> C[AGENTS.md]
     C --> D[SOUL.md]
     D --> E[USER.md]
     E --> F[TOOLS.md]
     F --> G[Memory - MEMORY.md]
     G --> H[Always-on skills]
     H --> I[Available skills summary]
-    I --> J[Complete System Prompt]
+    I --> I1[Agent instructions]
+    I1 --> J[Complete System Prompt]
 ```
 
 ### 8.1. Base Identity
@@ -362,15 +399,46 @@ graph TD
 "You are OpenBotX, a personal AI assistant."
 ```
 
+If the agent has a name (multi-agent setup), this is followed by:
+
+```
+"You are acting as the **crypto** agent."
+```
+
 ### 8.2. Current Date and Time
 
 ```
 "Current date and time: 2025-01-15 14:30:00."
 ```
 
+### 8.2a. Public URL and Project Structure
+
+If a public URL is configured, it is included:
+
+```
+"Public URL: https://my-domain.com"
+```
+
+Then the directory context, which tells the agent about its workspace and the public directory:
+
+```
+# Project Structure
+You have access to your workspace and the public directory. Always use absolute paths.
+
+Workspace: /home/user/myproject/workspace
+  Internal files: reports, data, drafts.
+
+Public: /home/user/myproject/public
+  Web-accessible at /public/ URL. Use for anything the user needs to access:
+  - /home/user/myproject/public/media — images, audio, video
+  - /home/user/myproject/public/documents — PDFs, spreadsheets, exports
+```
+
+This explicitly provides the agent with the absolute paths for its workspace and the public directory, guiding it to use the correct directories for different file types.
+
 ### 8.3. Bootstrap Files (.md)
 
-The system reads 4 files from the workspace root, in this fixed order:
+The system reads 4 files from the **project root** (not the workspace), in this fixed order:
 1. `AGENTS.md`
 2. `SOUL.md`
 3. `USER.md`
@@ -397,7 +465,18 @@ An XML list of all available skills is added, so the LLM knows what it can reque
 </skills>
 ```
 
-### 8.7. Final Message Assembly
+### 8.7. Agent Instructions
+
+If the agent has an `instructions` field configured, it is appended as a dedicated section:
+
+```
+# Agent Instructions
+You are a market analyst specializing in cryptocurrency. Always include disclaimers.
+```
+
+This is the last section in the system prompt, so it takes highest priority when instructions conflict with earlier context.
+
+### 8.8. Final Message Assembly
 
 After building the system prompt, `build_messages()` assembles the message list:
 
@@ -537,9 +616,10 @@ The `SkillsLoader` (`openbotx/agent/skills.py`) does the following:
 2. Workspace skills with the same name **override** built-in ones
 3. For each skill, reads the `SKILL.md` and parses the frontmatter using a regex `^---\n...\n---\n`
 4. Checks if dependencies are satisfied (binaries installed, env vars present)
-5. Skills with `always: true` are included in the prompt automatically
-6. Skills with `always: false` appear in the available skills list for the LLM to use when needed
-7. Skills with unsatisfied dependencies appear as `status="unavailable"` and are not used
+5. Tags each skill with a `source` field: `"builtin"` for skills from `openbotx/skills/`, `"project"` for skills from `workspace/skills/`. This is exposed via the REST API and displayed in the web UI as a visual tag on each skill card
+6. Skills with `always: true` are included in the prompt automatically — **but only if their requirements are satisfied**. An `always: true` skill with unsatisfied requirements (missing binary or env var) is silently excluded from the prompt, preventing broken instructions from being injected
+7. Skills with `always: false` appear in the available skills list for the LLM to use when needed
+8. Skills with unsatisfied dependencies appear as `status="unavailable"` in the skills summary and are not loaded when requested
 
 ---
 
@@ -633,10 +713,13 @@ graph TD
 
 ### Real-time Broadcasting
 
-During the loop, the agent sends events via WebSocket so the frontend can show progress:
+During processing, the agent broadcasts events via the `EventDispatcher` so the frontend can show progress. All `chat:*` events include `agent_name` for multi-agent identification:
 
-- **`chat:tool_use`** — when a tool is executed. Sent with the tool name in human-readable format (e.g., `Read File`, `Web Search`)
+- **`chat:tool_use`** — when a tool is executed. Includes `tool` (human-readable name like `Read File`, `Web Search`) and `description` (human-readable summary of the tool call with arguments)
 - **`chat:thinking`** — when the LLM returns reasoning content (see below)
+- **`chat:user_message`** — when a non-web message arrives (e.g., from Telegram or cron). Includes `channel`, `content`, and `media`. This allows the web UI to display messages from other channels in real time
+- **`chat:transcription`** — when audio media is transcribed. Includes the transcription text, which is also prepended to the user message content
+- **`sessions:updated`** — after saving each conversation turn (user + assistant messages) to the session. Triggers sidebar reload in the frontend
 
 ### Extended Thinking (Reasoning)
 
@@ -654,10 +737,12 @@ Some LLM models support **extended thinking** — a feature where the model expo
 4. The agent loop checks if `reasoning_content` exists. If it does, it broadcasts a `chat:thinking` WebSocket event:
 
 ```python
-if response.reasoning_content and self._ws_manager:
-    await self._ws_manager.broadcast("chat:thinking", {
+if response.reasoning_content and self._dispatcher:
+    await self._dispatcher.broadcast("chat:thinking", {
         "task_id": task_id,
+        "chat_id": chat_id,
         "content": response.reasoning_content,
+        "agent_name": agent_name,
     })
 ```
 
@@ -680,7 +765,7 @@ The loop has a maximum iteration limit (default: **40**, configurable via `param
 
 ### Result Truncation
 
-Tool results are truncated to **500 characters** before being added back to the LLM messages. This prevents excessively large results from consuming tokens unnecessarily.
+Tool results are truncated to **500 characters** before being added back to the LLM messages. This is performed by `ContextBuilder.add_tool_result()`, which is called after each tool execution in the agent loop. Subagents perform the same 500-character truncation inline (not via `ContextBuilder`). This prevents excessively large results from consuming tokens unnecessarily.
 
 ### Practical Example
 
@@ -796,12 +881,13 @@ When the AgentLoop calls the LLM, it sends tool definitions (name, description, 
 | `exec` | Execute shell commands |
 | `web_search` | Search the web (Brave Search API) |
 | `web_fetch` | Fetch content from a URL |
+| `http_client` | Make HTTP requests (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) with download/upload support |
+| `rss_reader` | Read RSS/Atom feeds and return latest entries |
 | `message` | Send intermediate messages to the user |
 | `spawn` | Create subagents for parallel tasks |
 | `cron` | Schedule recurring or one-time tasks |
 | `save_memory` | Save information to long-term memory |
 | `browser` | Browser automation (Chrome/Chromium via CDP) |
-| `http_client` | Make HTTP requests (GET, POST, etc.) |
 | `image_generation` | Generate images (if configured) |
 
 ### Parameter Validation
@@ -826,12 +912,16 @@ This hint is automatically appended by the `ToolRegistry` to any result starting
 
 If the tool is not found, the error message lists all available tools, helping the LLM self-correct.
 
-### Workspace Restriction
+### Workspace Restriction and PathResolver
 
-By default, file tools (`read_file`, `write_file`, `edit_file`, `list_dir`) and the shell (`exec`) are restricted to the workspace directory. The restriction works as follows:
+By default, file tools (`read_file`, `write_file`, `edit_file`, `list_dir`), the HTTP client (`http_client`), and the shell (`exec`) are restricted to the agent's workspace and the shared public directory. The restriction is enforced by the `PathResolver` class (`openbotx/helpers/path.py`):
 
-- **File tools**: Relative paths are resolved from the workspace. Absolute paths are verified with `relative_to()` — if they fall outside the allowed directory, a `PermissionError` is raised
-- **Shell (exec)**: Applies additional safety guards (see below)
+- **File tools and HTTP client**: All use a `PathResolver` instance for path resolution. The resolver:
+  1. Expands `~` (home directory) via `Path.expanduser()`
+  2. Resolves relative paths against the agent's workspace
+  3. When `restrict_to_workspace` is enabled, verifies the resolved path falls within one of the allowed directories (workspace or public). If not, raises a `PermissionError`
+- **Per-agent isolation**: Each agent has its own `PathResolver` with `allowed_dirs = [agent_workspace, public_dir]`. In multi-agent setups, agents cannot access each other's workspaces
+- **Shell (exec)**: The working directory is set to the agent's workspace. The `PathResolver.is_restricted` property is used to determine whether workspace restriction is active for the exec tool
 
 ### Shell Safety Guards (exec)
 
@@ -937,9 +1027,10 @@ Subagents have **limited access** to tools:
 | `read_file`, `write_file`, `edit_file`, `list_dir` | `message` (send messages to user) |
 | `exec` (shell) | `spawn` (create other subagents) |
 | `web_search`, `web_fetch` | `cron` (schedule tasks) |
-| `http_client`, `browser`, `image_generation` | `save_memory` |
+| `http_client`, `rss_reader` | `save_memory` |
+| `browser`, `image_generation` | |
 
-This prevents subagents from multiplying uncontrollably, sending unexpected messages, or modifying memory.
+This prevents subagents from multiplying uncontrollably, sending unexpected messages, or modifying memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
 
 **Browser tab isolation** — Each subagent creates its own browser tab via `BrowserTool`. The tab is always closed in a `finally` block when the subagent finishes (whether it succeeds, fails, or throws an exception). This guarantees tabs are never leaked, even under error conditions. See section 14 for the multi-tab architecture.
 
@@ -947,18 +1038,31 @@ This prevents subagents from multiplying uncontrollably, sending unexpected mess
 
 | Feature | Main Agent | Subagent |
 |---|---|---|
-| Max iterations | 40 | **15** |
-| System prompt | Full (SOUL + USER + memory + skills) | **Simplified** ("You are a subagent...") |
+| Max iterations | 40 (configurable) | **15** (hardcoded) |
+| Max tokens | Configurable (default 8192) | **4096** (hardcoded) |
+| Temperature | Configurable (default 0.1) | **0.1** (hardcoded) |
+| System prompt | Full (SOUL + USER + memory + skills + agent instructions) | **Simplified** ("You are a subagent..." with workspace + public paths) |
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
-| Tools | All (13+) | **10** (no message, spawn, cron, save_memory) |
-| Model | Configurable per agent | **Inherits from main agent** |
+| Tools | All (15) | **11** (no message, spawn, cron, save_memory) |
+| Tool result truncation | Via `ContextBuilder.add_tool_result()` (500 chars) | **Inline** (500 chars, not via ContextBuilder) |
+| Model | Configurable per agent | **Inherits from parent agent** |
+| PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |
+
+The subagent's system prompt is intentionally minimal:
+
+```
+You are a subagent of OpenBotX. Complete the following task and report results. Be concise and efficient.
+Workspace: /path/to/workspace (internal files)
+Public: /path/to/public (web-accessible files)
+Always use absolute paths.
+```
 
 ### Completion
 
 When the subagent completes its task:
 1. The task is marked as **DONE** with the result (first 500 characters)
-2. An `InboundMessage` is published to the bus with the format `[Subagent {task_id} completed]: {result}` (first 300 characters)
+2. An `InboundMessage` is published to the bus with the format `[Subagent {task_id} completed]: {result}` (first 300 characters). The message metadata includes `system_message: true` and `subagent_task_id`, which the main agent loop uses to identify it as a subagent completion announcement rather than a regular user message
 3. This message returns to the main agent, which can use the result to continue its work
 
 If the subagent fails, the task is marked as **ERROR** with the error message.
@@ -975,7 +1079,7 @@ The memory system allows the agent to remember important information across conv
 
 ### Structure
 
-Memory resides in the `memory/` folder of the workspace:
+Memory resides in the `memory/` folder of the workspace. The `MemoryStore` auto-creates this directory on initialization (`mkdir(parents=True, exist_ok=True)`), so it's always available even on a fresh workspace:
 
 ```
 workspace/
@@ -1041,7 +1145,7 @@ graph TD
 The process in detail:
 
 1. `_check_consolidation()` checks: `total_messages - last_consolidated >= memory_window`
-2. If yes, extracts unconsolidated messages from the session
+2. If yes, extracts unconsolidated messages from the session. **Only user and assistant text messages are included** — tool calls (`role: "assistant"` with `tool_calls`) and tool results (`role: "tool"`) are filtered out. This keeps the consolidation input focused on the actual conversation content
 3. Creates a temporary "consolidation agent" with access **only** to the `save_memory` tool
 4. Sends the messages to the LLM with instructions:
 
@@ -1360,9 +1464,12 @@ class WebSocketManager:
 
 | Event | Payload | When Sent |
 |---|---|---|
-| `chat:message` | `{ content, chat_id, task_id }` | When the agent finalizes a response |
-| `chat:thinking` | `{ task_id, chat_id, content }` | During the Agent Loop, if the LLM sends reasoning |
-| `chat:tool_use` | `{ task_id, chat_id, tool, description }` | When a tool is executed |
+| `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | During the Agent Loop, if the LLM sends reasoning |
+| `chat:tool_use` | `{ task_id, chat_id, tool, description, agent_name }` | When a tool is executed |
+| `chat:message` | `{ content, chat_id, task_id, agent_name }` | When the agent finalizes a response |
+| `chat:user_message` | `{ chat_id, content, media, channel }` | When a non-web user message is received (e.g., Telegram, cron). Allows the web UI to display messages from other channels in real time |
+| `chat:transcription` | `{ chat_id, content }` | When audio media is transcribed (the transcription text is prepended to the user message) |
+| `sessions:updated` | `{}` | After a session is saved or cleared (triggers sidebar reload) |
 | `task:created` | Task object | When a task is created |
 | `task:updated` | Task object | When a task's state changes |
 | `channel:status` | `{ name, running }` | When a channel connects or disconnects |
@@ -1561,7 +1668,7 @@ sequenceDiagram
     BUS->>U: WebSocket broadcast (no dedicated cron channel handler)
 ```
 
-The key detail: when the job fires, `_build_cron_callback()` generates a **unique session per execution** by constructing a `chat_id` from the job ID and a random hex suffix:
+The key detail: when the job fires, `ServerFactory.create_cron_callback()` generates a **unique session per execution** by constructing a `chat_id` from the job ID and a random hex suffix:
 
 ```python
 chat_id = f"cron-{job.id}-{uuid4().hex[:6]}"
@@ -1780,9 +1887,10 @@ When the server is stopped (Ctrl+C or shutdown signal), the lifespan executes th
 ```mermaid
 graph TD
     A[Shutdown signal] --> B[HeartbeatService.stop]
-    B --> C[AgentLoop.stop - set stop_event]
-    C --> D[Browser cleanup - close Chrome if open]
-    D --> E[Cancel agent_task]
+    B --> C[Orchestrator.stop]
+    C --> C1["For each agent: AgentLoop.stop"]
+    C1 --> D[Browser cleanup - close Chrome if open]
+    D --> E[Cancel orchestrator_task]
     E --> F[CronService.stop - set stop_event]
     F --> G[Cancel cron_task]
     G --> H[ChannelManager.stop]
@@ -1793,7 +1901,7 @@ graph TD
 
 **HeartbeatService.stop()** cancels the background loop and is the first service to stop — it prevents new heartbeat messages from being queued during shutdown.
 
-**AgentLoop.stop()**, in addition to setting the `_stop_event`, also calls `browser_tool.cleanup()` if the browser tool is registered. This terminates the entire Chrome process, closing all tabs. Individual subagent tabs are already cleaned up via `close_tab()` in their `finally` blocks (see section 15).
+**Orchestrator.stop()** sets its `_stop_event` and then calls `stop()` on every `AgentLoop` instance. Each `AgentLoop.stop()` calls `browser_tool.cleanup()` if the browser tool is registered, terminating the Chrome process and closing all tabs. Individual subagent tabs are already cleaned up via `close_tab()` in their `finally` blocks (see section 15).
 
 **ChannelManager.stop()** stops each channel with a **10-second timeout** (`asyncio.wait_for`). This prevents the shutdown from hanging indefinitely if a channel (e.g., Telegram long-polling) takes too long to close. If a channel exceeds the timeout, the error is logged and shutdown continues with the remaining channels.
 

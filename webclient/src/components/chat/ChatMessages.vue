@@ -58,6 +58,9 @@ watch(
         <i v-else class="pi pi-sparkles"></i>
       </div>
       <div class="message-body">
+        <div v-if="msg.agent_name" class="agent-label">
+          <i class="pi pi-user"></i> {{ msg.agent_name }} Agent
+        </div>
         <div v-if="msg.media?.length" class="message-media">
           <template v-for="(path, k) in msg.media" :key="k">
             <img v-if="isImage(path)" :src="mediaUrl(path)" class="media-thumb" />
@@ -149,6 +152,21 @@ watch(
   min-width: 0;
 }
 
+.agent-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--p-primary-color);
+  margin-bottom: 0.25rem;
+  text-transform: capitalize;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.agent-label i {
+  font-size: 0.7rem;
+}
+
 .message.user .message-body {
   background: color-mix(in srgb, var(--p-primary-color) 12%, var(--p-content-background));
   border-color: color-mix(in srgb, var(--p-primary-color) 25%, var(--p-content-background));
@@ -196,8 +214,11 @@ watch(
   height: 36px;
 }
 
-.tool-uses {
+.message-content + .tool-uses {
   margin-top: 0.5rem;
+}
+
+.tool-uses {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;

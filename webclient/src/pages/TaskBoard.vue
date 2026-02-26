@@ -1,21 +1,29 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
+import Select from 'primevue/select'
 import TaskColumn from '../components/tasks/TaskColumn.vue'
 import { useTasksStore } from '../stores/tasks'
 import { useChatStore } from '../stores/chat'
+import { useAgentsStore } from '../stores/agents'
 
 const router = useRouter()
 const tasksStore = useTasksStore()
 const chatStore = useChatStore()
+const agentsStore = useAgentsStore()
 
 const showConfirm = ref(false)
 const targetTask = ref(null)
 
+const agentOptions = computed(() =>
+  agentsStore.agents.map((a) => ({ label: a.name, value: a.name }))
+)
+
 onMounted(() => {
   tasksStore.loadTasks()
+  agentsStore.loadAgents()
 })
 
 function handleGoToSession(task) {
@@ -37,6 +45,16 @@ async function confirmGoToSession() {
   <div class="task-board">
     <div class="board-header">
       <h2>Task Board</h2>
+      <Select
+        v-if="agentsStore.agents.length > 1"
+        v-model="tasksStore.selectedAgent"
+        :options="agentOptions"
+        option-label="label"
+        option-value="value"
+        placeholder="All agents"
+        :show-clear="true"
+        class="agent-filter"
+      />
     </div>
     <div class="board-columns">
       <TaskColumn title="TODO" :tasks="tasksStore.todoTasks" @go-to-session="handleGoToSession" />
@@ -65,11 +83,19 @@ async function confirmGoToSession() {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .board-header h2 {
   margin: 0;
   font-size: 1.1rem;
+}
+
+.agent-filter {
+  width: 12rem;
 }
 
 .board-columns {

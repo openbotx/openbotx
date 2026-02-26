@@ -76,6 +76,9 @@ function duration(task) {
 
     <div class="task-meta">
       <div class="task-meta-left">
+        <span v-if="task.agent_name" class="agent-badge">
+          <i class="pi pi-user"></i> {{ task.agent_name }}
+        </span>
         <span v-if="task.agent_type === 'subagent'" class="agent-badge">
           <i class="pi pi-sitemap"></i> subagent
         </span>

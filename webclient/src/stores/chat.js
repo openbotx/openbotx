@@ -103,6 +103,7 @@ export const useChatStore = defineStore('chat', () => {
       role: 'assistant',
       content: data.content,
       task_id: data.task_id,
+      agent_name: data.agent_name,
       timestamp: Date.now(),
     })
   }

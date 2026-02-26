@@ -34,10 +34,15 @@ async function viewSkill(skill) {
     <div v-if="skills.length" class="skills-grid">
       <Card v-for="skill in skills" :key="skill.name" class="skill-card" @click="viewSkill(skill)">
         <template #title>
-          <div class="skill-title">
-            <i class="pi pi-bolt"></i>
-            {{ skill.name }}
-            <Tag v-if="skill.always" value="always active" severity="info" />
+          <div class="skill-header">
+            <div class="skill-name">
+              <i class="pi pi-bolt"></i>
+              {{ skill.name }}
+            </div>
+            <div class="skill-tags">
+              <Tag v-if="skill.always" value="always active" severity="info" />
+              <Tag :value="skill.source === 'builtin' ? 'builtin' : 'project'" :severity="skill.source === 'builtin' ? 'secondary' : 'success'" />
+            </div>
           </div>
         </template>
         <template #subtitle>
@@ -90,10 +95,22 @@ async function viewSkill(skill) {
   cursor: pointer;
 }
 
-.skill-title {
+.skill-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.skill-name {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.skill-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .skill-content {

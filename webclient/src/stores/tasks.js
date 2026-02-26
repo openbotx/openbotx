@@ -6,15 +6,22 @@ export const useTasksStore = defineStore('tasks', () => {
   const api = useApi()
   const tasks = ref(new Map())
   const activeTools = ref(new Map())
+  const selectedAgent = ref('')
+
+  const filteredTasks = computed(() => {
+    const all = [...tasks.value.values()]
+    if (!selectedAgent.value) return all
+    return all.filter((t) => t.agent_name === selectedAgent.value)
+  })
 
   const todoTasks = computed(() =>
-    [...tasks.value.values()].filter((t) => t.state === 'TODO')
+    filteredTasks.value.filter((t) => t.state === 'TODO')
   )
   const doingTasks = computed(() =>
-    [...tasks.value.values()].filter((t) => t.state === 'DOING')
+    filteredTasks.value.filter((t) => t.state === 'DOING')
   )
   const doneTasks = computed(() =>
-    [...tasks.value.values()].filter((t) => t.state === 'DONE' || t.state === 'ERROR')
+    filteredTasks.value.filter((t) => t.state === 'DONE' || t.state === 'ERROR')
   )
 
   async function loadTasks() {
@@ -54,7 +61,7 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   return {
-    tasks, activeTools, todoTasks, doingTasks, doneTasks,
+    tasks, activeTools, selectedAgent, todoTasks, doingTasks, doneTasks,
     loadTasks, onTaskCreated, onTaskUpdated, onToolUse, onThinking,
   }
 })

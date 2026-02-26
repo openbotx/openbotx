@@ -9,17 +9,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
+from openbotx.agent.classifier import AgentClassifier
 from openbotx.agent.loop import AgentLoop
+from openbotx.agent.orchestrator import Orchestrator
 from openbotx.agent.skills import SkillsLoader
 from openbotx.agent.subagent import SubagentManager
-from openbotx.bus.events import InboundMessage
 from openbotx.bus.dispatcher import EventDispatcher
+from openbotx.bus.events import InboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.manager import ChannelManager
 from openbotx.config.loader import load_config
+from openbotx.config.schema import Config
 from openbotx.cron.service import CronService
 from openbotx.cron.types import CronJob
 from openbotx.heartbeat.service import HeartbeatService
+from openbotx.helpers.path import PathResolver
 from openbotx.providers.litellm_provider import LiteLLMProvider
 from openbotx.server.auth import AuthMiddleware
 from openbotx.server.websocket import WebSocketManager, websocket_endpoint
@@ -32,67 +36,175 @@ logger = logging.getLogger(__name__)
 WEBCLIENT_DIR = Path(__file__).parent.parent.parent / "webclient" / "dist"
 
 
-def _build_cron_callback(bus: MessageBus):
-    async def _on_job(job: CronJob) -> None:
-        chat_id = f"cron-{job.id}-{uuid4().hex[:6]}"
-        msg = InboundMessage(
-            channel="cron",
-            sender_id="cron",
-            chat_id=chat_id,
-            content=job.payload.message,
-            metadata={"cron_job_id": job.id, "cron_job_name": job.name},
-        )
-        await bus.publish_inbound(msg)
+class ServerFactory:
+    """Builds all server dependencies from config."""
 
-    return _on_job
+    def __init__(self, config: Config):
+        self._config = config
+        self._project_path = config.project_path
 
-
-def _create_storage(config, project_path: Path, public_url: str):
-    if config.storage.type == "s3" and config.storage.s3_bucket:
-        from openbotx.storage.s3 import S3Storage
-
-        return S3Storage(
-            bucket=config.storage.s3_bucket,
-            region=config.storage.s3_region,
-            access_key=config.storage.s3_access_key,
-            secret_key=config.storage.s3_secret_key,
+    def create_provider(self, model: str) -> LiteLLMProvider:
+        provider_cfg = self._config.get_provider(model)
+        return LiteLLMProvider(
+            api_key=provider_cfg.api_key if provider_cfg else "",
+            api_base=provider_cfg.api_base if provider_cfg else None,
+            extra_headers=provider_cfg.headers if provider_cfg else None,
         )
 
-    from openbotx.storage.local import LocalStorage
+    def create_storage(self, public_url: str):
+        if self._config.storage.type == "s3" and self._config.storage.s3_bucket:
+            from openbotx.storage.s3 import S3Storage
 
-    return LocalStorage(base_path=project_path, public_url=public_url)
+            return S3Storage(
+                bucket=self._config.storage.s3_bucket,
+                region=self._config.storage.s3_region,
+                access_key=self._config.storage.s3_access_key,
+                secret_key=self._config.storage.s3_secret_key,
+            )
 
+        from openbotx.storage.local import LocalStorage
 
-def _setup_logging(project_path: Path) -> None:
-    log_dir = project_path / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+        return LocalStorage(base_path=self._project_path, public_url=public_url)
 
-    root = logging.getLogger("openbotx")
-    root.setLevel(logging.DEBUG)
+    def create_cron_callback(self, bus: MessageBus):
+        async def _on_job(job: CronJob) -> None:
+            chat_id = f"cron-{job.id}-{uuid4().hex[:6]}"
+            msg = InboundMessage(
+                channel="cron",
+                sender_id="cron",
+                chat_id=chat_id,
+                content=job.payload.message,
+                metadata={"cron_job_id": job.id, "cron_job_name": job.name},
+            )
+            await bus.publish_inbound(msg)
 
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "openbotx.log",
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    root.addHandler(file_handler)
+        return _on_job
 
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    root.addHandler(console_handler)
+    def create_orchestrator(
+        self,
+        bus: MessageBus,
+        public_dir: Path,
+        dispatcher: EventDispatcher,
+        task_manager: TaskManager,
+        session_manager: SessionManager,
+        skills_loader: SkillsLoader,
+        cron_service: CronService,
+        storage,
+        public_url: str,
+    ) -> Orchestrator:
+        agent_loops: dict[str, AgentLoop] = {}
+        default_agent_name = next(iter(self._config.agents))
+
+        for name, agent_cfg in self._config.agents.items():
+            provider = self.create_provider(agent_cfg.model)
+
+            agent_workspace = agent_cfg.resolve_workspace(self._project_path)
+            agent_workspace.mkdir(parents=True, exist_ok=True)
+
+            allowed_dirs = (
+                [agent_workspace, public_dir] if self._config.tools.restrict_to_workspace else None
+            )
+            resolver = PathResolver(workspace=agent_workspace, allowed_dirs=allowed_dirs)
+
+            subagent_mgr = SubagentManager(
+                provider=provider,
+                workspace=agent_workspace,
+                resolver=resolver,
+                public_dir=public_dir,
+                bus=bus,
+                task_manager=task_manager,
+                model=agent_cfg.model,
+                brave_api_key=self._config.tools.web_search.api_key,
+                exec_timeout=self._config.tools.exec.timeout,
+                image_config=self._config.image,
+                storage=storage,
+            )
+
+            loop = AgentLoop(
+                bus=bus,
+                provider=provider,
+                project_path=self._project_path,
+                workspace=agent_workspace,
+                resolver=resolver,
+                public_dir=public_dir,
+                dispatcher=dispatcher,
+                task_manager=task_manager,
+                session_manager=session_manager,
+                skills_loader=skills_loader,
+                subagent_manager=subagent_mgr,
+                cron_service=cron_service,
+                model=agent_cfg.model,
+                max_iterations=agent_cfg.params.max_iterations,
+                temperature=agent_cfg.params.temperature,
+                max_tokens=agent_cfg.params.max_tokens,
+                memory_window=agent_cfg.params.memory_window,
+                brave_api_key=self._config.tools.web_search.api_key,
+                exec_timeout=self._config.tools.exec.timeout,
+                image_config=self._config.image,
+                storage=storage,
+                public_url=public_url,
+                agent_name=name,
+                agent_instructions=agent_cfg.instructions,
+                agent_tools=agent_cfg.tools or None,
+            )
+            agent_loops[name] = loop
+
+        classifier = None
+        if len(agent_loops) > 1:
+            agents_info = {name: cfg.description for name, cfg in self._config.agents.items()}
+            classifier_model = (
+                self._config.classifier.model or self._config.agents[default_agent_name].model
+            )
+            classifier_provider = self.create_provider(classifier_model)
+            classifier = AgentClassifier(
+                provider=classifier_provider,
+                agents=agents_info,
+                model=classifier_model,
+            )
+
+        return Orchestrator(
+            bus=bus,
+            agents=agent_loops,
+            classifier=classifier,
+            default_agent=default_agent_name,
+            session_manager=session_manager,
+        )
+
+    @staticmethod
+    def setup_logging(project_path: Path) -> None:
+        log_dir = project_path / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        root = logging.getLogger("openbotx")
+        root.setLevel(logging.DEBUG)
+
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "openbotx.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        root.addHandler(file_handler)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        root.addHandler(console_handler)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config = load_config()
-    workspace = config.workspace_path
-    workspace.mkdir(parents=True, exist_ok=True)
+    factory = ServerFactory(config)
+    project_path = config.project_path
+    system_workspace = config.workspace_path
+    system_workspace.mkdir(parents=True, exist_ok=True)
 
-    _setup_logging(config.project_path)
+    ServerFactory.setup_logging(project_path)
 
     if not config.auth.secret_key:
         config.auth.secret_key = uuid4().hex
@@ -104,58 +216,27 @@ async def lifespan(app: FastAPI):
     dispatcher.add_handler(ws_manager)
 
     bus = MessageBus()
-    session_manager = SessionManager(workspace)
-    task_manager = TaskManager(workspace, dispatcher)
-    skills_loader = SkillsLoader(workspace)
-    cron_service = CronService(workspace, on_job_callback=_build_cron_callback(bus))
+    session_manager = SessionManager(system_workspace)
+    task_manager = TaskManager(system_workspace, dispatcher)
+    skills_loader = SkillsLoader(system_workspace)
+    cron_service = CronService(system_workspace, on_job_callback=factory.create_cron_callback(bus))
 
-    public_dir = config.project_path / "public"
+    public_dir = project_path / "public"
     public_dir.mkdir(parents=True, exist_ok=True)
     (public_dir / "media").mkdir(parents=True, exist_ok=True)
+    (public_dir / "documents").mkdir(parents=True, exist_ok=True)
 
     public_url = config.server.public_url or f"http://localhost:{config.server.port}"
-    storage = _create_storage(config, config.project_path, public_url)
+    storage = factory.create_storage(public_url)
 
-    main_agent = config.main_agent
-    provider_cfg = config.get_provider()
-    provider = LiteLLMProvider(
-        api_key=provider_cfg.api_key if provider_cfg else "",
-        api_base=provider_cfg.api_base if provider_cfg else None,
-        extra_headers=provider_cfg.headers if provider_cfg else None,
-    )
-
-    subagent_manager = SubagentManager(
-        provider=provider,
-        workspace=workspace,
+    orchestrator = factory.create_orchestrator(
         bus=bus,
-        task_manager=task_manager,
-        model=main_agent.model,
-        brave_api_key=config.tools.web_search.api_key,
-        exec_timeout=config.tools.exec.timeout,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        image_config=config.image,
-        storage=storage,
-    )
-
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=workspace,
+        public_dir=public_dir,
         dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,
         skills_loader=skills_loader,
-        subagent_manager=subagent_manager,
         cron_service=cron_service,
-        model=main_agent.model,
-        max_iterations=main_agent.params.max_iterations,
-        temperature=main_agent.params.temperature,
-        max_tokens=main_agent.params.max_tokens,
-        memory_window=main_agent.params.memory_window,
-        brave_api_key=config.tools.web_search.api_key,
-        exec_timeout=config.tools.exec.timeout,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        image_config=config.image,
         storage=storage,
         public_url=public_url,
     )
@@ -168,7 +249,7 @@ async def lifespan(app: FastAPI):
     )
 
     heartbeat = HeartbeatService(
-        workspace=workspace,
+        workspace=system_workspace,
         bus=bus,
         interval=config.heartbeat.interval,
         enabled=config.heartbeat.enabled,
@@ -183,13 +264,11 @@ async def lifespan(app: FastAPI):
     app.state.task_manager = task_manager
     app.state.skills_loader = skills_loader
     app.state.cron_service = cron_service
-    app.state.provider = provider
-    app.state.subagent_manager = subagent_manager
-    app.state.agent_loop = agent_loop
+    app.state.orchestrator = orchestrator
     app.state.channel_manager = channel_manager
     app.state.heartbeat = heartbeat
 
-    agent_task = asyncio.create_task(agent_loop.run())
+    orchestrator_task = asyncio.create_task(orchestrator.run())
     cron_task = asyncio.create_task(cron_service.run())
     await channel_manager.start()
     await heartbeat.start()
@@ -209,19 +288,19 @@ async def lifespan(app: FastAPI):
         logger.info(
             "openbotx %s started (workspace: %s, public_url: %s)",
             __version__,
-            workspace,
+            system_workspace,
             config.server.public_url,
         )
     else:
-        logger.info("openbotx %s started (workspace: %s)", __version__, workspace)
+        logger.info("openbotx %s started (workspace: %s)", __version__, system_workspace)
 
     yield
 
     await heartbeat.stop()
-    await agent_loop.stop()
-    agent_task.cancel()
+    await orchestrator.stop()
+    orchestrator_task.cancel()
     try:
-        await agent_task
+        await orchestrator_task
     except asyncio.CancelledError:
         pass
 
@@ -251,6 +330,7 @@ def create_app() -> FastAPI:
     )
 
     from openbotx.server.routes import (
+        agents,
         auth,
         channels,
         chat,
@@ -273,6 +353,7 @@ def create_app() -> FastAPI:
     app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
     app.include_router(scheduler.router, prefix="/api/scheduler", tags=["scheduler"])
     app.include_router(config.router, prefix="/api/config", tags=["config"])
+    app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 
     app.add_api_websocket_route("/ws", websocket_endpoint)
 

@@ -76,16 +76,19 @@ class SkillsLoader:
                 metadata, _ = self._parse_frontmatter(content)
                 requires = metadata.get("requires", {})
                 available = self._check_requirements(requires) if requires else True
+                source = "builtin" if path.is_relative_to(self._builtin_skills_dir) else "project"
                 result.append(
                     {
                         "name": metadata.get("name", name),
                         "description": metadata.get("description", ""),
                         "available": available,
                         "always": bool(metadata.get("always", False)),
+                        "source": source,
                     }
                 )
             except Exception as e:
                 logger.warning("failed to load skill %s: %s", name, e)
+        result.sort(key=lambda s: s["name"])
         return result
 
     def load_skill(self, name: str) -> str | None:

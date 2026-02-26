@@ -17,6 +17,7 @@ class Task:
     description: str = ""
     state: TaskState = TaskState.TODO
     agent_type: str = "agent"
+    agent_name: str = ""
     channel: str = ""
     chat_id: str = ""
     parent_task_id: str | None = None
@@ -33,6 +34,7 @@ class Task:
             "description": self.description,
             "state": self.state.value,
             "agent_type": self.agent_type,
+            "agent_name": self.agent_name,
             "channel": self.channel,
             "chat_id": self.chat_id,
             "parent_task_id": self.parent_task_id,

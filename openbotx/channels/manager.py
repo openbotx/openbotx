@@ -173,5 +173,6 @@ class ChannelManager:
                     "content": msg.content,
                     "chat_id": msg.chat_id,
                     "task_id": msg.metadata.get("task_id"),
+                    "agent_name": msg.metadata.get("agent_name"),
                 },
             )

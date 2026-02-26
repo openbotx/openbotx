@@ -15,11 +15,13 @@ class TaskUpdate(BaseModel):
 
 
 @router.get("")
-async def list_tasks(request: Request):
+async def list_tasks(request: Request, agent: str | None = None):
     task_manager = request.app.state.task_manager
     cutoff = (datetime.now() - STALE_RETENTION).isoformat()
     tasks = []
     for t in task_manager.list_tasks():
+        if agent and t.agent_name != agent:
+            continue
         if t.state in (TaskState.TODO, TaskState.DONE, TaskState.ERROR) and t.updated_at < cutoff:
             continue
         tasks.append(t.to_dict())

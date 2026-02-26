@@ -1,7 +1,7 @@
 import mimetypes
 import posixpath
 
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 

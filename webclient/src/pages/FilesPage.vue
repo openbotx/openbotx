@@ -35,6 +35,11 @@ const isMarkdown = computed(() => {
   return p.endsWith('.md')
 })
 
+const isHtmlFile = computed(() => {
+  const name = selectedItem.value?.name || ''
+  return /\.(html|htm)$/i.test(name)
+})
+
 const showBackButton = computed(() => isMobile.value && currentFile.value !== null)
 
 function onResize() {
@@ -230,6 +235,9 @@ async function confirmDelete() {
           <Button icon="pi pi-trash" size="small" text severity="danger" title="Delete" @click="openDeleteConfirm" />
         </template>
         <template v-else>
+          <a v-if="isHtmlFile" :href="`/api/files/download/${selectedItem.path}`" target="_blank" rel="noopener noreferrer" class="download-link">
+            <Button icon="pi pi-external-link" size="small" text severity="secondary" title="Open in browser" />
+          </a>
           <a :href="`/api/files/download/${selectedItem.path}`" :download="selectedItem.name" class="download-link">
             <Button icon="pi pi-download" size="small" text severity="secondary" title="Download" />
           </a>
