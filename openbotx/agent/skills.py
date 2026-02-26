@@ -106,6 +106,38 @@ class SkillsLoader:
             logger.warning("failed to load skill %s: %s", name, e)
             return None
 
+    def load_skill_raw(self, name: str) -> dict[str, Any] | None:
+        """Load a skill's raw content (with frontmatter) and metadata."""
+        skills = self._discover_skills()
+        path = skills.get(name)
+        if not path:
+            return None
+
+        try:
+            content = path.read_text(encoding="utf-8")
+            source = "builtin" if path.is_relative_to(self._builtin_skills_dir) else "project"
+            return {"name": name, "content": content, "source": source}
+        except Exception as e:
+            logger.warning("failed to load skill %s: %s", name, e)
+            return None
+
+    def save_skill(self, name: str, content: str) -> str | None:
+        """Save content to a project skill's SKILL.md. Returns error string or None on success."""
+        skills = self._discover_skills()
+        path = skills.get(name)
+        if not path:
+            return "Skill not found"
+
+        if path.is_relative_to(self._builtin_skills_dir):
+            return "Cannot edit builtin skills"
+
+        try:
+            path.write_text(content, encoding="utf-8")
+            return None
+        except Exception as e:
+            logger.warning("failed to save skill %s: %s", name, e)
+            return str(e)
+
     def get_always_skills(self) -> list[tuple[str, str]]:
         result = []
         for name, path in self._discover_skills().items():

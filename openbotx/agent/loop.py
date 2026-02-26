@@ -122,6 +122,10 @@ class AgentLoop:
     def name(self) -> str:
         return self._agent_name
 
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
+        """Return tool definitions from the registry."""
+        return self._registry.get_definitions()
+
     def _register_tools(self) -> None:
         whitelist = set(self._agent_tools) if self._agent_tools else None
 

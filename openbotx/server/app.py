@@ -345,6 +345,7 @@ def create_app() -> FastAPI:
         skills,
         system,
         tasks,
+        tools,
     )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
@@ -353,6 +354,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
     app.include_router(files.router, prefix="/api/files", tags=["files"])
     app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
+    app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
     app.include_router(channels.router, prefix="/api/channels", tags=["channels"])
     app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
     app.include_router(scheduler.router, prefix="/api/scheduler", tags=["scheduler"])

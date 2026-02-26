@@ -6,6 +6,7 @@ const routes = [
   { path: '/tasks', name: 'tasks', component: () => import('../pages/TaskBoard.vue') },
   { path: '/files', name: 'files', component: () => import('../pages/FilesPage.vue') },
   { path: '/skills', name: 'skills', component: () => import('../pages/SkillsPage.vue') },
+  { path: '/tools', name: 'tools', component: () => import('../pages/ToolsPage.vue') },
   { path: '/scheduler', name: 'scheduler', component: () => import('../pages/SchedulerPage.vue') },
   { path: '/settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },

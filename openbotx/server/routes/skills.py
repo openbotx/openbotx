@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -21,7 +22,20 @@ async def list_skills(request: Request):
 @router.get("/{name}")
 async def get_skill(name: str, request: Request):
     skills_loader = request.app.state.skills_loader
-    content = skills_loader.load_skill(name)
-    if content is None:
+    data = skills_loader.load_skill_raw(name)
+    if data is None:
         return {"error": "Skill not found"}
-    return {"name": name, "content": content}
+    return data
+
+
+class SkillUpdate(BaseModel):
+    content: str
+
+
+@router.put("/{name}")
+async def update_skill(name: str, body: SkillUpdate, request: Request):
+    skills_loader = request.app.state.skills_loader
+    error = skills_loader.save_skill(name, body.content)
+    if error:
+        return {"error": error}
+    return {"ok": True}

@@ -9,9 +9,7 @@ class ReadFileTool(Tool):
     """Read the contents of a file. Use offset to continue reading truncated files."""
 
     name = "read_file"
-    description = (
-        "Read the contents of a file. Use offset to continue reading truncated files."
-    )
+    description = "Read the contents of a file. Use offset to continue reading truncated files."
     parameters = {
         "type": "object",
         "properties": {
@@ -33,9 +31,7 @@ class ReadFileTool(Tool):
     def __init__(self, resolver: PathResolver):
         self._resolver = resolver
 
-    async def execute(
-        self, path: str, offset: int = 1, limit: int = 0, **kwargs: Any
-    ) -> str:
+    async def execute(self, path: str, offset: int = 1, limit: int = 0, **kwargs: Any) -> str:
         try:
             file_path = self._resolver.resolve(path)
             if not file_path.exists():
@@ -48,9 +44,7 @@ class ReadFileTool(Tool):
 
             start = max(0, offset - 1)
             if start >= total_lines:
-                return (
-                    f"Error: offset {offset} exceeds file length ({total_lines} lines)."
-                )
+                return f"Error: offset {offset} exceeds file length ({total_lines} lines)."
 
             lines = all_lines[start:]
             if limit > 0:
@@ -59,10 +53,7 @@ class ReadFileTool(Tool):
             output = ""
             output_lines = 0
             for line in lines:
-                if (
-                    len(output.encode("utf-8")) + len(line.encode("utf-8"))
-                    > self._MAX_READ_BYTES
-                ):
+                if len(output.encode("utf-8")) + len(line.encode("utf-8")) > self._MAX_READ_BYTES:
                     break
                 output += line
                 output_lines += 1
@@ -139,9 +130,7 @@ class EditFileTool(Tool):
     def __init__(self, resolver: PathResolver):
         self._resolver = resolver
 
-    async def execute(
-        self, path: str, old_text: str, new_text: str, **kwargs: Any
-    ) -> str:
+    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = self._resolver.resolve(path)
             if not file_path.exists():
@@ -175,9 +164,7 @@ class EditFileTool(Tool):
 
         best_ratio, best_start = 0.0, 0
         for i in range(max(1, len(lines) - window + 1)):
-            ratio = difflib.SequenceMatcher(
-                None, old_lines, lines[i : i + window]
-            ).ratio()
+            ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
             if ratio > best_ratio:
                 best_ratio, best_start = ratio, i
 
@@ -195,7 +182,9 @@ class EditFileTool(Tool):
                 f"Error: old_text not found in {path}.\n"
                 f"Best match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
             )
-        return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        return (
+            f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        )
 
 
 class ListDirTool(Tool):

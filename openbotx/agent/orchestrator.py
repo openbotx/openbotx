@@ -51,6 +51,13 @@ class Orchestrator:
         for agent in self._agents.values():
             await agent.stop()
 
+    def get_tool_definitions(self) -> list[dict]:
+        """Return tool definitions from the default agent's registry."""
+        agent = self._agents.get(self._default_agent)
+        if not agent:
+            return []
+        return agent.get_tool_definitions()
+
     async def _route(self, msg: InboundMessage) -> str:
         # single agent or no classifier — skip classification
         if len(self._agents) == 1 or not self._classifier:

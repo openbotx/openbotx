@@ -15,6 +15,7 @@ const navItems = [
   { label: 'Tasks', icon: 'pi pi-th-large', path: '/tasks' },
   { label: 'Files', icon: 'pi pi-folder', path: '/files' },
   { label: 'Skills', icon: 'pi pi-bolt', path: '/skills' },
+  { label: 'Tools', icon: 'pi pi-wrench', path: '/tools' },
   { label: 'Scheduler', icon: 'pi pi-clock', path: '/scheduler' },
   { label: 'Settings', icon: 'pi pi-cog', path: '/settings' },
 ]
