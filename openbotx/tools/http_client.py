@@ -68,7 +68,7 @@ class HttpClientTool(Tool):
         "xml": "application/xml",
     }
 
-    _MAX_BODY_LENGTH = 10000
+    _MAX_BODY_LENGTH = 50_000  # 50KB — matches WebFetchTool
 
     def __init__(self, resolver: PathResolver | None = None):
         self._resolver = resolver

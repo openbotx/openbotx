@@ -36,6 +36,7 @@ class ContextBuilder:
             "",
             f"Workspace: {self._workspace}",
             "  Internal files: reports, data, drafts.",
+            f"  - {self._workspace / 'skills'} — project skills (each is a directory with a SKILL.md)",
             "",
             f"Public: {self._public_dir}",
             "  Web-accessible at /public/ URL. Use for anything the user needs to access:",
@@ -81,7 +82,17 @@ class ContextBuilder:
 
         skills_summary = self._skills_loader.build_skills_summary()
         if skills_summary:
-            parts.append(f"\n# Available Skills\n{skills_summary}")
+            parts.append(
+                "\n# Skills\n"
+                "Before replying, scan <available_skills> <description> entries.\n"
+                "- If exactly one skill clearly applies: read its SKILL.md at "
+                "<location> with read_file, then follow it.\n"
+                "- If multiple could apply: choose the most specific one, "
+                "then read and follow it.\n"
+                "- If none clearly apply: do not read any SKILL.md.\n"
+                'Skills marked always="true" are already loaded above.\n\n'
+                f"{skills_summary}"
+            )
 
         if agent_instructions:
             parts.append(f"\n# Agent Instructions\n{agent_instructions}")
@@ -123,13 +134,12 @@ class ContextBuilder:
         tool_name: str,
         result: str,
     ) -> None:
-        truncated = result[:500] if len(result) > 500 else result
         messages.append(
             {
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "name": tool_name,
-                "content": truncated,
+                "content": result,
             }
         )
 

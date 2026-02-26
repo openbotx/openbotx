@@ -84,6 +84,7 @@ class SkillsLoader:
                         "available": available,
                         "always": bool(metadata.get("always", False)),
                         "source": source,
+                        "location": str(path),
                     }
                 )
             except Exception as e:
@@ -126,13 +127,17 @@ class SkillsLoader:
         if not skills:
             return ""
 
-        lines = ["<skills>"]
+        lines = ["<available_skills>"]
         for s in skills:
             status = "available" if s["available"] else "unavailable"
             always_tag = ' always="true"' if s["always"] else ""
             lines.append(
-                f'  <skill name="{s["name"]}" status="{status}"{always_tag}>'
-                f"{s['description']}</skill>"
+                f"  <skill{always_tag}>"
+                f"<name>{s['name']}</name>"
+                f"<description>{s['description']}</description>"
+                f"<location>{s['location']}</location>"
+                f"<status>{status}</status>"
+                f"</skill>"
             )
-        lines.append("</skills>")
+        lines.append("</available_skills>")
         return "\n".join(lines)

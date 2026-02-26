@@ -20,8 +20,7 @@ def describe_tool_use(name: str, arguments: dict) -> str:
         case "web_fetch":
             return f"Fetching {args.get('url', '')}"
         case "exec":
-            cmd = args.get("command", "")
-            return f"Running {cmd[:60]}"
+            return f"Running {args.get('command', '')}"
         case "http_client":
             method = args.get("method", "GET").upper()
             return f"{method} {args.get('url', '')}"
@@ -31,7 +30,7 @@ def describe_tool_use(name: str, arguments: dict) -> str:
                 return f"Navigating to {args.get('url', '')}"
             return f"Browser {action}"
         case "spawn":
-            return f"Spawning {args.get('label', args.get('task', '')[:40])}"
+            return f"Spawning {args.get('label') or args.get('task', '')}"
         case "message":
             return "Sending message"
         case "cron":

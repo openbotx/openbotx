@@ -27,6 +27,8 @@ class ExecTool(Tool):
         "required": ["command"],
     }
 
+    _MAX_OUTPUT = 200_000  # 200KB
+
     _DENY_PATTERNS = [
         r"\brm\s+-[rf]{1,2}\b",
         r"\bdel\s+/[fq]\b",
@@ -85,9 +87,11 @@ class ExecTool(Tool):
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
 
-            max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
+            if len(result) > self._MAX_OUTPUT:
+                result = (
+                    f"[Output truncated: showing last {self._MAX_OUTPUT} of {len(result)} chars]\n"
+                    + result[-self._MAX_OUTPUT :]
+                )
             return result
 
         except Exception as e:
