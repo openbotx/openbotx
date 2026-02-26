@@ -256,7 +256,7 @@ Chrome automation via the Chrome DevTools Protocol (CDP). Requires Google Chrome
 | `navigate` | Navigate to a URL via `cdp.page.navigate`. Waits 2 seconds for page load. |
 | `snapshot` | Extract visible text content (`document.body.innerText`). Truncated to `max_chars`. |
 | `screenshot` | Capture a PNG screenshot via `cdp.page.capture_screenshot`. |
-| `click` | Click an element by CSS selector. Uses pure CDP: resolves element to `RemoteObjectId`, scrolls into view, gets content quads for coordinates, then dispatches mouse events (mouseMoved → mousePressed → mouseReleased). Includes a hit-test via `elementFromPoint` — if an overlay covers the element, falls back to keyboard activation (`dom.focus` + Enter key). |
+| `click` | Click an element by CSS selector. Uses pure CDP: resolves element to `RemoteObjectId`, scrolls into view, gets content quads for coordinates, then dispatches mouse events (mouseMoved → mousePressed → mouseReleased). |
 | `type` | Click to focus an element, then type text character-by-character via CDP key events (`dispatch_key_event`). |
 | `press` | Press a special key (Enter, Tab, Escape, etc.) via CDP key events with correct virtual key codes. |
 | `inspect` | Discover interactive elements on the page (links, buttons, inputs, etc.). Returns up to 50 visible elements with their CSS selectors, element type, and label text. |
@@ -268,8 +268,7 @@ Chrome automation via the Chrome DevTools Protocol (CDP). Requires Google Chrome
 1. **Resolve** — `runtime.evaluate` to get a `RemoteObjectId` handle for the CSS selector.
 2. **Scroll** — `dom.scroll_into_view_if_needed` to ensure the element is in the viewport.
 3. **Position** — `dom.get_content_quads` to get the element's bounding quad, then compute the center point.
-4. **Hit-test** — `elementFromPoint(x, y)` checks if the top element at those coordinates is inside the target. This detects overlays.
-5. **Activate** — If the hit-test passes, dispatch CDP mouse events at the coordinates. If an overlay is detected, fall back to `dom.focus` + Enter key press (standard accessibility interaction for buttons).
+4. **Click** — Dispatch CDP mouse events at the coordinates (mouseMoved → mousePressed → mouseReleased).
 
 ---
 

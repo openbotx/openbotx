@@ -94,17 +94,20 @@ class BrowserLauncher(LoggerMixin):
 
     def kill(self, timeout: float = 3.0):
         if self._process is not None:
-            if os.name == "posix":
-                os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-            else:
-                self._process.terminate()
             try:
-                self._process.wait(timeout)
-            except subprocess.TimeoutExpired:
                 if os.name == "posix":
-                    os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
+                    os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
                 else:
-                    self._process.kill()
+                    self._process.terminate()
+                try:
+                    self._process.wait(timeout)
+                except subprocess.TimeoutExpired:
+                    if os.name == "posix":
+                        os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
+                    else:
+                        self._process.kill()
+            except ProcessLookupError:
+                pass
             self._process = None
             if self._logfile is not None and not self._logfile.closed:
                 self._logfile.close()

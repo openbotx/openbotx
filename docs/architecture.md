@@ -273,7 +273,7 @@ Tools are the actions the agent can perform in the world.
 | `spawn.py`         | `SpawnTool` -- delegate tasks to background subagents.                   |
 | `cron.py`          | `CronTool` -- create, list, and remove scheduled jobs.                   |
 | `memory_tool.py`   | `SaveMemoryTool` -- persist content to MEMORY.md and HISTORY.md.         |
-| `browser.py`       | `BrowserTool` -- browser automation via CDP (Chrome DevTools Protocol) using the vendored `openbotx/cdp/` library. Singleton `_ChromeInstance` manages the Chrome process; each tool instance gets its own tab. Click uses pure CDP: resolve element → scroll into view → get content quads → hit-test via `elementFromPoint` → mouse events or keyboard activation (when overlays are detected). |
+| `browser.py`       | `BrowserTool` -- browser automation via CDP (Chrome DevTools Protocol) using the vendored `openbotx/cdp/` library. Singleton `_ChromeInstance` manages the Chrome process; each tool instance gets its own tab. Click uses pure CDP: resolve element → scroll into view → get content quads → dispatch mouse events. |
 | `http_client.py`   | `HttpClientTool` -- full HTTP client with download/upload support, content type mapping, and `PathResolver` integration. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. |
 | `rss.py`           | `RssReaderTool` -- read RSS 2.0 and Atom feeds. Auto-detects feed format, strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` -- generate images via configurable provider/model. |

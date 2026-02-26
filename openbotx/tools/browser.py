@@ -81,7 +81,10 @@ class _ChromeInstance:
         """Terminate the Chrome process."""
         async with self._lock:
             if self._connection:
-                await self._connection.close()
+                try:
+                    await self._connection.close()
+                except Exception:
+                    pass
                 self._connection = None
             if self._launcher:
                 self._launcher.kill()
@@ -280,43 +283,6 @@ class BrowserTool(Tool):
             )
         )
 
-    async def _is_hit_target(self, selector: str, x: float, y: float) -> bool:
-        """Check if the element at (x, y) is inside the target element."""
-        escaped_sel = selector.replace("'", "\\'")
-        hit_js = (
-            "(function(){"
-            f"var target = document.querySelector('{escaped_sel}');"
-            f"var hit = document.elementFromPoint({x},{y});"
-            "return !!(target && hit && target.contains(hit));"
-            "})()"
-        )
-        result = await self._session.execute(
-            cdp.runtime.evaluate(expression=hit_js, return_by_value=True)
-        )
-        return bool(result[0].value) if result and result[0] else False
-
-    async def _activate_by_keyboard(self, object_id: cdp.runtime.RemoteObjectId) -> None:
-        """Focus element via CDP and press Enter to activate it."""
-        await self._session.execute(cdp.dom.focus(object_id=object_id))
-        await self._session.execute(
-            cdp.input_.dispatch_key_event(
-                "keyDown",
-                key="Enter",
-                code="Enter",
-                windows_virtual_key_code=13,
-                native_virtual_key_code=13,
-            )
-        )
-        await self._session.execute(
-            cdp.input_.dispatch_key_event(
-                "keyUp",
-                key="Enter",
-                code="Enter",
-                windows_virtual_key_code=13,
-                native_virtual_key_code=13,
-            )
-        )
-
     async def _click(self, selector: str) -> str:
         if not selector:
             return "Error: selector is required for click"
@@ -325,26 +291,17 @@ class BrowserTool(Tool):
         if not object_id:
             return f"Element not found: {selector}"
 
-        # Scroll into view via CDP
         await self._session.execute(cdp.dom.scroll_into_view_if_needed(object_id=object_id))
 
-        # Get clickable point via CDP content quads
         quads = await self._session.execute(cdp.dom.get_content_quads(object_id=object_id))
         if not quads:
             return f"Could not determine position of: {selector}"
 
-        # Calculate center from first quad (8 floats: x1,y1,x2,y2,x3,y3,x4,y4)
         quad = quads[0]
         x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4
         y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4
 
-        # Verify the element is reachable at these coordinates
-        if await self._is_hit_target(selector, x, y):
-            await self._click_point(x, y)
-        else:
-            # Element is covered by an overlay — activate via keyboard (focus + Enter)
-            await self._activate_by_keyboard(object_id)
-
+        await self._click_point(x, y)
         return f"Clicked: {selector}"
 
     async def _type_text(self, selector: str, text: str) -> str:
