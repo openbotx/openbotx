@@ -216,7 +216,6 @@ async function confirmDelete() {
           <span>Back</span>
         </button>
         <h2 v-else class="header-title" @click="clearSelection" title="Click to deselect">Files</h2>
-        <Button icon="pi pi-refresh" size="small" text severity="secondary" title="Refresh" @click="refreshFiles" />
       </div>
 
       <div v-if="selectedItem" class="header-center">
@@ -229,6 +228,7 @@ async function confirmDelete() {
       <div v-else class="header-center"></div>
 
       <div class="header-right">
+        <Button v-if="!currentFile" icon="pi pi-refresh" size="small" text severity="secondary" title="Refresh" @click="refreshFiles" />
         <template v-if="!selectedItem">
           <Button icon="pi pi-upload" size="small" text severity="secondary" title="Upload to root" :loading="uploading" @click="triggerUpload" />
           <Button icon="pi pi-file-plus" size="small" text severity="secondary" title="New File" @click="openCreateFile('')" />

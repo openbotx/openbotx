@@ -15,6 +15,7 @@ import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
 import Message from 'primevue/message'
 import Tag from 'primevue/tag'
+import ProgressBar from 'primevue/progressbar'
 import { useToast } from 'primevue/usetoast'
 import { useConfigStore } from '../stores/config'
 import { useChannelsStore } from '../stores/channels'
@@ -25,6 +26,9 @@ const toast = useToast()
 const configStore = useConfigStore()
 const channelsStore = useChannelsStore()
 const api = useApi()
+
+const systemInfo = ref(null)
+const systemInfoLoading = ref(true)
 
 const bot = ref({ name: '', description: '' })
 const auth = ref({ username: 'admin', password: '', secret_key: '' })
@@ -47,11 +51,23 @@ const storageTypes = ref([
 
 const isS3 = computed(() => storage.value.type === 's3')
 
+async function loadSystemInfo() {
+  systemInfoLoading.value = true
+  try {
+    systemInfo.value = await api.get('/system/info')
+  } catch {
+    systemInfo.value = null
+  } finally {
+    systemInfoLoading.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([
     configStore.loadConfig(),
     channelsStore.loadChannels(),
     loadYaml(),
+    loadSystemInfo(),
   ])
   if (configStore.config) {
     bot.value = { ...configStore.config.bot }
@@ -226,8 +242,9 @@ async function saveAgents() {
       <h2>Settings</h2>
     </div>
     <div class="settings-content">
-      <Tabs value="bot" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
+      <Tabs value="info" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
         <TabList>
+          <Tab value="info">Info</Tab>
           <Tab value="bot">Bot</Tab>
           <Tab value="agents">Agents</Tab>
           <Tab value="channels">Channels</Tab>
@@ -237,6 +254,105 @@ async function saveAgents() {
           <Tab value="advanced">Advanced</Tab>
         </TabList>
         <TabPanels :pt="{ root: { style: { flex: '1' } } }">
+          <TabPanel value="info" :pt="{ root: { style: { minHeight: '100%' } } }">
+            <div class="tab-content">
+              <div v-if="systemInfoLoading" class="info-loading">
+                <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
+              </div>
+              <div v-else-if="!systemInfo" class="info-loading">
+                <Message severity="error" :closable="false">Failed to load system information.</Message>
+              </div>
+              <template v-else>
+                <div class="info-section">
+                  <h3><i class="pi pi-desktop"></i> Operating System</h3>
+                  <div class="info-row">
+                    <span class="info-label">System</span>
+                    <span class="info-value">{{ systemInfo.os.system }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Version</span>
+                    <span class="info-value">{{ systemInfo.os.release }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Architecture</span>
+                    <span class="info-value">{{ systemInfo.os.machine }}</span>
+                  </div>
+                </div>
+
+                <div class="info-section">
+                  <h3><i class="pi pi-microchip-ai"></i> Processor</h3>
+                  <div class="info-row">
+                    <span class="info-label">Model</span>
+                    <span class="info-value">{{ systemInfo.cpu.processor }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Cores</span>
+                    <span class="info-value">{{ systemInfo.cpu.cores }}</span>
+                  </div>
+                </div>
+
+                <div v-if="systemInfo.memory.total_gb" class="info-section">
+                  <h3><i class="pi pi-server"></i> Memory</h3>
+                  <div class="info-row">
+                    <span class="info-label">Total</span>
+                    <span class="info-value">{{ systemInfo.memory.total_gb }} GB</span>
+                  </div>
+                </div>
+
+                <div v-if="systemInfo.disk.total_gb" class="info-section">
+                  <h3><i class="pi pi-database"></i> Disk</h3>
+                  <div class="info-row">
+                    <span class="info-label">Total</span>
+                    <span class="info-value">{{ systemInfo.disk.total_gb }} GB</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Used</span>
+                    <span class="info-value">{{ systemInfo.disk.used_gb }} GB ({{ systemInfo.disk.percent }}%)</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Free</span>
+                    <span class="info-value">{{ systemInfo.disk.free_gb }} GB</span>
+                  </div>
+                  <ProgressBar :value="systemInfo.disk.percent" :show-value="false" style="height: 0.5rem; margin-top: 0.5rem" />
+                </div>
+
+                <div v-if="systemInfo.gpu?.length" class="info-section">
+                  <h3><i class="pi pi-image"></i> Graphics</h3>
+                  <template v-for="(gpu, i) in systemInfo.gpu" :key="i">
+                    <div class="info-row">
+                      <span class="info-label">{{ systemInfo.gpu.length > 1 ? `GPU ${i + 1}` : 'GPU' }}</span>
+                      <span class="info-value">{{ gpu.name }}</span>
+                    </div>
+                    <div v-if="gpu.cores" class="info-row">
+                      <span class="info-label">Cores</span>
+                      <span class="info-value">{{ gpu.cores }}</span>
+                    </div>
+                    <div v-if="gpu.vendor" class="info-row">
+                      <span class="info-label">Vendor</span>
+                      <span class="info-value">{{ gpu.vendor }}</span>
+                    </div>
+                    <div v-if="gpu.metal" class="info-row">
+                      <span class="info-label">Metal</span>
+                      <span class="info-value">{{ gpu.metal }}</span>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="info-section">
+                  <h3><i class="pi pi-code"></i> Runtime</h3>
+                  <div class="info-row">
+                    <span class="info-label">Python</span>
+                    <span class="info-value">{{ systemInfo.python }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">OpenBotX</span>
+                    <span class="info-value">{{ systemInfo.version }}</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </TabPanel>
+
           <TabPanel value="bot" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
               <div class="form-group">
@@ -578,6 +694,47 @@ async function saveAgents() {
 .raw-editor {
   font-family: monospace;
   font-size: 0.85rem;
+}
+
+.info-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--p-text-muted-color);
+}
+
+.info-section {
+  margin-bottom: 1.25rem;
+}
+
+.info-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--p-text-color);
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.info-row:last-of-type {
+  border-bottom: none;
+}
+
+.info-label {
+  color: var(--p-text-muted-color);
+}
+
+.info-value {
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {
