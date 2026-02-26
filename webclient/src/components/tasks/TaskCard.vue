@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onUnmounted, watch } from 'vue'
 import Tag from 'primevue/tag'
 import { useTasksStore } from '../../stores/tasks'
 
@@ -29,18 +29,49 @@ const severityMap = {
 function formatTime(iso) {
   if (!iso) return ''
   const d = new Date(iso)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function duration(task) {
-  if (!task.created_at || !task.updated_at) return ''
-  const start = new Date(task.created_at).getTime()
-  const end = new Date(task.updated_at).getTime()
-  const diff = end - start
-  if (diff < 1000) return ''
-  if (diff < 60000) return `${Math.round(diff / 1000)}s`
-  if (diff < 3600000) return `${Math.round(diff / 60000)}m`
-  return `${Math.round(diff / 3600000)}h`
+const now = ref(Date.now())
+let timer = null
+
+function startTimer() {
+  if (!timer) {
+    timer = setInterval(() => { now.value = Date.now() }, 1000)
+  }
+}
+
+function stopTimer() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+
+watch(() => props.task.state, (state) => {
+  if (state === 'DOING') startTimer()
+  else stopTimer()
+}, { immediate: true })
+
+onUnmounted(stopTimer)
+
+const elapsed = computed(() => {
+  if (!props.task.created_at) return 0
+  const start = new Date(props.task.created_at).getTime()
+  const end = props.task.state === 'DOING' ? now.value : new Date(props.task.updated_at).getTime()
+  return Math.max(0, end - start)
+})
+
+function formatDuration(ms) {
+  if (ms < 1000) return '0s'
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rs = s % 60
+  if (m < 60) return `${m}m ${rs}s`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return `${h}h ${rm}m`
 }
 </script>
 
@@ -88,8 +119,9 @@ function duration(task) {
         </span>
       </div>
       <div class="task-meta-right">
-        <span v-if="duration(task)" class="task-duration">
-          <i class="pi pi-stopwatch"></i> {{ duration(task) }}
+        <span v-if="elapsed > 0" :class="['task-duration', task.state === 'DOING' ? 'task-duration-live' : '']">
+          <i :class="task.state === 'DOING' ? 'pi pi-spin pi-stopwatch' : 'pi pi-stopwatch'"></i>
+          {{ formatDuration(elapsed) }}
         </span>
         <span class="task-time">{{ formatTime(task.created_at) }}</span>
       </div>
@@ -224,5 +256,10 @@ function duration(task) {
   display: flex;
   align-items: center;
   gap: 0.2rem;
+}
+
+.task-duration-live {
+  color: var(--p-primary-color);
+  font-weight: 600;
 }
 </style>
