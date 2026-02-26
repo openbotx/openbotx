@@ -35,6 +35,7 @@ from openbotx.tools.registry import ToolRegistry
 from openbotx.tools.rss import RssReaderTool
 from openbotx.tools.shell import ExecTool
 from openbotx.tools.spawn import SpawnTool
+from openbotx.tools.twitter import TwitterTool
 from openbotx.tools.web import WebFetchTool, WebSearchTool
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class AgentLoop:
         brave_api_key: str = "",
         exec_timeout: int = 60,
         image_config=None,
+        twitter_config=None,
         storage=None,
         public_url: str = "",
         agent_name: str = "main",
@@ -94,6 +96,7 @@ class AgentLoop:
         self._brave_api_key = brave_api_key
         self._exec_timeout = exec_timeout
         self._image_config = image_config
+        self._twitter_config = twitter_config
         self._agent_name = agent_name
         self._agent_instructions = agent_instructions
         self._agent_tools = agent_tools
@@ -158,6 +161,9 @@ class AgentLoop:
 
         if self._image_config and self._image_config.provider.api_key and self._storage:
             _register(ImageGenerationTool(config=self._image_config, storage=self._storage))
+
+        if self._twitter_config and self._twitter_config.consumer_key and self._storage:
+            _register(TwitterTool(config=self._twitter_config, storage=self._storage))
 
     async def stop(self) -> None:
         browser_tool = self._registry.get("browser")

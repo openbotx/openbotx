@@ -21,8 +21,8 @@ All file-based tools (`read_file`, `write_file`, `edit_file`, `list_dir`, `http_
 
 1. Relative paths are resolved against the agent's workspace directory.
 2. `~` (home directory) is expanded via `Path.expanduser()`.
-3. When `restrict_to_workspace` is enabled in the config, each agent is restricted to its own **workspace directory** and the shared **public directory**. Any path outside these directories raises a `PermissionError`.
-4. When `restrict_to_workspace` is disabled, all paths on the filesystem are accessible.
+3. When `tools.general.restrict_to_workspace` is enabled in the config, each agent is restricted to its own **workspace directory** and the shared **public directory**. Any path outside these directories raises a `PermissionError`.
+4. When `tools.general.restrict_to_workspace` is disabled, all paths on the filesystem are accessible.
 
 ```python
 class PathResolver:
@@ -46,7 +46,7 @@ The `ServerFactory` in `app.py` creates a `PathResolver` per agent during startu
 
 ```python
 agent_workspace = agent_cfg.resolve_workspace(self._project_path)
-allowed_dirs = [agent_workspace, public_dir] if config.tools.restrict_to_workspace else None
+allowed_dirs = [agent_workspace, public_dir] if config.tools.general.restrict_to_workspace else None
 resolver = PathResolver(workspace=agent_workspace, allowed_dirs=allowed_dirs)
 ```
 
@@ -70,7 +70,7 @@ agents:
 
 **Source:** `openbotx/tools/filesystem.py`
 
-All file tools receive a `PathResolver` instance at construction. When `restrict_to_workspace` is enabled, operations are sandboxed to the agent's workspace directory and the shared public directory.
+All file tools receive a `PathResolver` instance at construction. When `tools.general.restrict_to_workspace` is enabled, operations are sandboxed to the agent's workspace directory and the shared public directory.
 
 #### read_file
 
@@ -121,7 +121,7 @@ Execute a shell command.
 |-----------|------|----------|-------------|
 | `command` | string | Yes | The shell command to execute. |
 
-The command runs with a configurable timeout (default 60 seconds). When `restrict_to_workspace` is enabled (detected via `PathResolver.is_restricted`), the working directory is locked to the workspace.
+The command runs with a configurable timeout (`tools.exec.timeout`, default 60 seconds). When `tools.general.restrict_to_workspace` is enabled (detected via `PathResolver.is_restricted`), the working directory is locked to the workspace.
 
 ---
 
@@ -310,6 +310,28 @@ Requires image generation configuration with an API key. Only registered when `i
 
 ---
 
+### Twitter
+
+**Source:** `openbotx/tools/twitter.py`
+
+#### twitter_post
+
+Post tweets on Twitter/X. Supports text-only tweets, tweets with images from storage, and threads via reply_to_id. Uses OAuth 1.0a (HMAC-SHA1) for authentication.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `text` | string | Yes | Tweet text (max 280 characters). |
+| `media_path` | string | No | Storage path to an image to attach. |
+| `reply_to_id` | string | No | Tweet ID to reply to (for creating threads). |
+
+Requires Twitter API credentials (`tools.twitter.consumer_key`) and a storage provider. Only registered when both are configured.
+
+**Response format:** Returns JSON with `success`, `tweet_id`, and `text` on success. Returns `error` and `details` on failure.
+
+**Media upload:** When `media_path` is provided, the image is read from storage, uploaded to the Twitter media endpoint (v1.1), and attached to the tweet (v2 API).
+
+---
+
 ## Tool Access by Agent Type
 
 Not all tools are available to every agent type. The main agent has full access, while subagents have a focused subset. Additionally, individual agents can restrict their tool set via the `tools` whitelist in their configuration.
@@ -327,13 +349,14 @@ Not all tools are available to every agent type. The main agent has full access,
 | `rss_reader` | Yes | Yes |
 | `browser` | Yes | Yes |
 | `image_generation` | Yes | Yes* |
+| `twitter_post` | Yes | Yes* |
 | `message` | Yes | No |
 | `spawn` | Yes | No |
 | `cron` | Yes | No |
 | `save_memory` | Yes | No |
 
-\* `image_generation` and `browser` are available to subagents only when their dependencies are satisfied (Chrome installed for browser, image API key configured for image_generation).
+\* `image_generation`, `twitter_post`, and `browser` are available to subagents only when their dependencies are satisfied (Chrome installed for browser, image API key configured for image_generation, Twitter API credentials configured for twitter_post).
 
-Subagents have access to file operations, shell execution, web tools, the HTTP client, RSS reader, browser automation, and image generation. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), or persist memory state (`save_memory`) are restricted to the main agent.
+Subagents have access to file operations, shell execution, web tools, the HTTP client, RSS reader, browser automation, image generation, and Twitter posting. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), or persist memory state (`save_memory`) are restricted to the main agent.
 
 Both main agents and subagents share the same `PathResolver` instance, so they have identical directory access restrictions.

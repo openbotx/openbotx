@@ -130,12 +130,18 @@ channels:
 # Tools
 # ---------------------------------------------------------------------------
 tools:
+  general:
+    restrict_to_workspace: true   # bool -- When true, file-related tools are restricted to the agent's workspace directory and the shared public directory. When false, all filesystem paths are accessible.
+  exec:
+    timeout: 60                   # int  -- Maximum execution time in seconds for the exec tool.
   web_search:
     api_key: ""                   # str  -- Brave Search API key for the web search tool.
     max_results: 5                # int  -- Maximum number of search results to return per query.
-  exec:
-    timeout: 60                   # int  -- Maximum execution time in seconds for the exec tool.
-  restrict_to_workspace: true     # bool -- When true, file-related tools are restricted to the agent's workspace directory and the shared public directory. When false, all filesystem paths are accessible.
+  twitter:
+    consumer_key: ""              # str  -- Twitter/X consumer key.
+    consumer_secret: ""           # str  -- Twitter/X consumer secret.
+    access_token: ""              # str  -- Twitter/X OAuth access token.
+    access_token_secret: ""       # str  -- Twitter/X OAuth access token secret.
 
 # ---------------------------------------------------------------------------
 # Storage
@@ -179,7 +185,7 @@ The workspace directory is created automatically at startup if it does not exist
 
 ### Workspace Restriction
 
-When `tools.restrict_to_workspace` is `true` (the default), the `PathResolver` enforces that all file operations are confined to two directories:
+When `tools.general.restrict_to_workspace` is `true` (the default), the `PathResolver` enforces that all file operations are confined to two directories:
 
 1. The agent's own workspace directory.
 2. The shared `public/` directory at the project root.
@@ -197,7 +203,7 @@ When `restrict_to_workspace` is `false`, all filesystem paths are accessible wit
 
 The `tools` field accepts a list of tool names. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
 
-Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `save_memory`, `image_generation`.
+Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `save_memory`, `image_generation`, `twitter_post`.
 
 ### Agent Instructions
 
@@ -401,6 +407,11 @@ channels:
 tools:
   web_search:
     api_key: ${BRAVE_SEARCH_API_KEY}
+  twitter:
+    consumer_key: ${TWITTER_CONSUMER_KEY}
+    consumer_secret: ${TWITTER_CONSUMER_SECRET}
+    access_token: ${TWITTER_ACCESS_TOKEN}
+    access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
 
 storage:
   type: "s3"
@@ -428,6 +439,11 @@ AUTH_SECRET_KEY=a-long-random-string
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
 BRAVE_SEARCH_API_KEY=BSA...
+
+TWITTER_CONSUMER_KEY=...
+TWITTER_CONSUMER_SECRET=...
+TWITTER_ACCESS_TOKEN=...
+TWITTER_ACCESS_TOKEN_SECRET=...
 
 S3_BUCKET=my-openbotx-storage
 S3_REGION=us-east-1
@@ -464,7 +480,8 @@ providers:
 
 - **Defaults are applied automatically.** You only need to include the sections and fields you want to override. Any omitted field falls back to its default value.
 - **Secret key auto-generation.** If `auth.secret_key` is left empty, a random key is generated each time the server starts. Set it explicitly if you need stable tokens across restarts.
-- **Workspace isolation.** When `tools.restrict_to_workspace` is `true`, file operations performed by each agent are confined to its configured `workspace` directory and the shared `public/` directory. The `PathResolver` enforces this by checking that all resolved paths fall within one of these allowed directories. Disable this only if you understand the security implications.
+- **Workspace isolation.** When `tools.general.restrict_to_workspace` is `true`, file operations performed by each agent are confined to its configured `workspace` directory and the shared `public/` directory. The `PathResolver` enforces this by checking that all resolved paths fall within one of these allowed directories. Disable this only if you understand the security implications.
+- **Exec timeout.** The `tools.exec.timeout` setting controls the maximum execution time in seconds for the `exec` tool. Commands exceeding this limit are automatically killed.
 - **Workspace defaulting.** If an agent's `workspace` field is empty, null, or whitespace, it automatically defaults to `"./workspace"`. This ensures every agent always has a valid workspace.
 - **Per-agent workspaces.** Each agent can have its own workspace directory. Workspaces are created automatically at startup. In multi-agent setups, this provides natural isolation between agents.
 - **Cron scheduler.** The cron system is enabled by default. Disable it with `cron.enabled: false` if you do not need scheduled tasks.

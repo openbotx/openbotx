@@ -105,6 +105,9 @@ Thumbs.db
 # Local development
 .claude/
 
+# Webclient build output
+openbotx/webclient/
+
 # Temporary
 /tmp
 /temp

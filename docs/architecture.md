@@ -132,7 +132,7 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `create_orchestrator(...)` | Builds all `AgentLoop` instances (one per agent), creates `SubagentManager`s, `PathResolver`s, and the `AgentClassifier`. Returns an `Orchestrator` that routes messages. |
 | `setup_logging(path)`   | Configures rotating file handler + console handler for the `openbotx` logger.        |
 
-The built web client (`webclient/dist/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles).
+The built web client (`openbotx/webclient/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles). The build output lives inside the Python package so it is included in the `.whl` distribution — users who install via `pip install openbotx` get the web UI out of the box.
 
 Files under the project's `public/` directory are served at `/public/{path}` without authentication. This allows media files (images, video, audio) to be embedded in HTML5 tags (`<img>`, `<video>`, `<audio>`) without needing auth headers.
 
@@ -272,8 +272,9 @@ Tools are the actions the agent can perform in the world.
 | `http_client.py`   | `HttpClientTool` -- full HTTP client with download/upload support, content type mapping, and `PathResolver` integration. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. |
 | `rss.py`           | `RssReaderTool` -- read RSS 2.0 and Atom feeds. Auto-detects feed format, strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` -- generate images via configurable provider/model. |
+| `twitter.py`       | `TwitterTool` -- post tweets on Twitter/X with OAuth 1.0a authentication. Supports text, media, and threads. |
 
-**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and `SaveMemoryTool` to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
+**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, image generation, and Twitter posting. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and `SaveMemoryTool` to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
 
 ### Tasks
 
@@ -352,7 +353,7 @@ Configuration is defined as Pydantic models and loaded from YAML.
 
 | File          | Purpose                                                                          |
 | ------------- | -------------------------------------------------------------------------------- |
-| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `ModelParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
+| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `ModelParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `GeneralToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `TwitterConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
 | `loader.py`   | `load_config()` reads YAML and expands `${ENV_VAR}` patterns. `save_config()` writes the config back to YAML. |
 
 Key configuration sections:
@@ -365,7 +366,7 @@ Key configuration sections:
 | `auth`       | Username, password, JWT secret                               |
 | `providers`  | API keys, base URLs, headers, and options per provider       |
 | `channels`   | Telegram settings, progress/tool hint broadcasting           |
-| `tools`      | Web search API key, exec timeout, workspace restriction      |
+| `tools`      | General settings (workspace restriction), exec settings (timeout), web search API key, Twitter credentials |
 | `storage`    | Backend type (local/S3), paths, credentials                  |
 | `image`      | Image generation provider, model, API key                    |
 | `heartbeat`  | Enabled flag, check interval                                 |
@@ -499,7 +500,8 @@ openbotx/
 │   ├── browser.py       # browser (CDP-based browser automation)
 │   ├── http_client.py   # http_client (HTTP requests with download/upload)
 │   ├── rss.py           # rss_reader (RSS/Atom feed reader)
-│   └── image.py         # image_generation (AI image generation)
+│   ├── image.py         # image_generation (AI image generation)
+│   └── twitter.py       # twitter_post (Twitter/X posting with OAuth 1.0a)
 └── version.py       # Package version
 ```
 
@@ -555,7 +557,7 @@ On shutdown, the reverse occurs: HeartbeatService stops, orchestrator stops (whi
 
 **Multi-agent orchestration.** All messages from all channels funnel into one `Orchestrator` instance. When multiple agents are configured, the `AgentClassifier` uses an LLM call to determine which agent is best suited for each message based on agent descriptions and recent conversation history. Each agent has its own `AgentLoop` with independent workspace, model, tools, and `PathResolver`. Session isolation is achieved through the session key (`channel:chat_id`), not through separate agent instances.
 
-**Per-agent workspace isolation.** Each agent gets its own workspace directory (resolved from its config via `AgentConfig.resolve_workspace()`). When `restrict_to_workspace` is enabled, the `PathResolver` restricts file access to the agent's workspace and the shared public directory. This prevents agents from accessing each other's workspaces or the project root.
+**Per-agent workspace isolation.** Each agent gets its own workspace directory (resolved from its config via `AgentConfig.resolve_workspace()`). When `tools.general.restrict_to_workspace` is enabled, the `PathResolver` restricts file access to the agent's workspace and the shared public directory. This prevents agents from accessing each other's workspaces or the project root.
 
 **Subagents for parallelism.** When the main agent needs to delegate work, it spawns a subagent via the `SpawnTool`. Subagents run as independent `asyncio.Task` instances with their own tool registries and iteration limits. They share the parent agent's `PathResolver` (same workspace access). They report results back through the inbound queue, which the main agent picks up in a subsequent turn.
 

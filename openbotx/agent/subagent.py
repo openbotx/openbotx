@@ -37,6 +37,7 @@ class SubagentManager:
         brave_api_key: str = "",
         exec_timeout: int = 60,
         image_config=None,
+        twitter_config=None,
         storage=None,
     ):
         self._provider = provider
@@ -49,6 +50,7 @@ class SubagentManager:
         self._brave_api_key = brave_api_key
         self._exec_timeout = exec_timeout
         self._image_config = image_config
+        self._twitter_config = twitter_config
         self._storage = storage
         self._background_tasks: set[asyncio.Task] = set()
 
@@ -197,5 +199,10 @@ class SubagentManager:
             from openbotx.tools.image import ImageGenerationTool
 
             registry.register(ImageGenerationTool(config=self._image_config, storage=self._storage))
+
+        if self._twitter_config and self._twitter_config.consumer_key and self._storage:
+            from openbotx.tools.twitter import TwitterTool
+
+            registry.register(TwitterTool(config=self._twitter_config, storage=self._storage))
 
         return registry, browser_tool

@@ -28,7 +28,7 @@ const api = useApi()
 
 const bot = ref({ name: '', description: '' })
 const auth = ref({ username: 'admin', password: '', secret_key: '' })
-const tools = ref({ restrict_to_workspace: true, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 } })
+const tools = ref({ general: { restrict_to_workspace: true }, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 }, twitter: { consumer_key: '', consumer_secret: '', access_token: '', access_token_secret: '' } })
 const storage = ref({ type: 'local', s3_bucket: '', s3_region: 'us-east-1', s3_access_key: '', s3_secret_key: '' })
 const agentsConfig = ref({})
 const rawYaml = ref('')
@@ -59,9 +59,12 @@ onMounted(async () => {
     const cfgAuth = configStore.config.auth || {}
     auth.value = { username: cfgAuth.username || 'admin', password: '', secret_key: '' }
     tools.value = {
-      restrict_to_workspace: configStore.config.tools?.restrict_to_workspace ?? true,
+      general: {
+        restrict_to_workspace: configStore.config.tools?.general?.restrict_to_workspace ?? true,
+      },
       exec: { timeout: configStore.config.tools?.exec?.timeout ?? 60 },
       web_search: { api_key: '', max_results: configStore.config.tools?.web_search?.max_results ?? 5 },
+      twitter: { consumer_key: '', consumer_secret: '', access_token: '', access_token_secret: '' },
     }
     const st = configStore.config.storage || {}
     storage.value = {
@@ -355,23 +358,66 @@ async function saveAgents() {
 
           <TabPanel value="tools" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content">
-              <div class="form-group">
-                <label>Restrict to Workspace</label>
-                <ToggleSwitch v-model="tools.restrict_to_workspace" />
+              <div class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-cog"></i>
+                  <strong>General</strong>
+                </div>
+                <div class="form-group">
+                  <label>Restrict to Workspace</label>
+                  <ToggleSwitch v-model="tools.general.restrict_to_workspace" />
+                </div>
               </div>
-              <div class="form-group">
-                <label>Exec Timeout (seconds)</label>
-                <InputNumber v-model="tools.exec.timeout" class="w-full" />
+
+              <div class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-code"></i>
+                  <strong>Exec</strong>
+                </div>
+                <div class="form-group">
+                  <label>Timeout (seconds)</label>
+                  <InputNumber v-model="tools.exec.timeout" class="w-full" />
+                </div>
               </div>
-              <h3>Web Search</h3>
-              <div class="form-group">
-                <label>Brave API Key</label>
-                <Password v-model="tools.web_search.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+
+              <div class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-search"></i>
+                  <strong>Web Search</strong>
+                </div>
+                <div class="form-group">
+                  <label>Brave API Key</label>
+                  <Password v-model="tools.web_search.api_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                </div>
+                <div class="form-group">
+                  <label>Max Results</label>
+                  <InputNumber v-model="tools.web_search.max_results" :min="1" :max="20" class="w-full" />
+                </div>
               </div>
-              <div class="form-group">
-                <label>Max Results</label>
-                <InputNumber v-model="tools.web_search.max_results" :min="1" :max="20" class="w-full" />
+
+              <div class="channel-block">
+                <div class="channel-header">
+                  <i class="pi pi-twitter"></i>
+                  <strong>Twitter / X</strong>
+                </div>
+                <div class="form-group">
+                  <label>Consumer Key</label>
+                  <Password v-model="tools.twitter.consumer_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                </div>
+                <div class="form-group">
+                  <label>Consumer Secret</label>
+                  <Password v-model="tools.twitter.consumer_secret" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                </div>
+                <div class="form-group">
+                  <label>Access Token</label>
+                  <Password v-model="tools.twitter.access_token" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                </div>
+                <div class="form-group">
+                  <label>Access Token Secret</label>
+                  <Password v-model="tools.twitter.access_token_secret" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                </div>
               </div>
+
               <Button label="Save" icon="pi pi-save" size="small" @click="saveSection('tools', tools)" />
             </div>
           </TabPanel>

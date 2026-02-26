@@ -138,7 +138,7 @@ providers:
 | Max iterations | `max_iterations: 40` |
 | Memory window | `memory_window: 100` |
 | Shell timeout | `exec.timeout: 60` seconds |
-| Workspace restriction | `restrict_to_workspace: true` |
+| Workspace restriction | `general.restrict_to_workspace: true` |
 | WebSocket progress | `send_progress: true` |
 | Tool hints | `send_tool_hints: false` |
 | Heartbeat | `enabled: true`, `interval: 1800` (30 minutes) |
@@ -889,6 +889,7 @@ When the AgentLoop calls the LLM, it sends tool definitions (name, description, 
 | `save_memory` | Save information to long-term memory |
 | `browser` | Browser automation (Chrome/Chromium via CDP) |
 | `image_generation` | Generate images (if configured) |
+| `twitter_post` | Post tweets on Twitter/X (if configured) |
 
 ### Parameter Validation
 
@@ -919,7 +920,7 @@ By default, file tools (`read_file`, `write_file`, `edit_file`, `list_dir`), the
 - **File tools and HTTP client**: All use a `PathResolver` instance for path resolution. The resolver:
   1. Expands `~` (home directory) via `Path.expanduser()`
   2. Resolves relative paths against the agent's workspace
-  3. When `restrict_to_workspace` is enabled, verifies the resolved path falls within one of the allowed directories (workspace or public). If not, raises a `PermissionError`
+  3. When `tools.general.restrict_to_workspace` is enabled, verifies the resolved path falls within one of the allowed directories (workspace or public). If not, raises a `PermissionError`
 - **Per-agent isolation**: Each agent has its own `PathResolver` with `allowed_dirs = [agent_workspace, public_dir]`. In multi-agent setups, agents cannot access each other's workspaces
 - **Shell (exec)**: The working directory is set to the agent's workspace. The `PathResolver.is_restricted` property is used to determine whether workspace restriction is active for the exec tool
 
@@ -1028,7 +1029,7 @@ Subagents have **limited access** to tools:
 | `exec` (shell) | `spawn` (create other subagents) |
 | `web_search`, `web_fetch` | `cron` (schedule tasks) |
 | `http_client`, `rss_reader` | `save_memory` |
-| `browser`, `image_generation` | |
+| `browser`, `image_generation`, `twitter_post` | |
 
 This prevents subagents from multiplying uncontrollably, sending unexpected messages, or modifying memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
 
@@ -1044,7 +1045,7 @@ This prevents subagents from multiplying uncontrollably, sending unexpected mess
 | System prompt | Full (SOUL + USER + memory + skills + agent instructions) | **Simplified** ("You are a subagent..." with workspace + public paths) |
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
-| Tools | All (15) | **11** (no message, spawn, cron, save_memory) |
+| Tools | All (16) | **12** (no message, spawn, cron, save_memory) |
 | Tool result truncation | Via `ContextBuilder.add_tool_result()` (500 chars) | **Inline** (500 chars, not via ContextBuilder) |
 | Model | Configurable per agent | **Inherits from parent agent** |
 | PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |

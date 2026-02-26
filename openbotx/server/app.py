@@ -33,7 +33,7 @@ from openbotx.version import __version__
 
 logger = logging.getLogger(__name__)
 
-WEBCLIENT_DIR = Path(__file__).parent.parent.parent / "webclient" / "dist"
+WEBCLIENT_DIR = Path(__file__).resolve().parent.parent / "webclient"
 
 
 class ServerFactory:
@@ -102,7 +102,9 @@ class ServerFactory:
             agent_workspace.mkdir(parents=True, exist_ok=True)
 
             allowed_dirs = (
-                [agent_workspace, public_dir] if self._config.tools.restrict_to_workspace else None
+                [agent_workspace, public_dir]
+                if self._config.tools.general.restrict_to_workspace
+                else None
             )
             resolver = PathResolver(workspace=agent_workspace, allowed_dirs=allowed_dirs)
 
@@ -117,6 +119,7 @@ class ServerFactory:
                 brave_api_key=self._config.tools.web_search.api_key,
                 exec_timeout=self._config.tools.exec.timeout,
                 image_config=self._config.image,
+                twitter_config=self._config.tools.twitter,
                 storage=storage,
             )
 
@@ -141,6 +144,7 @@ class ServerFactory:
                 brave_api_key=self._config.tools.web_search.api_key,
                 exec_timeout=self._config.tools.exec.timeout,
                 image_config=self._config.image,
+                twitter_config=self._config.tools.twitter,
                 storage=storage,
                 public_url=public_url,
                 agent_name=name,

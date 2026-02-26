@@ -86,10 +86,22 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
-class ToolsConfig(BaseModel):
-    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+class TwitterConfig(BaseModel):
+    consumer_key: str = ""
+    consumer_secret: str = ""
+    access_token: str = ""
+    access_token_secret: str = ""
+
+
+class GeneralToolsConfig(BaseModel):
     restrict_to_workspace: bool = True
+
+
+class ToolsConfig(BaseModel):
+    general: GeneralToolsConfig = Field(default_factory=GeneralToolsConfig)
+    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    twitter: TwitterConfig = Field(default_factory=TwitterConfig)
 
 
 class StorageConfig(BaseModel):

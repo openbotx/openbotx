@@ -84,7 +84,7 @@ The skills summary is injected into the system prompt as XML:
 
 ## Built-in Skills
 
-OpenBotX ships with eight built-in skills.
+OpenBotX ships with nine built-in skills.
 
 ### browser
 
@@ -134,6 +134,13 @@ Summarize or extract text and transcripts from URLs, podcasts, YouTube videos, a
 
 - **Requires:** `summarize` binary on PATH
 - **Supports:** Multiple AI providers (OpenAI, Anthropic, Google, xAI), YouTube transcript extraction, Firecrawl fallback for blocked sites
+
+### twitter
+
+Post tweets on Twitter/X with text and optional images. Supports text-only tweets, tweets with media from storage, and threads via reply_to_id.
+
+- **Tool:** `twitter_post`
+- **Parameters:** `text`, `media_path`, `reply_to_id`
 
 ### weather
 
