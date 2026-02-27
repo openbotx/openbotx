@@ -1,0 +1,34 @@
+@import "tailwindcss";
+@plugin "tailwindcss-primeui";
+@custom-variant dark (&:where(.dark-mode, .dark-mode *));
+
+body {
+  background: var(--p-surface-0);
+  color: var(--p-text-color);
+}
+
+.dark-mode body {
+  background: var(--p-surface-950);
+}
+
+/* md-editor-v3: match code block colors to theme */
+.md-editor .md-editor-preview {
+  --md-theme-code-block-bg-color: #f6f8fa;
+  --md-theme-code-block-color: #24292e;
+  --md-theme-code-before-bg-color: #e8eaed;
+}
+
+.md-editor-dark .md-editor-preview {
+  --md-theme-code-block-bg-color: #1a1a1a;
+  --md-theme-code-block-color: #a9b7c6;
+  --md-theme-code-before-bg-color: #2d2d2d;
+}
+
+/* Remove border/outline from PrimeVue Dialog header icon buttons */
+.p-dialog-close-button,
+.p-dialog-maximize-button {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
