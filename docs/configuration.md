@@ -66,9 +66,7 @@ agents:
     description: ""               # str  -- Short description of this agent's purpose. Used by the AgentClassifier to route messages when multiple agents are configured.
     instructions: ""              # str  -- Agent-specific instructions appended to the system prompt as a dedicated section. Use for behavioral rules, domain expertise, or role-specific guidelines.
     tools: []                     # list[str] -- Whitelist of tool names available to this agent. When empty (default), all tools are registered. When set, only tools whose name appears in this list are available.
-    model_params:                   # dict -- Arbitrary model parameters passed to the LLM provider. Common keys: max_tokens, temperature, top_p, etc.
-      max_tokens: 8192
-      temperature: 0.1
+    model_params: {}                # dict -- Arbitrary model parameters passed to the LLM provider. Common keys: max_tokens, temperature, top_p, etc. Empty by default.
     agent_params:
       max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
       memory_window: 100          # int  -- Number of recent messages to keep in context before triggering consolidation.
@@ -98,8 +96,8 @@ image:
 # Authentication
 # ---------------------------------------------------------------------------
 auth:
-  username: ""                    # str  -- Username for the web UI login (required).
-  password: ""                    # str  -- Password for the web UI login (required).
+  username: ""                    # str  -- Username for the web UI login. Leave empty to disable authentication.
+  password: ""                    # str  -- Password for the web UI login. Leave empty to disable authentication.
   secret_key: ""                  # str  -- Secret used for signing tokens. Auto-generated at startup if left empty.
 
 # ---------------------------------------------------------------------------
@@ -113,9 +111,7 @@ providers:
     api_base: null                # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
     headers: {}                   # dict[str, str] -- Custom HTTP headers sent with every API request.
     options: {}                   # dict -- Additional provider-specific parameters merged into the request body.
-    model_params:                 # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these.
-      max_tokens: 8192
-      temperature: 0.1
+    model_params: {}              # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these. Empty by default.
 
 # ---------------------------------------------------------------------------
 # Channels

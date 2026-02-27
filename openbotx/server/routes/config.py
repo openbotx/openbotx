@@ -183,11 +183,13 @@ def _update_providers(config, data):
         api_base = pdata.get("api_base") or (existing.api_base if existing else None)
         headers = pdata.get("headers", existing.headers if existing else {})
         options = pdata.get("options", existing.options if existing else {})
+        model_params = pdata.get("model_params", existing.model_params if existing else {})
         config.providers[name] = ProviderConfig(
             api_key=api_key,
             api_base=api_base,
             headers=headers,
             options=options,
+            model_params=model_params,
         )
 
 

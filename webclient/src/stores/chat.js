@@ -54,7 +54,8 @@ export const useChatStore = defineStore('chat', () => {
   const currentToolUse = ref(null)
 
   async function sendMessage(text, media = []) {
-    messages.value.push({ role: 'user', content: text, media, timestamp: Date.now() })
+    const userMsg = { role: 'user', content: text, media, timestamp: Date.now() }
+    messages.value.push(userMsg)
     streaming.value = true
     currentToolUse.value = null
 
@@ -66,6 +67,9 @@ export const useChatStore = defineStore('chat', () => {
       })
       return res
     } catch (e) {
+      // Remove the optimistic message — backend never received it.
+      const idx = messages.value.indexOf(userMsg)
+      if (idx !== -1) messages.value.splice(idx, 1)
       streaming.value = false
       throw e
     }
@@ -157,7 +161,15 @@ export const useChatStore = defineStore('chat', () => {
     currentSessionId.value = sessionKey
     localStorage.setItem('chat_session', sessionKey)
 
+    // Snapshot message count before fetch — WS events arriving during the
+    // async call will append beyond this index.
+    const preCount = messages.value.length
+
     const data = await api.get(`/chat/sessions/${sessionKey}`)
+
+    // Collect any WS-pushed messages that arrived during the fetch.
+    const liveMessages = messages.value.slice(preCount)
+
     messages.value = (data.messages || []).map((m) => ({
       ...m,
       timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
@@ -173,6 +185,11 @@ export const useChatStore = defineStore('chat', () => {
       })
       streaming.value = true
       currentToolUse.value = toolUses[toolUses.length - 1]
+    }
+
+    // Re-append live messages that arrived during the fetch.
+    if (liveMessages.length) {
+      messages.value.push(...liveMessages)
     }
   }
 
