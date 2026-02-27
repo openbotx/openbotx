@@ -197,6 +197,36 @@ The classifier operates with four rules:
 
 Assistant messages in the classifier's history include an `[Agent: name]` prefix (e.g., `[Agent: crypto] Here's the market data...`), so the classifier can see which agent handled previous turns and maintain continuity.
 
+**Inter-agent communication:**
+
+Agents do not communicate directly with each other. There is no message passing, shared queue, or RPC mechanism between agents. Each inbound message is routed to exactly one agent by the classifier, and only that agent processes it.
+
+The only form of "communication" is indirect through the shared session history. All agents in the same chat use the same session (keyed by `{channel}:{chat_id}`). When the classifier switches from one agent to another, the new agent sees the full conversation history, including everything the previous agent said.
+
+Example with two agents (`crypto` and `assistant`):
+
+```
+1. User: "What is the current price of Bitcoin?"
+   → Classifier selects "crypto" (matches topic)
+   → crypto agent responds with market data
+   → Response saved to session history
+
+2. User: "Thanks, now help me write an email"
+   → Classifier detects topic change, selects "assistant"
+   → assistant agent receives the full session history,
+     including the crypto agent's previous response
+   → assistant agent responds about the email
+   → Response saved to session history
+
+3. User: "Compare that price with Ethereum"
+   → Classifier sees crypto context returning, selects "crypto"
+   → crypto agent sees the entire conversation (its own earlier
+     response + the assistant's email response + the new message)
+   → crypto agent responds with the comparison
+```
+
+Each agent is unaware that other agents exist. They just see a conversation history with user and assistant messages. The classifier is the only component that knows about all agents and decides which one handles each turn.
+
 **Orchestrator error resilience:**
 
 The orchestrator's `run()` loop catches exceptions per-message. If a single message fails (e.g., the agent loop throws), the error is logged but the orchestrator continues processing the next message. This prevents one bad request from crashing the entire system. The 1-second timeout on `consume_inbound()` allows the stop event to be checked regularly for graceful shutdown.
