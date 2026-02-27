@@ -27,7 +27,8 @@ class WebSocketManager:
             return
         msg = json.dumps({"type": event_type, "data": data}, default=str)
         dead: set[WebSocket] = set()
-        for ws in self._connections:
+        # Snapshot: connect/disconnect can modify the set during awaits below.
+        for ws in list(self._connections):
             try:
                 await ws.send_text(msg)
             except Exception:
@@ -40,7 +41,7 @@ class WebSocketManager:
 
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    secret = getattr(websocket.app.state, "auth_secret", "")
+    secret = websocket.app.state.auth_secret
     if secret:
         token = websocket.query_params.get("token", "")
         payload = verify_token(token, secret)

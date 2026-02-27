@@ -11,6 +11,7 @@ class ProviderUpdate(BaseModel):
     api_base: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
     options: dict = Field(default_factory=dict)
+    model_params: dict = Field(default_factory=dict)
 
 
 @router.get("")
@@ -28,6 +29,7 @@ async def list_providers(request: Request):
                 "has_key": bool(cfg.api_key) if configured else False,
                 "headers": dict(cfg.headers) if configured else {},
                 "options": dict(cfg.options) if configured else {},
+                "model_params": cfg.model_params if configured else {},
             }
         )
     return result
@@ -51,6 +53,7 @@ async def update_provider(name: str, body: ProviderUpdate, request: Request):
         api_base=api_base,
         headers=body.headers,
         options=body.options,
+        model_params=body.model_params,
     )
     save_config(config, config._config_path)
     return {"status": "ok"}

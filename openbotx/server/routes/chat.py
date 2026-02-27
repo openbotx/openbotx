@@ -20,6 +20,8 @@ class ChatRequest(BaseModel):
 async def send_message(req: ChatRequest, request: Request):
     bus = request.app.state.bus
     task_manager = request.app.state.task_manager
+    session_manager = request.app.state.session_manager
+    dispatcher = request.app.state.dispatcher
 
     key = _resolve_session_key(req.session_id)
     if ":" in key:
@@ -34,13 +36,26 @@ async def send_message(req: ChatRequest, request: Request):
         chat_id=chat_id,
     )
 
+    # Persist the user message immediately so the session exists on disk
+    # before the async agent loop picks it up. This ensures a page refresh
+    # always shows the session and the user's message.
+    session_key = f"{channel}:{chat_id}"
+    session = session_manager.get_or_create(session_key)
+    media_kwargs = {}
+    if req.media:
+        media_kwargs["media"] = req.media
+    session.add_message("user", req.message, **media_kwargs)
+    session_manager.save(session)
+
+    await dispatcher.broadcast("sessions:updated", {})
+
     msg = InboundMessage(
         channel=channel,
         sender_id="web_user",
         chat_id=chat_id,
         content=req.message,
         media=req.media,
-        metadata={"task_id": task.id},
+        metadata={"task_id": task.id, "message_saved": True},
     )
 
     # Forward the user message to the target channel (e.g. Telegram)
@@ -114,8 +129,7 @@ async def delete_session(session_id: str, request: Request):
     key = _resolve_session_key(session_id)
     session_manager.delete(key)
 
-    dispatcher = getattr(request.app.state, "dispatcher", None)
-    if dispatcher:
-        await dispatcher.broadcast("sessions:updated", {})
+    dispatcher = request.app.state.dispatcher
+    await dispatcher.broadcast("sessions:updated", {})
 
     return {"status": "deleted"}

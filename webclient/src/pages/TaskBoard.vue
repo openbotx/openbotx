@@ -38,7 +38,7 @@ function handleGoToSession(task) {
 async function confirmGoToSession() {
   showConfirm.value = false
   const t = targetTask.value
-  if (!t) return
+  if (!t || !t.channel || !t.chat_id) return
   const sessionKey = `${t.channel}:${t.chat_id}`
   await chatStore.switchSession(sessionKey)
   router.push({ name: 'chat' })
@@ -116,19 +116,18 @@ async function confirmGoToSession() {
 .board-columns {
   flex: 1;
   display: flex;
-  gap: 1rem;
-  padding: 1rem;
   overflow-x: auto;
 }
 
 @media (max-width: 768px) {
-  .board-columns {
-    padding: 0.5rem;
-    gap: 0.5rem;
-  }
-
   .board-header {
     padding: 0.5rem 0.75rem;
+  }
+
+  .board-columns {
+    flex-direction: column;
+    overflow-x: visible;
+    overflow-y: auto;
   }
 }
 </style>

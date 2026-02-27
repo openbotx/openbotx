@@ -54,7 +54,8 @@ export const useChatStore = defineStore('chat', () => {
   const currentToolUse = ref(null)
 
   async function sendMessage(text, media = []) {
-    messages.value.push({ role: 'user', content: text, media, timestamp: Date.now() })
+    const userMsg = { role: 'user', content: text, media, timestamp: Date.now() }
+    messages.value.push(userMsg)
     streaming.value = true
     currentToolUse.value = null
 
@@ -66,6 +67,9 @@ export const useChatStore = defineStore('chat', () => {
       })
       return res
     } catch (e) {
+      // Remove the optimistic message — backend never received it.
+      const idx = messages.value.indexOf(userMsg)
+      if (idx !== -1) messages.value.splice(idx, 1)
       streaming.value = false
       throw e
     }
@@ -151,11 +155,26 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = await api.get('/chat/sessions')
   }
 
+  let _loadToken = 0
+
   async function loadHistory(sessionKey) {
+    // Set session context BEFORE the async call so WebSocket events
+    // arriving during the fetch are filtered against the correct session.
+    currentSessionId.value = sessionKey
+    localStorage.setItem('chat_session', sessionKey)
+
+    // Cancellation token: if another loadHistory is called while this
+    // fetch is in-flight (e.g. onMounted + syncAfterReconnect on page
+    // refresh), the stale result is discarded to prevent duplication.
+    const token = ++_loadToken
+
     const data = await api.get(`/chat/sessions/${sessionKey}`)
+
+    if (token !== _loadToken) return
+
     messages.value = (data.messages || []).map((m) => ({
       ...m,
-      timestamp: Date.now(),
+      timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
     }))
 
     const toolUses = data.live_state?.tool_uses
@@ -169,9 +188,6 @@ export const useChatStore = defineStore('chat', () => {
       streaming.value = true
       currentToolUse.value = toolUses[toolUses.length - 1]
     }
-
-    currentSessionId.value = sessionKey
-    localStorage.setItem('chat_session', sessionKey)
   }
 
   async function switchSession(sessionKey) {

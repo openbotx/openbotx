@@ -29,20 +29,23 @@ const emit = defineEmits(['go-to-session'])
 .task-column {
   flex: 1;
   min-width: 280px;
-  background: var(--p-content-background);
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 0.75rem;
   display: flex;
   flex-direction: column;
   max-height: 100%;
+  border-right: 1px solid var(--p-content-border-color);
+}
+
+.task-column:last-child {
+  border-right: none;
 }
 
 .column-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
   font-weight: 600;
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 
 .column-count {
@@ -56,7 +59,7 @@ const emit = defineEmits(['go-to-session'])
 .column-cards {
   flex: 1;
   overflow-y: auto;
-  padding: 0 0.75rem 0.75rem;
+  padding: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -67,5 +70,25 @@ const emit = defineEmits(['go-to-session'])
   color: var(--p-text-muted-color);
   padding: 2rem 0;
   font-size: 0.85rem;
+}
+
+@media (max-width: 768px) {
+  .task-column {
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--p-content-border-color);
+  }
+
+  .task-column:last-child {
+    border-bottom: none;
+  }
+
+  .column-cards {
+    overflow-y: visible;
+  }
+
+  .empty-column {
+    padding: 1rem 0;
+  }
 }
 </style>

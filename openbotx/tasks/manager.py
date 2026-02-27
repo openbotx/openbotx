@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class TaskManager:
     """CRUD for tasks with WebSocket broadcasting on state changes."""
 
-    def __init__(self, workspace: Path, dispatcher: EventDispatcher | None = None):
+    def __init__(self, workspace: Path, dispatcher: EventDispatcher):
         self.store_path = workspace / "tasks.jsonl"
         self._dispatcher = dispatcher
         self._tasks: dict[str, Task] = {}
@@ -45,6 +45,10 @@ class TaskManager:
                         error=data.get("error"),
                         created_at=data.get("created_at", ""),
                         updated_at=data.get("updated_at", ""),
+                        started_at=data.get("started_at"),
+                        completed_at=data.get("completed_at"),
+                        tool_count=data.get("tool_count", 0),
+                        iteration_count=data.get("iteration_count", 0),
                     )
                     self._tasks[task.id] = task
         except Exception as e:
@@ -88,8 +92,7 @@ class TaskManager:
                 f.write(json.dumps(task.to_dict(), ensure_ascii=False) + "\n")
 
     async def _broadcast(self, event_type: str, task: Task) -> None:
-        if self._dispatcher:
-            await self._dispatcher.broadcast(event_type, task.to_dict())
+        await self._dispatcher.broadcast(event_type, task.to_dict())
 
     async def create_task(
         self,
@@ -132,8 +135,16 @@ class TaskManager:
         if not task:
             return None
 
+        now_iso = datetime.now().isoformat()
+
+        if state == TaskState.DOING and not task.started_at:
+            task.started_at = now_iso
+
+        if state in (TaskState.DONE, TaskState.ERROR):
+            task.completed_at = now_iso
+
         task.state = state
-        task.updated_at = datetime.now().isoformat()
+        task.updated_at = now_iso
         if result is not None:
             task.result = result
         if error is not None:
@@ -142,6 +153,16 @@ class TaskManager:
         self._persist()
         await self._broadcast("task:updated", task)
         return task
+
+    def increment_tool_count(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task:
+            task.tool_count += 1
+
+    def increment_iteration_count(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task:
+            task.iteration_count += 1
 
     def get_task(self, task_id: str) -> Task | None:
         return self._tasks.get(task_id)

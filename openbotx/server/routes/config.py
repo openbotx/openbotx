@@ -125,12 +125,14 @@ async def _save_advanced_yaml(yaml_str: str, config):
 
 def _update_section(current, data: dict) -> None:
     """Update a config section, preserving sensitive fields when masked or empty."""
+    from pydantic import BaseModel
+
     for key, value in data.items():
         if not hasattr(current, key):
             continue
         if isinstance(value, dict):
             nested = getattr(current, key)
-            if hasattr(nested, "__dict__"):
+            if isinstance(nested, BaseModel):
                 _update_section(nested, value)
             else:
                 setattr(current, key, value)
@@ -153,11 +155,7 @@ def _update_agents(config, data):
             agent = AgentConfig()
 
         for key, value in agent_data.items():
-            if key == "model_params" and isinstance(value, dict):
-                for pk, pv in value.items():
-                    if hasattr(agent.model_params, pk):
-                        setattr(agent.model_params, pk, pv)
-            elif key == "agent_params" and isinstance(value, dict):
+            if key == "agent_params" and isinstance(value, dict):
                 for pk, pv in value.items():
                     if hasattr(agent.agent_params, pk):
                         setattr(agent.agent_params, pk, pv)
@@ -185,11 +183,13 @@ def _update_providers(config, data):
         api_base = pdata.get("api_base") or (existing.api_base if existing else None)
         headers = pdata.get("headers", existing.headers if existing else {})
         options = pdata.get("options", existing.options if existing else {})
+        model_params = pdata.get("model_params", existing.model_params if existing else {})
         config.providers[name] = ProviderConfig(
             api_key=api_key,
             api_base=api_base,
             headers=headers,
             options=options,
+            model_params=model_params,
         )
 
 
@@ -203,7 +203,7 @@ async def restart_services(request: Request):
     config = app.state.config
 
     for name, service in [
-        ("heartbeat", getattr(app.state, "heartbeat", None)),
+        ("heartbeat", app.state.heartbeat),
         ("orchestrator", app.state.orchestrator),
         ("channel_manager", app.state.channel_manager),
         ("cron_service", app.state.cron_service),

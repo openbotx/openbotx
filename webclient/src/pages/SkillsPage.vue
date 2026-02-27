@@ -4,9 +4,8 @@ import Card from 'primevue/card'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
-import Textarea from 'primevue/textarea'
-import { MdPreview } from 'md-editor-v3'
-import 'md-editor-v3/lib/preview.css'
+import { MdEditor, MdPreview } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
 import { useApi } from '../composables/useApi'
 import { useToast } from 'primevue/usetoast'
 import { useDark } from '../composables/useDark'
@@ -110,24 +109,42 @@ async function saveSkill() {
       :breakpoints="{ '768px': '95vw' }"
     >
       <template #header>
-        <div class="dialog-header">
-          <span class="dialog-title">{{ selectedSkill?.name }}</span>
-          <div v-if="selectedSkill?.source === 'project'" class="dialog-actions">
-            <Button v-if="!editing" icon="pi pi-pencil" label="Edit" severity="secondary" size="small" @click="startEdit" />
-            <template v-else>
-              <Button icon="pi pi-times" label="Cancel" severity="secondary" size="small" @click="cancelEdit" />
-              <Button icon="pi pi-check" label="Save" size="small" :loading="saving" @click="saveSkill" />
-            </template>
-          </div>
-        </div>
+        <span class="dialog-title">{{ selectedSkill?.name }}</span>
       </template>
 
-      <Textarea
+      <div v-if="selectedSkill?.source === 'project'" class="editor-toolbar">
+        <span class="editor-path">{{ selectedSkill?.name }}</span>
+        <div class="editor-actions">
+          <Button
+            v-if="!editing"
+            icon="pi pi-pencil"
+            label="Edit"
+            severity="secondary"
+            text
+            size="small"
+            @click="startEdit"
+          />
+          <template v-else>
+            <Button icon="pi pi-times" label="Cancel" severity="secondary" text size="small" @click="cancelEdit" />
+            <Button icon="pi pi-save" label="Save" size="small" :loading="saving" @click="saveSkill" />
+          </template>
+        </div>
+      </div>
+
+      <MdEditor
         v-if="editing"
         v-model="editContent"
-        class="skill-editor"
-        autoResize
-        :style="{ width: '100%', minHeight: '400px', fontFamily: 'ui-monospace, monospace', fontSize: '0.85rem' }"
+        :theme="isDark ? 'dark' : 'light'"
+        codeTheme="github"
+        :codeStyleReverse="false"
+        language="en-US"
+        :preview="false"
+        :toolbars="['bold', 'underline', 'italic', 'strikeThrough', '-',
+          'title', 'sub', 'sup', 'quote', 'unorderedList', 'orderedList', 'task', '-',
+          'codeRow', 'code', 'link', 'image', 'table', '-',
+          'revoke', 'next', '=',
+          'preview', 'fullscreen']"
+        class="skill-md-editor"
       />
       <MdPreview v-else :modelValue="skillContent || ''" :theme="isDark ? 'dark' : 'light'" codeTheme="github" :codeStyleReverse="false" language="en-US" class="skill-content" />
     </Dialog>
@@ -152,8 +169,8 @@ async function saveSkill() {
 .skills-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1rem;
-  padding: 1rem;
+  gap: 0.75rem;
+  padding: 0.75rem;
 }
 
 .skill-card {
@@ -178,21 +195,32 @@ async function saveSkill() {
   gap: 0.35rem;
 }
 
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 1rem;
-}
-
 .dialog-title {
   font-weight: 700;
 }
 
-.dialog-actions {
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.editor-path {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color);
+}
+
+.editor-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.skill-md-editor {
+  min-height: 400px;
 }
 
 .skill-content {

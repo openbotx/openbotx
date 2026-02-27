@@ -100,9 +100,23 @@ def start(host, port, no_browser):
         else:
             url = f"http://{host}:{port}/app/"
 
-        import threading
+        health_url = url.replace("/app/", "/api/health")
 
-        threading.Timer(1.5, webbrowser.open, args=[url]).start()
+        import threading
+        import time
+
+        def _open_when_ready():
+            for _ in range(30):
+                time.sleep(1)
+                try:
+                    r = httpx.get(health_url, timeout=2)
+                    if r.status_code == 200:
+                        webbrowser.open(url)
+                        return
+                except Exception:
+                    pass
+
+        threading.Thread(target=_open_when_ready, daemon=True).start()
 
     click.echo(f"Starting OpenBotX v{__version__} on {host}:{port}")
     uvicorn.run(

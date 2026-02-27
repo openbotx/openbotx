@@ -35,7 +35,7 @@ class AgentLoop:
         project_ctx: ProjectContext,
         bus: MessageBus,
         provider: LLMProvider,
-        dispatcher: EventDispatcher | None,
+        dispatcher: EventDispatcher,
         task_manager: TaskManager,
         session_manager: SessionManager,
         skills_loader: SkillsLoader,
@@ -111,7 +111,7 @@ class AgentLoop:
         task.live_state = {"tool_uses": []}
         await self._task_manager.update_state(task_id, TaskState.DOING)
 
-        if msg.channel != "web" and self._dispatcher:
+        if msg.channel != "web":
             await self._dispatcher.broadcast(
                 "chat:user_message",
                 {
@@ -131,8 +131,7 @@ class AgentLoop:
             session.clear()
             self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.DONE)
-            if self._dispatcher:
-                await self._dispatcher.broadcast("sessions:updated", {})
+            await self._dispatcher.broadcast("sessions:updated", {})
             await self._bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
@@ -175,17 +174,30 @@ class AgentLoop:
 
         if extra_content:
             content = f"{content}\n\n{extra_content}"
-            if self._dispatcher:
-                await self._dispatcher.broadcast(
-                    "chat:transcription",
-                    {"chat_id": msg.chat_id, "content": extra_content},
-                )
+            await self._dispatcher.broadcast(
+                "chat:transcription",
+                {"chat_id": msg.chat_id, "content": extra_content},
+            )
+
+        # Save user message if not already persisted at the HTTP layer.
+        if not msg.metadata.get("message_saved"):
+            user_kwargs = {}
+            if msg.media:
+                user_kwargs["media"] = msg.media
+            session.add_message("user", content, **user_kwargs)
+            self._session_manager.save(session)
+            await self._dispatcher.broadcast("sessions:updated", {})
 
         system_prompt = self._context_builder.build_system_prompt(
             agent_name=effective_name,
             agent_instructions=self._agent_cfg.instructions,
         )
+
+        # Build LLM context. The user message is already in session history,
+        # so exclude it — build_messages appends the current turn separately.
         history = session.get_history()
+        if history and history[-1]["role"] == "user":
+            history = history[:-1]
         messages = ContextBuilder.build_messages(system_prompt, history, content, media=media_urls)
 
         try:
@@ -197,6 +209,8 @@ class AgentLoop:
             task.live_state = {}
             logger.error("agent loop error for task %s: %s", task_id, e, exc_info=True)
             response_text = f"I encountered an error: {e}"
+            session.add_message("assistant", response_text, agent_name=effective_name)
+            self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.ERROR, error=str(e))
             await self._bus.publish_outbound(
                 OutboundMessage(
@@ -208,17 +222,12 @@ class AgentLoop:
             )
             return
 
-        user_kwargs = {}
-        if msg.media:
-            user_kwargs["media"] = msg.media
         session.live_state = {}
         task.live_state = {}
-        session.add_message("user", content, **user_kwargs)
         session.add_message("assistant", response_text, agent_name=effective_name)
         self._session_manager.save(session)
 
-        if self._dispatcher:
-            await self._dispatcher.broadcast("sessions:updated", {})
+        await self._dispatcher.broadcast("sessions:updated", {})
 
         await self._bus.publish_outbound(
             OutboundMessage(
@@ -244,15 +253,16 @@ class AgentLoop:
         max_iterations = self._agent_cfg.agent_params.max_iterations
 
         for iteration in range(max_iterations):
+            self._task_manager.increment_iteration_count(task_id)
+
             response = await self._provider.chat(
                 messages=messages,
                 tools=self._registry.get_definitions(),
                 model=self._agent_cfg.model,
-                max_tokens=self._agent_cfg.model_params.max_tokens,
-                temperature=self._agent_cfg.model_params.temperature,
+                model_params=self._agent_cfg.model_params,
             )
 
-            if response.reasoning_content and self._dispatcher:
+            if response.reasoning_content:
                 await self._dispatcher.broadcast(
                     "chat:thinking",
                     {
@@ -285,21 +295,21 @@ class AgentLoop:
 
                 for tc in response.tool_calls:
                     result = await self._registry.execute(tc.name, tc.arguments)
+                    self._task_manager.increment_tool_count(task_id)
 
                     display_name = humanize(tc.name)
                     description = describe_tool_use(tc.name, tc.arguments)
 
-                    if self._dispatcher:
-                        await self._dispatcher.broadcast(
-                            "chat:tool_use",
-                            {
-                                "task_id": task_id,
-                                "chat_id": chat_id,
-                                "tool": display_name,
-                                "description": description,
-                                "agent_name": agent_name,
-                            },
-                        )
+                    await self._dispatcher.broadcast(
+                        "chat:tool_use",
+                        {
+                            "task_id": task_id,
+                            "chat_id": chat_id,
+                            "tool": display_name,
+                            "description": description,
+                            "agent_name": agent_name,
+                        },
+                    )
 
                     tool_entry = {"tool": display_name, "description": description}
                     if session is not None:
@@ -343,8 +353,7 @@ class AgentLoop:
                     messages=consolidation_messages,
                     tools=consolidation_registry.get_definitions(),
                     model=self._agent_cfg.model,
-                    max_tokens=4096,
-                    temperature=0.1,
+                    model_params={"max_tokens": 4096, "temperature": 0.1},
                 )
 
                 if response.has_tool_calls:

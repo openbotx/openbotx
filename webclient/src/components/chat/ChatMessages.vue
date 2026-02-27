@@ -104,15 +104,15 @@ watch(
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .message {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem;
   max-width: 85%;
 }
 
@@ -146,7 +146,7 @@ watch(
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
   border-radius: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.85rem;
   line-height: 1.5;
   overflow-wrap: break-word;
   min-width: 0;

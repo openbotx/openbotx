@@ -98,12 +98,13 @@ class SubagentManager:
         try:
             final_content = ""
             for _ in range(MAX_SUBAGENT_ITERATIONS):
+                self._task_manager.increment_iteration_count(task_id)
+
                 response = await self._provider.chat(
                     messages=messages,
                     tools=registry.get_definitions(),
                     model=self._agent_cfg.model,
-                    max_tokens=4096,
-                    temperature=0.1,
+                    model_params={"max_tokens": 4096, "temperature": 0.1},
                 )
 
                 if response.has_tool_calls:
@@ -126,6 +127,7 @@ class SubagentManager:
 
                     for tc in response.tool_calls:
                         tool_result = await registry.execute(tc.name, tc.arguments)
+                        self._task_manager.increment_tool_count(task_id)
                         messages.append(
                             {
                                 "role": "tool",

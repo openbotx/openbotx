@@ -18,7 +18,7 @@ class LiteLLMProvider(LLMProvider):
         self,
         api_key: str | None = None,
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-sonnet-4-20250514",
+        default_model: str = "",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
     ):
@@ -142,24 +142,31 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
+        model_params: dict[str, Any] | None = None,
     ) -> LLMResponse:
         original_model = model or self.default_model
+        if not original_model:
+            return LLMResponse(
+                content="No model configured. Set the 'model' field in your agent config (e.g. model: \"anthropic/claude-sonnet-4-20250514\").",
+                finish_reason="error",
+            )
         model = self._resolve_model(original_model)
 
         if self._supports_cache_control(original_model):
             messages, tools = self._apply_cache_control(messages, tools)
 
-        max_tokens = max(1, max_tokens)
+        params = {"max_tokens": 4096, "temperature": 0.7}
+        if model_params:
+            params.update(model_params)
+        if "max_tokens" in params:
+            params["max_tokens"] = max(1, params["max_tokens"])
 
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": self._sanitize_messages(
                 self._convert_image_blocks(self._sanitize_empty_content(messages))
             ),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            **params,
         }
 
         self._apply_model_overrides(model, kwargs)
