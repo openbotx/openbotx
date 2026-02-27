@@ -1,8 +1,9 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
 import { MdEditor, MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import Button from 'primevue/button'
+import { useDark } from '../../composables/useDark'
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -12,10 +13,7 @@ const props = defineProps({
 const emit = defineEmits(['save'])
 const editContent = ref(props.content)
 const editing = ref(false)
-
-const isDark = computed(() =>
-  document.documentElement.classList.contains('dark-mode')
-)
+const isDark = useDark()
 
 watch(() => props.content, (val) => {
   editContent.value = val
@@ -47,6 +45,8 @@ function save() {
       v-if="editing"
       v-model="editContent"
       :theme="isDark ? 'dark' : 'light'"
+      codeTheme="github"
+      :codeStyleReverse="false"
       language="en-US"
       :preview="false"
       :toolbars="['bold', 'underline', 'italic', 'strikeThrough', '-',
@@ -60,6 +60,8 @@ function save() {
       v-else
       :modelValue="editContent"
       :theme="isDark ? 'dark' : 'light'"
+      codeTheme="github"
+      :codeStyleReverse="false"
       language="en-US"
       class="md-preview-fill"
     />

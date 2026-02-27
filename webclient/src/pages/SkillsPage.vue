@@ -9,9 +9,11 @@ import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import { useApi } from '../composables/useApi'
 import { useToast } from 'primevue/usetoast'
+import { useDark } from '../composables/useDark'
 
 const api = useApi()
 const toast = useToast()
+const isDark = useDark()
 const skills = ref([])
 const selectedSkill = ref(null)
 const skillContent = ref('')
@@ -127,7 +129,7 @@ async function saveSkill() {
         autoResize
         :style="{ width: '100%', minHeight: '400px', fontFamily: 'ui-monospace, monospace', fontSize: '0.85rem' }"
       />
-      <MdPreview v-else :modelValue="skillContent || ''" language="en-US" class="skill-content" />
+      <MdPreview v-else :modelValue="skillContent || ''" :theme="isDark ? 'dark' : 'light'" codeTheme="github" :codeStyleReverse="false" language="en-US" class="skill-content" />
     </Dialog>
   </div>
 </template>

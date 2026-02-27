@@ -1,14 +1,14 @@
 <script setup>
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import { useWebSocketStore } from '../../stores/websocket'
 import { useAuthStore } from '../../stores/auth'
+import { useDark, toggleDark } from '../../composables/useDark'
 
 const router = useRouter()
 const wsStore = useWebSocketStore()
 const authStore = useAuthStore()
-const darkMode = ref(false)
+const darkMode = useDark()
 
 const navItems = [
   { label: 'Chat', icon: 'pi pi-comments', path: '/' },
@@ -25,8 +25,7 @@ function navigate(path) {
 }
 
 function toggleDarkMode() {
-  darkMode.value = !darkMode.value
-  document.documentElement.classList.toggle('dark-mode', darkMode.value)
+  toggleDark()
 }
 
 function logout() {
