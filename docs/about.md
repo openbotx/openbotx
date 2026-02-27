@@ -8,15 +8,11 @@ Rather than being just another autonomous AI agent, OpenBotX provides a controll
 
 It combines orchestration, real-time monitoring, hierarchical agent architecture, integrated communication systems, and native tooling into a unified, user-friendly platform.
 
----
-
 If you want to clearly show what differentiates OpenBotX from OpenClaw or similar solutions, the key point is to position OpenBotX as a more mature, secure, accessible, and user-oriented platform 🚀
 
 OpenBotX was not created as just another AI agent. From the beginning, it was designed as a structured, organized, and secure platform to intelligently orchestrate multiple agents 🔐
 
 While many projects focus only on agent autonomy, OpenBotX focuses on control, visibility, management, and structured orchestration.
-
----
 
 ## First major differentiator: Security 🛡️
 
@@ -26,8 +22,6 @@ Each agent runs inside an isolated workspace with sandbox restrictions, limiting
 
 This level of isolation and permission control is essential for anyone who wants to use it in production or even in a home environment without compromising their system.
 
----
-
 ## Second differentiator: Ease of installation and use ⚡
 
 Most people cannot even install complex solutions like OpenClaw or similar platforms. Broken dependencies, multiple services, open ports, environment conflicts… all of that pushes regular users away.
@@ -36,8 +30,6 @@ OpenBotX was built to be simple to install and start using — in fact, it can b
 
 The experience is designed to work without headaches.
 
----
-
 ## Third differentiator: Not just for developers 👥
 
 OpenBotX was also designed for non-programmers. It does not require you to understand agent architecture or advanced code manipulation to get started.
@@ -45,8 +37,6 @@ OpenBotX was also designed for non-programmers. It does not require you to under
 With the fully responsive web panel (desktop, tablet, and mobile), anyone can manage, monitor, and configure the system.
 
 There is also visual configuration editing with YAML validation, making advanced configuration safer and easier without breaking the system.
-
----
 
 ## Fourth differentiator: It’s not just an agent 🤖
 
@@ -60,16 +50,12 @@ This creates a hierarchical, scalable, and structured architecture, ideal for co
 
 It’s an organized system — not a standalone experimental agent trying to do everything alone.
 
----
-
 ## Intelligent agent-to-agent routing 🧠
 
 OpenBotX includes automatic message routing between agents.
 Agents can communicate intelligently with contextual continuity, enabling structured collaboration between specialized LLM instances.
 
 This transforms the system into a coordinated AI workforce rather than a single monolithic agent.
-
----
 
 ## Native browser communication system 🌐
 
@@ -78,8 +64,6 @@ OpenBotX includes its own native browser communication system, built specificall
 It also supports secure browser automation through Chrome/CDP integration, allowing controlled interaction with web environments.
 
 This means more controlled integration, less external dependency, and greater stability.
-
----
 
 ## Native real-time web dashboard 📊
 
@@ -99,8 +83,6 @@ And all of this can be accessed from desktop, tablet, and mobile 📱💻
 
 Just having a complete, production-ready dashboard already places OpenBotX at another level of usability.
 
----
-
 ## Integrated file browser 📁
 
 There is a native file browser inside the web panel, with separation between public and private files.
@@ -108,8 +90,6 @@ There is a native file browser inside the web panel, with separation between pub
 All file operations occur inside sandboxed environments, ensuring safe access and preventing unintended system exposure.
 
 You can manage everything directly through the interface — no terminal required.
-
----
 
 ## Real-time skill editing ✏️
 
@@ -121,15 +101,11 @@ No environment conflicts.
 
 This provides agility, operational control, and real-time iteration.
 
----
-
 ## Kanban-style board 📋
 
 OpenBotX includes a visual Kanban-style board where you can track in real time what each agent is doing.
 
 This introduces transparency, workflow organization, and structured task management — something most experimental agent platforms simply do not offer.
-
----
 
 ## Independent web chat 💬
 
@@ -143,13 +119,9 @@ It supports:
 
 This eliminates third-party dependencies and increases communication control.
 
----
-
 ## Native Telegram support 📲
 
 With support for text, audio, and images, enabling direct integration with end users.
-
----
 
 ## Native Python tools system 🧩
 
@@ -169,8 +141,6 @@ Built-in capabilities include:
 
 This transforms OpenBotX from a simple conversational system into a programmable AI automation platform.
 
----
-
 ## Multi-provider LLM support 🔄
 
 OpenBotX supports multiple LLM providers.
@@ -178,8 +148,6 @@ OpenBotX supports multiple LLM providers.
 It allows flexible model configuration and includes prompt caching to reduce latency and operational cost.
 
 This makes the platform adaptable, efficient, and scalable.
-
----
 
 ## Strategic Summary 🎯
 
