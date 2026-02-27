@@ -231,7 +231,14 @@ POST /api/chat
 }
 ```
 
-The route (`openbotx/server/routes/chat.py`) creates a task beforehand and injects the `task_id` into the message metadata. Returns `{"task_id": "abc123", "session_id": "direct"}` — the frontend can then track progress via WebSocket.
+The route (`openbotx/server/routes/chat.py`) does the following synchronously before returning:
+
+1. Creates a task and injects the `task_id` into the message metadata
+2. Persists the user message to the session immediately (creates the session if needed)
+3. Broadcasts `sessions:updated` so connected clients see the new session right away
+4. Publishes the `InboundMessage` to the bus with `message_saved: true` in metadata
+
+Returns `{"task_id": "abc123", "session_id": "direct"}`. Because the session is saved before the response, a page refresh always shows the session and the user's message — even if the agent hasn't started processing yet.
 
 ### Via Telegram
 
@@ -329,11 +336,16 @@ graph TD
     I1 -->|Yes| I2["Transcribe audio, broadcast chat:transcription"]
     I1 -->|No| J
     I2 --> J
-    J[Build System Prompt]
-    J --> K[Retrieve session history]
-    K --> L[Assemble messages]
+    J{User message already saved?}
+    J -->|Yes - web/REST| J1[Skip user save]
+    J -->|No - channel/cron| J2[Save user message to session]
+    J2 --> J3["Broadcast sessions:updated"]
+    J3 --> J1
+    J1 --> K[Build System Prompt]
+    K --> K1["Retrieve session history (exclude current turn)"]
+    K1 --> L[Assemble messages]
     L --> M[Execute Agent Loop]
-    M --> N[Save user + assistant to session]
+    M --> N[Save assistant response to session]
     N --> N1["Broadcast sessions:updated"]
     N1 --> O[Publish response to Bus]
     O --> P[Mark Task as DONE]
@@ -1274,21 +1286,26 @@ graph TD
     F -->|No| H[Create empty session]
     G --> I[Cache and return]
     H --> I
-    E --> J[Agent loop processes message]
+    E --> J{message_saved in metadata?}
     I --> J
-    J --> K[Add user + assistant messages]
-    K --> L["SessionManager.save(session)"]
-    L --> M[Write JSONL + update cache]
-    M --> N["Check consolidation (section 16)"]
+    J -->|Yes| K[User message already persisted at HTTP layer]
+    J -->|No| K1[Save user message to session]
+    K1 --> K
+    K --> L[Agent loop processes message]
+    L --> M[Save assistant response to session]
+    M --> N["SessionManager.save(session)"]
+    N --> O[Write JSONL + update cache]
+    O --> P["Check consolidation (section 16)"]
 ```
 
 Step by step:
 
 1. **Key computation** — `InboundMessage.session_key` returns `session_key_override` if set, otherwise `{channel}:{chat_id}`
 2. **Load or create** — `get_or_create(key)` checks the in-memory cache first; if not found, attempts to load from the JSONL file; if the file doesn't exist, creates a new empty `Session`
-3. **Agent loop** — The agent uses `session.get_history()` to build the conversation context for the LLM
-4. **Save** — After the agent loop completes, the user message and assistant response are appended to the session, and it's written back to disk
-5. **Consolidation check** — If unconsolidated messages exceed `memory_window`, memory consolidation triggers (see section 16)
+3. **User message persistence** — For REST API (web) messages, the user message is already saved at the HTTP handler (with `message_saved: true` in metadata). For channel messages (Telegram, cron, heartbeat), the agent loop saves the user message before processing
+4. **Agent loop** — The agent uses `session.get_history()` to build the conversation context for the LLM, excluding the last user message (current turn) since `build_messages` adds it separately
+5. **Save** — After the agent loop completes, the assistant response is appended to the session and written back to disk
+6. **Consolidation check** — If unconsolidated messages exceed `memory_window`, memory consolidation triggers (see section 16)
 
 ### Storage Format
 

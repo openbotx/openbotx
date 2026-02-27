@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
+from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.bus.events import OutboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.base import BaseChannel
@@ -19,7 +20,7 @@ class ChannelManager:
         config: ChannelsConfig,
         bus: MessageBus,
         storage: StorageProvider,
-        dispatcher=None,
+        dispatcher: EventDispatcher,
     ):
         self.config = config
         self.bus = bus
@@ -107,10 +108,9 @@ class ChannelManager:
         return False
 
     def _broadcast_channel_status(self, name: str, running: bool) -> None:
-        if self._dispatcher:
-            asyncio.create_task(
-                self._dispatcher.broadcast("channel:status", {"name": name, "running": running})
-            )
+        asyncio.create_task(
+            self._dispatcher.broadcast("channel:status", {"name": name, "running": running})
+        )
 
     def get_status(self) -> dict[str, Any]:
         status = {
@@ -167,13 +167,12 @@ class ChannelManager:
             return
 
         # Always broadcast to WebSocket so the web UI mirrors all sessions
-        if self._dispatcher:
-            await self._dispatcher.broadcast(
-                "chat:message",
-                {
-                    "content": msg.content,
-                    "chat_id": msg.chat_id,
-                    "task_id": msg.metadata.get("task_id"),
-                    "agent_name": msg.metadata.get("agent_name"),
-                },
-            )
+        await self._dispatcher.broadcast(
+            "chat:message",
+            {
+                "content": msg.content,
+                "chat_id": msg.chat_id,
+                "task_id": msg.metadata.get("task_id"),
+                "agent_name": msg.metadata.get("agent_name"),
+            },
+        )

@@ -203,7 +203,7 @@ async def restart_services(request: Request):
     config = app.state.config
 
     for name, service in [
-        ("heartbeat", getattr(app.state, "heartbeat", None)),
+        ("heartbeat", app.state.heartbeat),
         ("orchestrator", app.state.orchestrator),
         ("channel_manager", app.state.channel_manager),
         ("cron_service", app.state.cron_service),

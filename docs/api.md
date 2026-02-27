@@ -105,6 +105,8 @@ Request body:
 
 The `media` field accepts an array of storage paths (e.g., from `/api/chat/upload`). Images are sent to the LLM as data URIs. Audio files are transcribed via faster-whisper and the transcript is prepended to the message content.
 
+The message is persisted to the session immediately (before the async agent loop processes it). This means a page refresh always shows the session and the user's message, even if the agent hasn't responded yet.
+
 Response:
 
 ```json

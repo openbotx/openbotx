@@ -145,6 +145,11 @@ class LiteLLMProvider(LLMProvider):
         model_params: dict[str, Any] | None = None,
     ) -> LLMResponse:
         original_model = model or self.default_model
+        if not original_model:
+            return LLMResponse(
+                content="No model configured. Set the 'model' field in your agent config (e.g. model: \"anthropic/claude-sonnet-4-20250514\").",
+                finish_reason="error",
+            )
         model = self._resolve_model(original_model)
 
         if self._supports_cache_control(original_model):

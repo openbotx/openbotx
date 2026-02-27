@@ -49,7 +49,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         if path.startswith("/api/"):
-            secret = getattr(request.app.state, "auth_secret", "")
+            secret = request.app.state.auth_secret
             if not secret:
                 return await call_next(request)
 

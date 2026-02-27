@@ -41,7 +41,7 @@ class WebSocketManager:
 
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    secret = getattr(websocket.app.state, "auth_secret", "")
+    secret = websocket.app.state.auth_secret
     if secret:
         token = websocket.query_params.get("token", "")
         payload = verify_token(token, secret)

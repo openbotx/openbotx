@@ -155,20 +155,22 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value = await api.get('/chat/sessions')
   }
 
+  let _loadToken = 0
+
   async function loadHistory(sessionKey) {
     // Set session context BEFORE the async call so WebSocket events
     // arriving during the fetch are filtered against the correct session.
     currentSessionId.value = sessionKey
     localStorage.setItem('chat_session', sessionKey)
 
-    // Snapshot message count before fetch — WS events arriving during the
-    // async call will append beyond this index.
-    const preCount = messages.value.length
+    // Cancellation token: if another loadHistory is called while this
+    // fetch is in-flight (e.g. onMounted + syncAfterReconnect on page
+    // refresh), the stale result is discarded to prevent duplication.
+    const token = ++_loadToken
 
     const data = await api.get(`/chat/sessions/${sessionKey}`)
 
-    // Collect any WS-pushed messages that arrived during the fetch.
-    const liveMessages = messages.value.slice(preCount)
+    if (token !== _loadToken) return
 
     messages.value = (data.messages || []).map((m) => ({
       ...m,
@@ -185,11 +187,6 @@ export const useChatStore = defineStore('chat', () => {
       })
       streaming.value = true
       currentToolUse.value = toolUses[toolUses.length - 1]
-    }
-
-    // Re-append live messages that arrived during the fetch.
-    if (liveMessages.length) {
-      messages.value.push(...liveMessages)
     }
   }
 

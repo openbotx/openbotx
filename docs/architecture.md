@@ -107,21 +107,21 @@ The server is a FastAPI application with a lifespan context manager that initial
 
 | File                | Purpose                                                                                     |
 | ------------------- | ------------------------------------------------------------------------------------------- |
-| `app.py`            | `ServerFactory` -- builds all server dependencies from config (providers, storage, orchestrator, cron callbacks). `lifespan()` -- async context manager that initializes and tears down all services. `create_app()` -- FastAPI app factory that registers all routers, middleware, WebSocket, and SPA fallback. |
-| `websocket.py`      | `WebSocketManager` -- maintains a set of active connections and broadcasts JSON events. `websocket_endpoint` handles auth and bidirectional communication. |
-| `auth.py`           | JWT-based `AuthMiddleware`. Protects all `/api/*` routes except `/api/auth/login`.          |
-| `routes/auth.py`    | Login endpoint. Issues JWT tokens.                                                          |
-| `routes/chat.py`    | Chat API (send messages, list/manage sessions).                                             |
-| `routes/tasks.py`   | Task CRUD and state management.                                                             |
-| `routes/files.py`   | File API: tree listing, read (returns JSON with type-based content or metadata), download (raw binary), create file, create directory, write, and delete (files and directories). Uses `StorageProvider` abstraction for all operations. Classifies files as `text`, `image`, `video`, `audio`, or `binary`. |
-| `routes/skills.py`  | List, load, and update skills. GET lists all skills, GET by name returns raw content with source, PUT updates project skills (validates source is not builtin). |
-| `routes/tools.py`   | List registered tools with their definitions (name, description, parameters).               |
-| `routes/channels.py`| Channel status, configuration, start/stop control. Persists `enabled` state on start/stop for auto-start on boot. |
-| `routes/providers.py`| Provider listing and configuration.                                                        |
-| `routes/scheduler.py`| Cron job management API.                                                                   |
-| `routes/config.py`  | Read and update platform configuration. Includes YAML export, YAML validation, and service restart. |
-| `routes/system.py`  | System info endpoint (`GET /system/info`). Returns cross-platform data: OS, CPU, memory, disk, GPU (list with name/cores/vendor/metal), Python version, and OpenBotX version. Uses stdlib + subprocess fallbacks. |
-| `routes/agents.py`  | Agent listing and configuration.                                                            |
+| `app.py`            | `ServerFactory` builds all server dependencies from config. `lifespan()` initializes and tears down all services. `create_app()` registers routers, middleware, WebSocket, and SPA fallback. |
+| `websocket.py`      | `WebSocketManager` maintains active connections and broadcasts JSON events. `websocket_endpoint` handles auth and bidirectional communication. |
+| `auth.py`           | JWT-based `AuthMiddleware`. Protects all `/api/*` routes except `/api/auth/login`. |
+| `routes/auth.py`    | Login endpoint. Issues JWT tokens. |
+| `routes/chat.py`    | Chat API. Send messages, list and manage sessions. |
+| `routes/tasks.py`   | Task CRUD and state management. |
+| `routes/files.py`   | File API with tree listing, read, download, create, write, and delete. Uses `StorageProvider` for all operations. Classifies files as `text`, `image`, `video`, `audio`, or `binary`. |
+| `routes/skills.py`  | List, load, and update skills. PUT validates source is not builtin. |
+| `routes/tools.py`   | List registered tools with their definitions. |
+| `routes/channels.py`| Channel status, configuration, and start/stop control. Persists `enabled` state for auto-start on boot. |
+| `routes/providers.py`| Provider listing and configuration. |
+| `routes/scheduler.py`| Cron job management API. |
+| `routes/config.py`  | Read and update platform configuration. Supports YAML export, validation, and service restart. |
+| `routes/system.py`  | System info endpoint (`GET /system/info`). Returns OS, CPU, memory, disk, GPU, Python version, and OpenBotX version. |
+| `routes/agents.py`  | Agent listing and configuration. |
 
 **ServerFactory** encapsulates all dependency creation:
 
@@ -130,10 +130,10 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `create_provider(model)` | Resolves the model to a provider config and creates a `LiteLLMProvider`.            |
 | `create_storage(url)`   | Creates `S3Storage` or `LocalStorage` based on the config.                           |
 | `create_cron_callback(bus)` | Returns a callback that publishes `InboundMessage` to the bus when a cron job fires. |
-| `create_orchestrator(...)` | Receives a `ProjectContext` (shared across all agents). Merges provider-level `model_params` into each agent's `model_params` via dict merge (agent keys take precedence). Builds all `AgentLoop` instances (one per agent), creates `SubagentManager`s, and the `AgentClassifier`. Each agent gets its `PathResolver` created internally by `build_registry()` via `ProjectContext.create_resolver()`. Returns an `Orchestrator` that routes messages. |
+| `create_orchestrator(...)` | Receives a shared `ProjectContext`. Merges provider-level `model_params` into each agent via dict merge (agent keys take precedence). Builds one `AgentLoop` per agent, creates `SubagentManager`s, and the `AgentClassifier`. Returns an `Orchestrator` that routes messages. |
 | `setup_logging(path)`   | Configures rotating file handler + console handler for the `openbotx` logger.        |
 
-The built web client (`openbotx/webclient/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles). The build output lives inside the Python package so it is included in the `.whl` distribution — users who install via `pip install openbotx` get the web UI out of the box.
+The built web client (`openbotx/webclient/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html`. The build output lives inside the Python package and is included in the `.whl` distribution.
 
 Files under the project's `public/` directory are served at `/public/{path}` without authentication. This allows media files (images, video, audio) to be embedded in HTML5 tags (`<img>`, `<video>`, `<audio>`) without needing auth headers.
 
@@ -147,7 +147,7 @@ The `MessageBus` is the backbone of the platform. It holds two `asyncio.Queue` i
 | --------------- | ----------------------------------------------------------------------------------------- |
 | `queue.py`      | `MessageBus` with `inbound` and `outbound` async queues. Provides `publish_*` / `consume_*` methods. |
 | `events.py`     | Message data classes: `InboundMessage` (channel -> agent) and `OutboundMessage` (agent -> channel). |
-| `dispatcher.py` | `EventDispatcher` -- protocol-based event broadcasting. Components call `dispatcher.broadcast(event, data)` instead of coupling directly to WebSocketManager. Handlers (like WebSocketManager) register via `add_handler()`. |
+| `dispatcher.py` | `EventDispatcher` provides protocol-based event broadcasting. Components call `dispatcher.broadcast(event, data)` instead of coupling directly to WebSocketManager. Handlers register via `add_handler()`. |
 
 **Session key derivation:** Each `InboundMessage` derives its session key as `{channel}:{chat_id}`, which ties all messages from the same chat to the same conversation session. This can be overridden via `session_key_override`.
 
@@ -159,13 +159,13 @@ The agent subsystem is the intelligence layer of the platform.
 
 | File              | Purpose                                                                                        |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `orchestrator.py` | `Orchestrator` -- consumes inbound messages from the bus, routes them to the appropriate agent via `AgentClassifier` (or directly to the default agent when only one exists), and delegates processing to the selected `AgentLoop`. |
-| `classifier.py`   | `AgentClassifier` -- LLM-based message classifier. Analyzes the user's message and recent conversation history to select the best agent using a `route` tool call. Falls back to the first agent on error. Only instantiated when multiple agents are configured. |
-| `loop.py`         | `AgentLoop` -- the main agentic loop. Receives an `AgentConfig` (model, params, instructions, tools) and a `ProjectContext` (project paths, tool configs, storage). Builds context, calls the LLM, executes tool calls, and repeats until a plain text response is returned or `agent_params.max_iterations` (default: 40) is reached. Streams `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events via the EventDispatcher. Broadcasts `sessions:updated` after saving each conversation turn. Tool registration is delegated to `build_registry()` in `tools/registry.py`. |
-| `context.py`      | `ContextBuilder` -- assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL (when configured), and agent-specific instructions. Provides the directory context (workspace and public paths) and static helpers for building OpenAI-compatible message arrays with multimodal support (text + images). `add_tool_result()` appends tool results to messages without truncation — each tool manages its own output limits internally. |
-| `memory.py`       | `MemoryStore` -- reads/writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Auto-creates the `memory/` directory on initialization. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages (tool calls and tool results are excluded). |
-| `skills.py`       | `SkillsLoader` -- discovers SKILL.md files from both built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with a `source` field (`"builtin"` or `"project"`) and a `location` field (absolute path to the SKILL.md file, included in the skills summary XML so the LLM can read the file if needed). Skills marked `always: true` are injected into every system prompt, but only if their requirements are satisfied. Provides `load_skill_raw()` for the REST API (returns raw content with frontmatter + source) and `save_skill()` for updating project skills (validates source is not builtin). |
-| `subagent.py`     | `SubagentManager` -- spawns independent background agent loops for delegated tasks. Receives `AgentConfig` + `ProjectContext` and uses `build_registry()` for tool setup (no `message`, `spawn`, `cron`, or memory tools). Subagents run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. Tool results are truncated to 500 characters. On completion, they announce results back to the main agent via the inbound queue with `system_message: true` metadata. |
+| `orchestrator.py` | `Orchestrator` consumes inbound messages from the bus. Routes them to the appropriate agent via `AgentClassifier`, or directly to the default agent when only one exists. |
+| `classifier.py`   | `AgentClassifier` is an LLM-based message classifier. Analyzes the user's message and recent history to select the best agent using a `route` tool call. Falls back to the first agent on error. Only instantiated when multiple agents are configured. |
+| `loop.py`         | `AgentLoop` is the main agentic loop. Receives an `AgentConfig` and a `ProjectContext`, builds context, calls the LLM, executes tool calls, and repeats until a plain text response or `max_iterations` (default 40) is reached. Streams `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events. For web/REST messages, the user message is already persisted at the HTTP layer (`message_saved` flag). For channel messages, the loop saves it before processing. Tool registration is delegated to `build_registry()`. |
+| `context.py`      | `ContextBuilder` assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL, and agent-specific instructions. Provides helpers for building OpenAI-compatible message arrays with multimodal support (text + images). |
+| `memory.py`       | `MemoryStore` reads and writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages. |
+| `skills.py`       | `SkillsLoader` discovers SKILL.md files from built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with `source` (`"builtin"` or `"project"`) and `location` (absolute path). Skills marked `always: true` are injected into every system prompt if their requirements are satisfied. |
+| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Subagents have no `message`, `spawn`, `cron`, or memory tools. They run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. On completion, results are announced back to the main agent via the inbound queue. |
 
 **Multi-agent orchestration:**
 
@@ -238,11 +238,11 @@ Channels are the communication endpoints that connect users to the platform.
 
 | File           | Purpose                                                                                  |
 | -------------- | ---------------------------------------------------------------------------------------- |
-| `base.py`      | `BaseChannel` -- abstract interface defining `start()`, `stop()`, `send()`, and `is_running`. |
-| `manager.py`   | `ChannelManager` -- initializes channels from config via `_create_channel()`, runs an outbound dispatch loop, and routes messages. `start_channel()` always recreates the channel from current config, enabling token changes without server restart. Web channel messages are forwarded through `WebSocketManager`. External channels (Telegram) go through their respective implementations. |
-| `telegram.py`  | `TelegramChannel` -- Telegram bot integration via `python-telegram-bot`. Supports allowed user filtering, proxy configuration, and reply-to-message mode. |
+| `base.py`      | `BaseChannel` abstract interface. Defines `start()`, `stop()`, `send()`, and `is_running`. |
+| `manager.py`   | `ChannelManager` initializes channels from config, runs an outbound dispatch loop, and routes messages. `start_channel()` recreates the channel from current config, enabling token changes without restart. Web messages go through `WebSocketManager`. External channels use their own implementations. |
+| `telegram.py`  | `TelegramChannel` integrates with Telegram via `python-telegram-bot`. Supports allowed user filtering, proxy configuration, and reply-to-message mode. |
 
-The web channel is implicit -- it does not have a `BaseChannel` implementation. Instead, the WebSocket endpoint in the server layer handles web client communication directly, and `ChannelManager._route_message` broadcasts web-bound outbound messages via `WebSocketManager`.
+The web channel is implicit and does not have a `BaseChannel` implementation. The WebSocket endpoint handles web client communication directly. `ChannelManager._route_message` broadcasts web-bound outbound messages via `WebSocketManager`.
 
 ### Providers
 
@@ -253,8 +253,8 @@ The provider subsystem abstracts LLM access behind a uniform interface.
 | File                   | Purpose                                                                             |
 | ---------------------- | ----------------------------------------------------------------------------------- |
 | `base.py`              | `LLMProvider` abstract class and `LLMResponse` data class (content, tool_calls, reasoning_content, has_tool_calls). |
-| `litellm_provider.py`  | `LiteLLMProvider` -- wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, and prompt caching support. |
-| `registry.py`          | `PROVIDERS` tuple of `ProviderSpec` objects. Defines metadata for each supported provider: custom, openrouter, anthropic, openai, deepseek, gemini, groq. Includes keyword matching, API key prefix detection, and gateway detection. |
+| `litellm_provider.py`  | `LiteLLMProvider` wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, and prompt caching. |
+| `registry.py`          | `PROVIDERS` tuple of `ProviderSpec` objects. Defines metadata for each supported provider (custom, openrouter, anthropic, openai, deepseek, gemini, groq) with keyword matching and API key detection. |
 
 **Provider resolution:** The `Config.get_provider()` method matches a model name to a provider by first checking the LiteLLM-style prefix (e.g., `anthropic/claude-sonnet-4-20250514`), then falling back to keyword matching, and finally returning any provider with an API key configured.
 
@@ -268,19 +268,19 @@ Tools are the actions the agent can perform in the world.
 
 | File               | Purpose                                                                  |
 | ------------------ | ------------------------------------------------------------------------ |
-| `base.py`          | Abstract `Tool` class with `name`, `description`, `parameters`, `execute()`, `validate_params()`, and `to_schema()` (OpenAI-compatible function definition). |
-| `registry.py`      | `ToolRegistry` -- manages tool registration, lookup, and execution. Generates tool definition arrays for LLM calls. Appends error hints on failure to guide the agent toward recovery. |
+| `base.py`          | Abstract `Tool` class with `name`, `description`, `parameters`, `execute()`, `validate_params()`, and `to_schema()`. |
+| `registry.py`      | `ToolRegistry` manages tool registration, lookup, and execution. Generates tool definition arrays for LLM calls. Appends error hints on failure to guide recovery. |
 | `filesystem.py`    | `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListDirTool` -- file operations using `PathResolver` for path resolution and directory restriction enforcement. |
-| `shell.py`         | `ExecTool` -- execute shell commands with configurable timeout and optional workspace restriction. |
+| `shell.py`         | `ExecTool` executes shell commands with configurable timeout and optional workspace restriction. |
 | `web.py`           | `WebSearchTool` (Brave Search API), `WebFetchTool` (HTTP fetch + content extraction). |
-| `message.py`       | `MessageTool` -- send messages to channels from within the agent loop. Rate-limited to one message per turn. |
-| `spawn.py`         | `SpawnTool` -- delegate tasks to background subagents.                   |
-| `cron.py`          | `CronTool` -- create, list, and remove scheduled jobs.                   |
-| `memory_tool.py`   | `MemorySaveTool` -- persist content to MEMORY.md and HISTORY.md. `MemoryReadTool` -- read MEMORY.md or HISTORY.md on demand. `MemorySearchTool` -- search across memory files with context. |
-| `browser.py`       | `BrowserTool` -- browser automation via CDP (Chrome DevTools Protocol) using the vendored `openbotx/cdp/` library. Singleton `_ChromeInstance` manages the Chrome process; each tool instance gets its own tab. Click uses pure CDP: resolve element → scroll into view → get content quads → dispatch mouse events. |
-| `http_client.py`   | `HttpClientTool` -- full HTTP client with download/upload support, content type mapping, `PathResolver` integration, and named auth profiles (OAuth 1.0a, Basic, Bearer). |
-| `rss.py`           | `RssReaderTool` -- read RSS 2.0 and Atom feeds. Auto-detects feed format, strips HTML from summaries. |
-| `image.py`         | `ImageGenerationTool` -- generate images via configurable provider/model. |
+| `message.py`       | `MessageTool` sends messages to channels from within the agent loop. Rate-limited to one message per turn. |
+| `spawn.py`         | `SpawnTool` delegates tasks to background subagents. |
+| `cron.py`          | `CronTool` creates, lists, and removes scheduled jobs. |
+| `memory_tool.py`   | `MemorySaveTool` persists content to MEMORY.md and HISTORY.md. `MemoryReadTool` reads them on demand. `MemorySearchTool` searches across memory files with context. |
+| `browser.py`       | `BrowserTool` provides browser automation via CDP using the vendored `openbotx/cdp/` library. A singleton `_ChromeInstance` manages the Chrome process. Each tool instance gets its own tab. Clicks use pure CDP: resolve element, scroll into view, get content quads, dispatch mouse events. |
+| `http_client.py`   | `HttpClientTool` is a full HTTP client with download/upload support, `PathResolver` integration, and named auth profiles (OAuth 1.0a, Basic, Bearer). |
+| `rss.py`           | `RssReaderTool` reads RSS 2.0 and Atom feeds. Auto-detects format and strips HTML from summaries. |
+| `image.py`         | `ImageGenerationTool` generates images via configurable provider and model. |
 
 **Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and all memory tools to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
 
@@ -292,8 +292,8 @@ Tasks provide observability into what the agent is doing.
 
 | File          | Purpose                                                                             |
 | ------------- | ----------------------------------------------------------------------------------- |
-| `models.py`   | `Task` dataclass with fields: `id`, `title`, `description`, `state`, `agent_type`, `agent_name`, `channel`, `chat_id`, `parent_task_id`, `subagent_ids`, `result`, `error`, `created_at`, `updated_at`, `started_at`, `completed_at`, `tool_count`, `iteration_count`, `live_state`. Computed property `duration_ms` returns elapsed milliseconds (from `started_at` to `completed_at`, or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory — it is included in API responses when non-empty but never persisted to JSONL. |
-| `manager.py`  | `TaskManager` -- creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events via the EventDispatcher. Auto-sets `started_at` on transition to `DOING` and `completed_at` on `DONE`/`ERROR`. Provides `increment_tool_count()` and `increment_iteration_count()` for in-memory metric tracking (persisted on next state transition). |
+| `models.py`   | `Task` dataclass with fields for identity, state, timing, metrics, and relationships. `duration_ms` returns elapsed milliseconds from `started_at` to `completed_at` (or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory and is never persisted to JSONL. |
+| `manager.py`  | `TaskManager` creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events. Auto-sets `started_at` on `DOING` and `completed_at` on `DONE`/`ERROR`. Provides `increment_tool_count()` and `increment_iteration_count()` for in-memory metric tracking. |
 
 Task states follow a Kanban model:
 
@@ -316,9 +316,9 @@ Sessions persist conversation history.
 
 | File          | Purpose                                                                           |
 | ------------- | --------------------------------------------------------------------------------- |
-| `manager.py`  | `SessionManager` -- manages `Session` objects stored as JSONL files in `workspace/sessions/`. Each session is keyed by `{channel}_{chat_id}`. Provides `get_or_create`, `save`, `delete`, and `list_sessions`. Uses an in-memory cache for fast access. |
+| `manager.py`  | `SessionManager` manages `Session` objects stored as JSONL files in `workspace/sessions/`. Each session is keyed by `{channel}_{chat_id}`. Provides `get_or_create`, `save`, `delete`, and `list_sessions`. Uses an in-memory cache for fast access. |
 
-The `Session` dataclass holds a list of messages (role + content + metadata), tracks `last_consolidated` for memory consolidation, and provides `get_history()` for building LLM context (capped at 500 messages by default). It also has a transient `live_state` dict that holds runtime data (e.g., `tool_uses`, `agent_name`) during execution — this is returned via the chat history API but never persisted to JSONL.
+The `Session` dataclass holds a list of messages (role + content + metadata) and tracks `last_consolidated` for memory consolidation. `get_history()` returns messages for building LLM context, capped at 500 by default. The transient `live_state` dict holds runtime data (e.g., `tool_uses`, `agent_name`) during execution. It is returned via the chat history API but never persisted to JSONL.
 
 ### Cron
 
@@ -328,8 +328,8 @@ The cron service enables scheduled task execution.
 
 | File          | Purpose                                                                            |
 | ------------- | ---------------------------------------------------------------------------------- |
-| `service.py`  | `CronService` -- runs a background tick loop (every 5 seconds), checks for due jobs, and fires them by publishing an `InboundMessage` to the message bus with `channel="cron"` and a unique `chat_id` per execution (`cron-{job_id}-{hex}`). Persists jobs to `workspace/cron_jobs.json`. |
-| `types.py`    | Data classes: `CronJob`, `CronSchedule` (kinds: `at`, `every`, `cron`), `CronPayload` (message, channel, recipient), `CronJobState` (next/last run, run count, errors), `CronStore`. |
+| `service.py`  | `CronService` runs a background tick loop every 5 seconds. When a job is due, it publishes an `InboundMessage` with `channel="cron"` and a unique `chat_id` per execution. Persists jobs to `workspace/cron_jobs.json`. |
+| `types.py`    | Data classes: `CronJob`, `CronSchedule` (kinds: `at`, `every`, `cron`), `CronPayload` (message, channel, recipient), `CronJobState` (next/last run, run count, errors). |
 
 Schedule kinds:
 
@@ -349,7 +349,7 @@ The heartbeat service periodically checks `HEARTBEAT.md` in the workspace for ta
 
 | File         | Purpose                                                                            |
 | ------------ | ---------------------------------------------------------------------------------- |
-| `service.py` | `HeartbeatService` -- runs a background loop that reads `workspace/HEARTBEAT.md` every N seconds. If the file has actionable content (not just headers/comments), publishes an `InboundMessage` to the bus with `channel="heartbeat"` and `chat_id="heartbeat"` (session key: `heartbeat:heartbeat`). The agent processes the tasks in a dedicated session. Responses are routed to the WebSocket (since there is no dedicated heartbeat channel handler). |
+| `service.py` | `HeartbeatService` runs a background loop that reads `workspace/HEARTBEAT.md` every N seconds. If the file has actionable content, it publishes an `InboundMessage` with `channel="heartbeat"` and `chat_id="heartbeat"`. The agent processes the tasks in a dedicated session. Responses are routed to the WebSocket. |
 
 Unlike cron (agent-managed via tools), `HEARTBEAT.md` is a file the user edits manually — a persistent to-do list the agent checks periodically.
 
@@ -361,7 +361,7 @@ Configuration is defined as Pydantic models and loaded from YAML.
 
 | File          | Purpose                                                                          |
 | ------------- | -------------------------------------------------------------------------------- |
-| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `AgentParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `GeneralToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `HttpClientConfig`, `AuthProfileConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
+| `schema.py`   | Pydantic models for all configuration sections (`Config`, `AgentConfig`, `ProviderConfig`, `ToolsConfig`, etc.). |
 | `loader.py`   | `load_config()` reads YAML and expands `${ENV_VAR}` patterns. `save_config()` writes the config back to YAML. |
 
 Key configuration sections:
@@ -397,11 +397,11 @@ Utility modules shared across the codebase.
 
 | File               | Purpose                                                                         |
 | ------------------ | ------------------------------------------------------------------------------- |
-| `path.py`          | `PathResolver` -- resolves file paths against a workspace directory and enforces allowed directory restrictions. Supports relative and absolute paths, home directory expansion (`~`), and multi-directory allowlists (workspace + public). Used by all file-based tools and the HTTP client. Also provides a module-level `media_path(filename)` function -- generates date-organized storage paths (`public/media/YYYY/MM/DD/filename`), used by `ImageGenerationTool` and `TelegramChannel`. |
+| `path.py`          | `PathResolver` resolves file paths against a workspace directory and enforces allowed directory restrictions. Supports relative/absolute paths, `~` expansion, and multi-directory allowlists. Used by all file-based tools and the HTTP client. Also provides `media_path()` for date-organized storage paths (`public/media/YYYY/MM/DD/filename`). |
 | `transcription.py` | Audio transcription via faster-whisper. Lazy-loads the Whisper model on first use. |
-| `text.py`          | `humanize()` -- converts tool names to human-readable format. `describe_tool_use()` -- generates human-readable descriptions of tool calls for WebSocket events. |
-| `oauth1.py`         | OAuth 1.0a signature generation (RFC 5849). `build_oauth1_header()` -- builds HMAC-SHA1 signed `Authorization` headers. Used by `HttpClientTool` for `oauth1` auth profiles. |
-| `ssrf.py`          | SSRF protection. `validate_url()` blocks requests to private/internal networks. `ssrf_event_hook()` is an httpx event hook for redirect validation. Used by `HttpClientTool`, `WebFetchTool`, and `RssReaderTool`. |
+| `text.py`          | `humanize()` converts tool names to human-readable format. `describe_tool_use()` generates descriptions of tool calls for WebSocket events. |
+| `oauth1.py`         | OAuth 1.0a signature generation (RFC 5849). `build_oauth1_header()` builds HMAC-SHA1 signed `Authorization` headers. Used by `HttpClientTool`. |
+| `ssrf.py`          | SSRF protection. `validate_url()` blocks requests to private/internal networks. `ssrf_event_hook()` validates redirects. Used by `HttpClientTool`, `WebFetchTool`, and `RssReaderTool`. |
 | `secrets.py`       | Sensitive value masking for config display. `is_sensitive_key()`, `mask_dict()`, `is_masked_or_empty()`. Used by config routes to hide API keys and passwords. |
 
 ### Storage
@@ -412,7 +412,7 @@ Pluggable storage backends for workspace files. The `StorageProvider` abstractio
 
 | File        | Purpose                                                |
 | ----------- | ------------------------------------------------------ |
-| `base.py`   | Abstract `StorageProvider` interface and `DirEntry` dataclass. Defines methods for file I/O (`read`, `write`, `delete`, `list`, `exists`, `size`) and directory operations (`list_dir`, `create_dir`, `delete_dir`, `is_directory`). |
+| `base.py`   | Abstract `StorageProvider` interface and `DirEntry` dataclass. Defines methods for file I/O and directory operations. |
 | `local.py`  | Local filesystem storage. Uses `Path` operations and `shutil.rmtree` for recursive directory deletion. |
 | `s3.py`     | AWS S3 storage backend. Uses `list_objects_v2` with `Delimiter` for directory listing, paginated batch deletion for directories. |
 
@@ -422,26 +422,26 @@ Pluggable storage backends for workspace files. The `StorageProvider` abstractio
 
 The web client is a single-page application built with:
 
-- **Vue 3** -- component framework
-- **Vite** -- build tool and dev server
-- **PrimeVue 4** -- UI component library
-- **Tailwind CSS 4** -- utility-first styling
-- **Pinia** -- state management
-- **md-editor-v3** -- Markdown editor and preview
-- **WebSocket** -- real-time communication with the server
+- **Vue 3** for components
+- **Vite** for build and dev server
+- **PrimeVue 4** for UI components
+- **Tailwind CSS 4** for styling
+- **Pinia** for state management
+- **md-editor-v3** for Markdown editing and preview
+- **WebSocket** for real-time communication
 
 Pages:
 
 | Page       | Function                                        |
 | ---------- | ----------------------------------------------- |
-| Chat       | Main conversation interface with session list panel, real-time updates, and session-aware message filtering. Users can switch between sessions (including heartbeat). Supports media attachments (images, audio files) and microphone audio recording. Audio files are transcribed via faster-whisper before being sent to the LLM. Links in messages open in a new tab. Agent messages display the agent name with an icon when multi-agent is active. |
-| TaskBoard  | Kanban board showing tasks in TODO/DOING/DONE/ERROR columns. Task cards display duration, channel, error details, result preview, and real-time active tool status (spinner + tool name + description) for DOING tasks. Clicking a task title opens a confirmation dialog to navigate to the associated chat session. |
-| Files      | File manager with type-aware rendering: `MarkdownEditor` (md-editor-v3) for `.md` files, `TextEditor` (monospace textarea) for other text files, `MediaPreview` (HTML5 img/video/audio) for media, and `FileDownload` for binary files. Supports creating files, creating folders, uploading files (to root or selected folder), deleting files/folders with confirmation dialogs, and a refresh button to force-reload the file tree (hidden when editing a file to avoid confusion). |
-| Skills     | View agent skills in a card grid. Each card shows the skill name, description, and tags for "always active" (when applicable) and source origin ("builtin" or "project"). Clicking a card opens a dialog with the full skill content rendered as Markdown. Project skills can be edited directly — an Edit button switches to a raw textarea editor with Save/Cancel actions. Builtin skills remain read-only. |
-| Tools      | View registered tools in a card grid. Each card shows the tool name and description. Clicking a card opens a dialog with the tool's parameter schema: parameter name, type, required status, description, enum values, and numeric ranges. |
-| Scheduler  | Manage cron jobs                                |
-| Settings   | Platform configuration with tabs: Info (system information — OS, CPU, memory, disk usage with progress bar, GPU, Python and OpenBotX versions), Bot, Channels (Telegram start/stop and config), Storage, Tools, Auth, and Advanced (YAML editor with validation and confirmation dialogs). The Info tab is the default tab and is read-only. Providers and agents are managed via the Advanced YAML editor. |
-| Login      | Authentication                                  |
+| Chat       | Main conversation interface with session list panel and real-time updates. Users can switch between sessions. Supports media attachments and microphone recording. Audio is transcribed via faster-whisper before being sent to the LLM. In multi-agent mode, messages display the agent name. |
+| TaskBoard  | Kanban board with TODO/DOING/DONE/ERROR columns. Cards display duration, channel, errors, and result preview. DOING tasks show real-time tool status. Clicking a task title navigates to the associated chat session. |
+| Files      | File manager with type-aware rendering. Uses `MarkdownEditor` for `.md` files, `TextEditor` for other text, `MediaPreview` for media, and `FileDownload` for binaries. Supports creating, uploading, and deleting files and folders. |
+| Skills     | Card grid of agent skills. Each card shows name, description, source tag, and "always active" tag when applicable. Clicking a card opens the full content as Markdown. Project skills can be edited inline. Builtin skills are read-only. |
+| Tools      | Card grid of registered tools. Clicking a card opens the parameter schema with types, required status, and descriptions. |
+| Scheduler  | Manage cron jobs. |
+| Settings   | Platform configuration with tabs: Info (OS, CPU, memory, disk, GPU, versions), Bot, Channels, Storage, Tools, Auth, and Advanced (YAML editor with validation). Providers and agents are managed via the Advanced tab. |
+| Login      | Authentication. |
 
 ---
 
