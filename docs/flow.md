@@ -82,9 +82,10 @@ graph TD
     J --> K[Create public/ directory structure]
     K --> L[Create Storage backend]
     L --> M["ServerFactory.create_orchestrator()"]
-    M --> M1["For each agent: Create Provider"]
-    M1 --> M2["Resolve workspace + Create PathResolver"]
-    M2 --> M3["Create SubagentManager + AgentLoop"]
+    M --> M0["Create ProjectContext (paths, tool configs, storage)"]
+    M0 --> M1["For each agent: Create Provider"]
+    M1 --> M2["Resolve workspace directory"]
+    M2 --> M3["Create SubagentManager + AgentLoop (with AgentConfig + ProjectContext)"]
     M3 --> M4["Create AgentClassifier (if multi-agent)"]
     M4 --> M5["Return Orchestrator"]
     M5 --> N[Create ChannelManager]
@@ -102,9 +103,9 @@ The `ServerFactory` class encapsulates all dependency creation logic. It receive
 Each agent gets its own `AgentLoop` with:
 - Its own `LiteLLMProvider` (configured for the agent's model)
 - Its own workspace directory (resolved via `AgentConfig.resolve_workspace()`)
-- Its own `PathResolver` with `allowed_dirs = [workspace, public_dir]`
-- Its own `SubagentManager` (sharing the parent's `PathResolver`)
-- Its own `ToolRegistry` (filtered by the agent's `tools` whitelist, if set)
+- A shared `ProjectContext` (project paths, tool configs, storage)
+- Its own `SubagentManager` (receives `AgentConfig` + `ProjectContext`)
+- Its own `ToolRegistry` built via `build_registry()`, which creates a `PathResolver` per agent via `ProjectContext.create_resolver()` and filters by the agent's `tools` whitelist if set
 
 After all services are started, the server re-queues any tasks that were interrupted by a previous shutdown. Tasks that were in the DOING state are reset to TODO during `TaskManager` initialization, and then published back to the MessageBus so the agent can re-execute them (see section 18).
 

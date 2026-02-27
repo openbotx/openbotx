@@ -25,6 +25,7 @@ class AgentParams(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    name: str = ""
     workspace: str = "./workspace"
     model: str = "anthropic/claude-sonnet-4-20250514"
     description: str = ""

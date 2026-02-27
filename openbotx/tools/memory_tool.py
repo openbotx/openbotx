@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from openbotx.agent.memory import MemoryStore

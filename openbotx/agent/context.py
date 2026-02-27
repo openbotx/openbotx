@@ -5,6 +5,7 @@ from typing import Any
 
 from openbotx.agent.memory import MemoryStore
 from openbotx.agent.skills import SkillsLoader
+from openbotx.config.project import ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +17,15 @@ IDENTITY = "You are OpenBotX, a personal AI assistant."
 class ContextBuilder:
     def __init__(
         self,
+        project_ctx: ProjectContext,
         workspace: Path,
-        public_dir: Path,
-        project_path: Path,
         memory: MemoryStore,
         skills_loader: SkillsLoader,
-        public_url: str = "",
     ):
+        self._project_ctx = project_ctx
         self._workspace = workspace
-        self._public_dir = public_dir
-        self._project_path = project_path
         self._memory = memory
         self._skills_loader = skills_loader
-        self._public_url = public_url
 
     def _build_directory_context(self) -> str:
         lines = [
@@ -38,10 +35,10 @@ class ContextBuilder:
             "  Internal files: reports, data, drafts.",
             f"  - {self._workspace / 'skills'} — project skills (each is a directory with a SKILL.md)",
             "",
-            f"Public: {self._public_dir}",
+            f"Public: {self._project_ctx.public_dir}",
             "  Web-accessible at /public/ URL. Use for anything the user needs to access:",
-            f"  - {self._public_dir / 'media'} — images, audio, video",
-            f"  - {self._public_dir / 'documents'} — PDFs, spreadsheets, exports",
+            f"  - {self._project_ctx.public_dir / 'media'} — images, audio, video",
+            f"  - {self._project_ctx.public_dir / 'documents'} — PDFs, spreadsheets, exports",
         ]
         return "\n".join(lines)
 
@@ -58,13 +55,13 @@ class ContextBuilder:
         now = datetime.now()
         parts.append(f"\nCurrent date and time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
 
-        if self._public_url:
-            parts.append(f"\nPublic URL: {self._public_url}")
+        if self._project_ctx.public_url:
+            parts.append(f"\nPublic URL: {self._project_ctx.public_url}")
 
         parts.append(f"\n# Project Structure\n{self._build_directory_context()}")
 
         for filename in BOOTSTRAP_FILES:
-            filepath = self._project_path / filename
+            filepath = self._project_ctx.project_path / filename
             if filepath.exists():
                 try:
                     content = filepath.read_text(encoding="utf-8").strip()

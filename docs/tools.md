@@ -4,7 +4,7 @@ OpenBotX is an AI assistant platform. Tools are Python functions the AI agent ca
 
 ## Overview
 
-All tools are registered in `openbotx/tools/`. The `ToolRegistry` manages them and generates OpenAI-compatible function definitions for the LLM. Tools are registered during agent initialization in `AgentLoop._register_tools()`.
+All tools are registered in `openbotx/tools/`. The `ToolRegistry` manages them and generates OpenAI-compatible function definitions for the LLM. Tools are registered via `build_registry()` in `openbotx/tools/registry.py`, which is called during agent initialization.
 
 The registry:
 
@@ -42,19 +42,25 @@ class PathResolver:
         ...
 ```
 
-The `ServerFactory` in `app.py` creates a `PathResolver` per agent during startup:
+`ProjectContext.create_resolver(agent_cfg)` creates a `PathResolver` per agent. This is called inside `build_registry()` during tool registration:
 
 ```python
-agent_workspace = agent_cfg.resolve_workspace(self._project_path)
-allowed_dirs = [agent_workspace, public_dir] if config.tools.general.restrict_to_workspace else None
-resolver = PathResolver(workspace=agent_workspace, allowed_dirs=allowed_dirs)
+# In ProjectContext (openbotx/config/project.py):
+def create_resolver(self, agent_cfg: AgentConfig) -> PathResolver:
+    workspace = agent_cfg.resolve_workspace(self.project_path)
+    allowed_dirs = (
+        [workspace, self.public_dir]
+        if self.tools.general.restrict_to_workspace
+        else None
+    )
+    return PathResolver(workspace=workspace, allowed_dirs=allowed_dirs)
 ```
 
-This `resolver` is passed to `AgentLoop` and `SubagentManager`, which in turn pass it to all file-based tools.
+The resolver is created internally by `build_registry()` and passed to all file-based tools.
 
 ### Agent-Specific Tool Whitelisting
 
-Each agent can optionally define a `tools` list in its configuration. When set, only tools whose `name` appears in this list are registered for that agent. Tools not in the whitelist are silently skipped during `_register_tools()`. When the list is empty (default), all tools are registered.
+Each agent can optionally define a `tools` list in its configuration. When set, only tools whose `name` appears in this list are registered for that agent. Tools not in the whitelist are silently skipped during `build_registry()`. When the list is empty (default), all tools are registered.
 
 ```yaml
 agents:

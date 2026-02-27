@@ -19,11 +19,11 @@ from openbotx.bus.events import InboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.manager import ChannelManager
 from openbotx.config.loader import load_config
+from openbotx.config.project import ProjectContext
 from openbotx.config.schema import Config
 from openbotx.cron.service import CronService
 from openbotx.cron.types import CronJob
 from openbotx.heartbeat.service import HeartbeatService
-from openbotx.helpers.path import PathResolver
 from openbotx.providers.litellm_provider import LiteLLMProvider
 from openbotx.server.auth import AuthMiddleware
 from openbotx.server.websocket import WebSocketManager, websocket_endpoint
@@ -83,75 +83,42 @@ class ServerFactory:
     def create_orchestrator(
         self,
         bus: MessageBus,
-        public_dir: Path,
+        project_ctx: ProjectContext,
         dispatcher: EventDispatcher,
         task_manager: TaskManager,
         session_manager: SessionManager,
         skills_loader: SkillsLoader,
         cron_service: CronService,
-        storage,
-        public_url: str,
     ) -> Orchestrator:
         agent_loops: dict[str, AgentLoop] = {}
         default_agent_name = next(iter(self._config.agents))
 
         for name, agent_cfg in self._config.agents.items():
+            agent_cfg.name = name
             provider = self.create_provider(agent_cfg.model)
 
             agent_workspace = agent_cfg.resolve_workspace(self._project_path)
             agent_workspace.mkdir(parents=True, exist_ok=True)
 
-            allowed_dirs = (
-                [agent_workspace, public_dir]
-                if self._config.tools.general.restrict_to_workspace
-                else None
-            )
-            resolver = PathResolver(workspace=agent_workspace, allowed_dirs=allowed_dirs)
-
             subagent_mgr = SubagentManager(
                 provider=provider,
-                workspace=agent_workspace,
-                resolver=resolver,
-                public_dir=public_dir,
+                agent_cfg=agent_cfg,
+                project_ctx=project_ctx,
                 bus=bus,
                 task_manager=task_manager,
-                model=agent_cfg.model,
-                brave_api_key=self._config.tools.web_search.api_key,
-                web_search_max_results=self._config.tools.web_search.max_results,
-                exec_timeout=self._config.tools.exec.timeout,
-                image_config=self._config.image,
-                auth_profiles=self._config.tools.http_client.auth_profiles,
-                storage=storage,
             )
 
             loop = AgentLoop(
+                agent_cfg=agent_cfg,
+                project_ctx=project_ctx,
                 bus=bus,
                 provider=provider,
-                project_path=self._project_path,
-                workspace=agent_workspace,
-                resolver=resolver,
-                public_dir=public_dir,
                 dispatcher=dispatcher,
                 task_manager=task_manager,
                 session_manager=session_manager,
                 skills_loader=skills_loader,
                 subagent_manager=subagent_mgr,
                 cron_service=cron_service,
-                model=agent_cfg.model,
-                max_iterations=agent_cfg.agent_params.max_iterations,
-                temperature=agent_cfg.model_params.temperature,
-                max_tokens=agent_cfg.model_params.max_tokens,
-                memory_window=agent_cfg.agent_params.memory_window,
-                brave_api_key=self._config.tools.web_search.api_key,
-                web_search_max_results=self._config.tools.web_search.max_results,
-                exec_timeout=self._config.tools.exec.timeout,
-                image_config=self._config.image,
-                auth_profiles=self._config.tools.http_client.auth_profiles,
-                storage=storage,
-                public_url=public_url,
-                agent_name=name,
-                agent_instructions=agent_cfg.instructions,
-                agent_tools=agent_cfg.tools or None,
             )
             agent_loops[name] = loop
 
@@ -235,16 +202,23 @@ async def lifespan(app: FastAPI):
     public_url = config.server.public_url or f"http://localhost:{config.server.port}"
     storage = factory.create_storage(public_url)
 
+    project_ctx = ProjectContext(
+        project_path=project_path,
+        public_dir=public_dir,
+        public_url=public_url,
+        tools=config.tools,
+        image=config.image,
+        storage=storage,
+    )
+
     orchestrator = factory.create_orchestrator(
         bus=bus,
-        public_dir=public_dir,
+        project_ctx=project_ctx,
         dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,
         skills_loader=skills_loader,
         cron_service=cron_service,
-        storage=storage,
-        public_url=public_url,
     )
 
     channel_manager = ChannelManager(

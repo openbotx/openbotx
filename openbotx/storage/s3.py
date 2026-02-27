@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import base64
 
@@ -50,7 +48,7 @@ class S3Storage(StorageProvider):
         except Exception:
             return False
 
-    async def list_dir(self, path: str = "") -> list[DirEntry]:
+    async def list_dir(self, path: str = "") -> "list[DirEntry]":
         prefix = f"{path}/" if path and not path.endswith("/") else path
         entries: list[DirEntry] = []
         continuation_token = None

@@ -130,7 +130,7 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `create_provider(model)` | Resolves the model to a provider config and creates a `LiteLLMProvider`.            |
 | `create_storage(url)`   | Creates `S3Storage` or `LocalStorage` based on the config.                           |
 | `create_cron_callback(bus)` | Returns a callback that publishes `InboundMessage` to the bus when a cron job fires. |
-| `create_orchestrator(...)` | Builds all `AgentLoop` instances (one per agent), creates `SubagentManager`s, `PathResolver`s, and the `AgentClassifier`. Returns an `Orchestrator` that routes messages. |
+| `create_orchestrator(...)` | Receives a `ProjectContext` (shared across all agents). Builds all `AgentLoop` instances (one per agent), creates `SubagentManager`s, and the `AgentClassifier`. Each agent gets its `PathResolver` created internally by `build_registry()` via `ProjectContext.create_resolver()`. Returns an `Orchestrator` that routes messages. |
 | `setup_logging(path)`   | Configures rotating file handler + console handler for the `openbotx` logger.        |
 
 The built web client (`openbotx/webclient/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles). The build output lives inside the Python package so it is included in the `.whl` distribution — users who install via `pip install openbotx` get the web UI out of the box.
@@ -161,11 +161,11 @@ The agent subsystem is the intelligence layer of the platform.
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | `orchestrator.py` | `Orchestrator` -- consumes inbound messages from the bus, routes them to the appropriate agent via `AgentClassifier` (or directly to the default agent when only one exists), and delegates processing to the selected `AgentLoop`. |
 | `classifier.py`   | `AgentClassifier` -- LLM-based message classifier. Analyzes the user's message and recent conversation history to select the best agent using a `route` tool call. Falls back to the first agent on error. Only instantiated when multiple agents are configured. |
-| `loop.py`         | `AgentLoop` -- the main agentic loop. Consumes inbound messages, builds context, calls the LLM, executes tool calls, and repeats until a plain text response is returned or `max_iterations` (default: 40) is reached. Streams `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events via the EventDispatcher. Broadcasts `sessions:updated` after saving each conversation turn. Each agent has its own `AgentLoop` instance with its own `PathResolver`, workspace, model, and tool registry. |
+| `loop.py`         | `AgentLoop` -- the main agentic loop. Receives an `AgentConfig` (model, params, instructions, tools) and a `ProjectContext` (project paths, tool configs, storage). Builds context, calls the LLM, executes tool calls, and repeats until a plain text response is returned or `agent_params.max_iterations` (default: 40) is reached. Streams `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events via the EventDispatcher. Broadcasts `sessions:updated` after saving each conversation turn. Tool registration is delegated to `build_registry()` in `tools/registry.py`. |
 | `context.py`      | `ContextBuilder` -- assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL (when configured), and agent-specific instructions. Provides the directory context (workspace and public paths) and static helpers for building OpenAI-compatible message arrays with multimodal support (text + images). `add_tool_result()` appends tool results to messages without truncation — each tool manages its own output limits internally. |
 | `memory.py`       | `MemoryStore` -- reads/writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Auto-creates the `memory/` directory on initialization. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages (tool calls and tool results are excluded). |
 | `skills.py`       | `SkillsLoader` -- discovers SKILL.md files from both built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with a `source` field (`"builtin"` or `"project"`) and a `location` field (absolute path to the SKILL.md file, included in the skills summary XML so the LLM can read the file if needed). Skills marked `always: true` are injected into every system prompt, but only if their requirements are satisfied. Provides `load_skill_raw()` for the REST API (returns raw content with frontmatter + source) and `save_skill()` for updating project skills (validates source is not builtin). |
-| `subagent.py`     | `SubagentManager` -- spawns independent background agent loops for delegated tasks. Subagents run with a focused tool set (no `message`, `spawn`, `cron`, or memory tools), a lower iteration cap (15), and hardcoded `max_tokens=4096`, `temperature=0.1`. Their system prompt includes workspace and public directory absolute paths. They share the same `PathResolver` as the parent agent. Tool results are truncated to 500 characters inline (not via ContextBuilder). On completion, they announce results back to the main agent via the inbound queue with `system_message: true` metadata. |
+| `subagent.py`     | `SubagentManager` -- spawns independent background agent loops for delegated tasks. Receives `AgentConfig` + `ProjectContext` and uses `build_registry()` for tool setup (no `message`, `spawn`, `cron`, or memory tools). Subagents run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. Tool results are truncated to 500 characters. On completion, they announce results back to the main agent via the inbound queue with `system_message: true` metadata. |
 
 **Multi-agent orchestration:**
 
@@ -542,13 +542,13 @@ The FastAPI lifespan context manager in `app.py` orchestrates the full startup s
    g. Create public directory structure (public/media/, public/documents/)
    h. Create Storage backend (local or S3)
    i. Orchestrator (via ServerFactory.create_orchestrator):
+      - Create ProjectContext (project paths, tool configs, storage) — shared across all agents
       - For each agent in config:
         1. Create LiteLLMProvider for the agent's model
         2. Resolve agent workspace path (AgentConfig.resolve_workspace)
         3. Create workspace directory
-        4. Create PathResolver with allowed_dirs = [workspace, public_dir]
-        5. Create SubagentManager with PathResolver
-        6. Create AgentLoop with PathResolver, tools, and per-agent config
+        4. Create SubagentManager with AgentConfig + ProjectContext
+        5. Create AgentLoop with AgentConfig + ProjectContext (tool registration via build_registry())
       - If multiple agents: create AgentClassifier
       - Return Orchestrator wrapping all agents
    j. ChannelManager (initializes Telegram if enabled)

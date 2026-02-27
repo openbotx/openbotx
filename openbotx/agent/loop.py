@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path
@@ -12,30 +10,16 @@ from openbotx.agent.subagent import SubagentManager
 from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.bus.events import InboundMessage, OutboundMessage
 from openbotx.bus.queue import MessageBus
+from openbotx.config.project import ProjectContext
+from openbotx.config.schema import AgentConfig
 from openbotx.cron.service import CronService
-from openbotx.helpers.path import PathResolver
 from openbotx.helpers.text import describe_tool_use, humanize
 from openbotx.providers.base import LLMProvider
 from openbotx.session.manager import SessionManager
 from openbotx.tasks.manager import TaskManager
 from openbotx.tasks.models import TaskState
-from openbotx.tools.browser import BrowserTool
-from openbotx.tools.cron import CronTool
-from openbotx.tools.filesystem import (
-    EditFileTool,
-    ListDirTool,
-    ReadFileTool,
-    WriteFileTool,
-)
-from openbotx.tools.http_client import HttpClientTool
-from openbotx.tools.image import ImageGenerationTool
-from openbotx.tools.memory_tool import MemoryReadTool, MemorySaveTool, MemorySearchTool
-from openbotx.tools.message import MessageTool
-from openbotx.tools.registry import ToolRegistry
-from openbotx.tools.rss import RssReaderTool
-from openbotx.tools.shell import ExecTool
-from openbotx.tools.spawn import SpawnTool
-from openbotx.tools.web import WebFetchTool, WebSearchTool
+from openbotx.tools.memory_tool import MemorySaveTool
+from openbotx.tools.registry import ToolRegistry, build_registry
 
 logger = logging.getLogger(__name__)
 
@@ -47,129 +31,56 @@ class AgentLoop:
 
     def __init__(
         self,
+        agent_cfg: AgentConfig,
+        project_ctx: ProjectContext,
         bus: MessageBus,
         provider: LLMProvider,
-        project_path: Path,
-        workspace: Path,
-        resolver: PathResolver,
-        public_dir: Path,
         dispatcher: EventDispatcher | None,
         task_manager: TaskManager,
         session_manager: SessionManager,
         skills_loader: SkillsLoader,
         subagent_manager: SubagentManager,
         cron_service: CronService | None,
-        model: str,
-        max_iterations: int = 40,
-        temperature: float = 0.1,
-        max_tokens: int = 8192,
-        memory_window: int = 100,
-        brave_api_key: str = "",
-        web_search_max_results: int = 5,
-        exec_timeout: int = 60,
-        image_config=None,
-        auth_profiles=None,
-        storage=None,
-        public_url: str = "",
-        agent_name: str = "main",
-        agent_instructions: str = "",
-        agent_tools: list[str] | None = None,
     ):
+        self._agent_cfg = agent_cfg
+        self._project_ctx = project_ctx
         self._bus = bus
         self._provider = provider
-        self._project_path = project_path
-        self._workspace = workspace
-        self._resolver = resolver
-        self._public_dir = public_dir
-        self._storage = storage
         self._dispatcher = dispatcher
         self._task_manager = task_manager
         self._session_manager = session_manager
-        self._skills_loader = skills_loader
-        self._subagent_manager = subagent_manager
-        self._cron_service = cron_service
-        self._model = model
-        self._max_iterations = max_iterations
-        self._temperature = temperature
-        self._max_tokens = max_tokens
-        self._memory_window = memory_window
-        self._brave_api_key = brave_api_key
-        self._web_search_max_results = web_search_max_results
-        self._exec_timeout = exec_timeout
-        self._image_config = image_config
-        self._auth_profiles = auth_profiles or {}
-        self._agent_name = agent_name
-        self._agent_instructions = agent_instructions
-        self._agent_tools = agent_tools
+
+        workspace = agent_cfg.resolve_workspace(project_ctx.project_path)
+        self._workspace = workspace
 
         self._memory = MemoryStore(workspace)
         self._context_builder = ContextBuilder(
+            project_ctx=project_ctx,
             workspace=workspace,
-            public_dir=public_dir,
-            project_path=project_path,
             memory=self._memory,
             skills_loader=skills_loader,
-            public_url=public_url,
         )
-        self._registry = ToolRegistry()
 
-        self._message_tool: MessageTool | None = None
-        self._spawn_tool: SpawnTool | None = None
-        self._cron_tool: CronTool | None = None
-
-        self._register_tools()
+        result = build_registry(
+            agent_cfg=agent_cfg,
+            project_ctx=project_ctx,
+            bus=bus,
+            subagent_manager=subagent_manager,
+            cron_service=cron_service,
+            memory_store=self._memory,
+        )
+        self._registry = result.registry
+        self._message_tool = result.message_tool
+        self._spawn_tool = result.spawn_tool
+        self._cron_tool = result.cron_tool
 
     @property
     def name(self) -> str:
-        return self._agent_name
+        return self._agent_cfg.name
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """Return tool definitions from the registry."""
         return self._registry.get_definitions()
-
-    def _register_tools(self) -> None:
-        whitelist = set(self._agent_tools) if self._agent_tools else None
-
-        def _register(tool):
-            if whitelist and tool.name not in whitelist:
-                return
-            self._registry.register(tool)
-
-        _register(ReadFileTool(self._resolver))
-        _register(WriteFileTool(self._resolver))
-        _register(EditFileTool(self._resolver))
-        _register(ListDirTool(self._resolver))
-        _register(
-            ExecTool(
-                timeout=self._exec_timeout,
-                working_dir=str(self._workspace),
-                restrict_to_workspace=self._resolver.is_restricted,
-            )
-        )
-        _register(
-            WebSearchTool(api_key=self._brave_api_key, max_results=self._web_search_max_results)
-        )
-        _register(WebFetchTool())
-
-        self._message_tool = MessageTool(send_callback=self._bus.publish_outbound)
-        _register(self._message_tool)
-
-        self._spawn_tool = SpawnTool(manager=self._subagent_manager)
-        _register(self._spawn_tool)
-
-        if self._cron_service:
-            self._cron_tool = CronTool(cron_service=self._cron_service)
-            _register(self._cron_tool)
-
-        _register(MemorySaveTool(memory_store=self._memory))
-        _register(MemoryReadTool(memory_store=self._memory))
-        _register(MemorySearchTool(memory_store=self._memory))
-        _register(BrowserTool())
-        _register(HttpClientTool(self._resolver, auth_profiles=self._auth_profiles))
-        _register(RssReaderTool())
-
-        if self._image_config and self._image_config.provider.api_key and self._storage:
-            _register(ImageGenerationTool(config=self._image_config, storage=self._storage))
 
     async def stop(self) -> None:
         browser_tool = self._registry.get("browser")
@@ -177,7 +88,7 @@ class AgentLoop:
             await browser_tool.cleanup()
 
     async def process_message(self, msg: InboundMessage, agent_name: str = "") -> None:
-        effective_name = agent_name or self._agent_name
+        effective_name = agent_name or self._agent_cfg.name
         task_id = msg.metadata.get("task_id")
         task = None
 
@@ -272,7 +183,7 @@ class AgentLoop:
 
         system_prompt = self._context_builder.build_system_prompt(
             agent_name=effective_name,
-            agent_instructions=self._agent_instructions,
+            agent_instructions=self._agent_cfg.instructions,
         )
         history = session.get_history()
         messages = ContextBuilder.build_messages(system_prompt, history, content, media=media_urls)
@@ -330,13 +241,15 @@ class AgentLoop:
         agent_name: str = "",
         session: Any = None,
     ) -> str:
-        for iteration in range(self._max_iterations):
+        max_iterations = self._agent_cfg.agent_params.max_iterations
+
+        for iteration in range(max_iterations):
             response = await self._provider.chat(
                 messages=messages,
                 tools=self._registry.get_definitions(),
-                model=self._model,
-                max_tokens=self._max_tokens,
-                temperature=self._temperature,
+                model=self._agent_cfg.model,
+                max_tokens=self._agent_cfg.model_params.max_tokens,
+                temperature=self._agent_cfg.model_params.temperature,
             )
 
             if response.reasoning_content and self._dispatcher:
@@ -399,14 +312,15 @@ class AgentLoop:
             else:
                 return response.content or ""
 
-        logger.warning("agent loop hit max iterations (%d)", self._max_iterations)
+        logger.warning("agent loop hit max iterations (%d)", max_iterations)
         return "I've reached my processing limit. Please try again or simplify your request."
 
     async def _check_consolidation(self, session: Any) -> None:
         total = len(session.messages)
         unconsolidated = total - session.last_consolidated
+        memory_window = self._agent_cfg.agent_params.memory_window
 
-        if unconsolidated < self._memory_window:
+        if unconsolidated < memory_window:
             return
 
         logger.info(
@@ -415,9 +329,7 @@ class AgentLoop:
             unconsolidated,
         )
 
-        consolidation_messages = self._memory.get_consolidation_messages(
-            session, self._memory_window
-        )
+        consolidation_messages = self._memory.get_consolidation_messages(session, memory_window)
         if not consolidation_messages:
             return
 
@@ -430,7 +342,7 @@ class AgentLoop:
                 response = await self._provider.chat(
                     messages=consolidation_messages,
                     tools=consolidation_registry.get_definitions(),
-                    model=self._model,
+                    model=self._agent_cfg.model,
                     max_tokens=4096,
                     temperature=0.1,
                 )
@@ -484,20 +396,18 @@ class AgentLoop:
     _AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a", ".webm", ".aac", ".flac"}
 
     async def _resolve_media(self, paths: list[str]) -> tuple[str, list[str]]:
-        """Resolve media paths: transcribe audio, convert images to data URIs.
-
-        Returns (transcription_text, image_data_uris).
-        """
+        """Resolve media paths: transcribe audio, convert images to data URIs."""
         transcriptions: list[str] = []
         image_uris: list[str] = []
+        storage = self._project_ctx.storage
 
         for path in paths:
             ext = Path(path).suffix.lower()
 
             if ext in self._AUDIO_EXTENSIONS:
-                if self._storage:
+                if storage:
                     try:
-                        data = await self._storage.read(path)
+                        data = await storage.read(path)
                         from openbotx.helpers.transcription import transcribe
 
                         text = transcribe(data)
@@ -507,7 +417,7 @@ class AgentLoop:
                         logger.warning("audio transcription failed for %s: %s", path, e)
             elif path.startswith("data:"):
                 image_uris.append(path)
-            elif self._storage:
-                image_uris.append(self._storage.get_data_uri(path))
+            elif storage:
+                image_uris.append(storage.get_data_uri(path))
 
         return "\n".join(transcriptions), image_uris

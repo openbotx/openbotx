@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import shutil
 from pathlib import Path
@@ -46,7 +44,7 @@ class LocalStorage(StorageProvider):
     async def exists(self, path: str) -> bool:
         return self._resolve(path).exists()
 
-    async def list_dir(self, path: str = "") -> list[DirEntry]:
+    async def list_dir(self, path: str = "") -> "list[DirEntry]":
         base = self._resolve(path) if path else self.base_path
         if not base.is_dir():
             return []

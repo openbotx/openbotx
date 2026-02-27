@@ -178,6 +178,9 @@ async function toggleTelegram(running) {
       await channelsStore.stopChannel('telegram')
       toast.add({ severity: 'success', summary: 'Stopped', detail: 'Telegram channel stopped', life: 2000 })
     } else {
+      if (telegramToken.value || telegramUsers.value) {
+        await saveTelegram()
+      }
       await channelsStore.startChannel('telegram')
       toast.add({ severity: 'success', summary: 'Started', detail: 'Telegram channel started', life: 2000 })
     }

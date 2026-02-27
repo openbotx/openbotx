@@ -1,9 +1,18 @@
-from __future__ import annotations
+from typing import Any, Protocol
 
-from typing import Any
-
-from openbotx.agent.subagent import SubagentManager
 from openbotx.tools.base import Tool
+
+
+class SpawnManager(Protocol):
+    async def spawn(
+        self,
+        task: str,
+        label: str | None = None,
+        origin_channel: str = "web",
+        origin_chat_id: str = "direct",
+        parent_task_id: str | None = None,
+        agent_name: str = "",
+    ) -> str: ...
 
 
 class SpawnTool(Tool):
@@ -29,7 +38,7 @@ class SpawnTool(Tool):
         "required": ["task"],
     }
 
-    def __init__(self, manager: SubagentManager):
+    def __init__(self, manager: SpawnManager):
         self._manager = manager
         self._origin_channel = "web"
         self._origin_chat_id = "direct"

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 MASKED_VALUE = "***"
 
 _SENSITIVE_SUFFIXES = ("_key", "_secret", "_token", "_password")

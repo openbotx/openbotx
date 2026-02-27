@@ -215,6 +215,7 @@ async def restart_services(request: Request):
         except Exception as e:
             logger.warning("Error stopping %s: %s", name, e)
 
+    from openbotx.config.project import ProjectContext
     from openbotx.server.app import ServerFactory
 
     factory = ServerFactory(config)
@@ -227,6 +228,15 @@ async def restart_services(request: Request):
 
     storage = factory.create_storage(public_url)
     app.state.storage = storage
+
+    project_ctx = ProjectContext(
+        project_path=config.project_path,
+        public_dir=public_dir,
+        public_url=public_url,
+        tools=config.tools,
+        image=config.image,
+        storage=storage,
+    )
 
     bus = app.state.bus
     dispatcher = app.state.dispatcher
@@ -242,14 +252,12 @@ async def restart_services(request: Request):
 
     orchestrator = factory.create_orchestrator(
         bus=bus,
-        public_dir=public_dir,
+        project_ctx=project_ctx,
         dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,
         skills_loader=skills_loader,
         cron_service=cron_service,
-        storage=storage,
-        public_url=public_url,
     )
     app.state.orchestrator = orchestrator
     asyncio.create_task(orchestrator.run())

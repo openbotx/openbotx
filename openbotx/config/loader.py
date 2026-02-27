@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 from pathlib import Path
@@ -7,15 +8,22 @@ from dotenv import load_dotenv
 
 from openbotx.config.schema import Config
 
+logger = logging.getLogger(__name__)
+
 
 def _expand_env_vars(data):
     """Recursively expand ${VAR} patterns in config values."""
     if isinstance(data, str):
-        return re.sub(
-            r"\$\{([^}]+)\}",
-            lambda m: os.environ.get(m.group(1), m.group(0)),
-            data,
-        )
+
+        def _replace(m: re.Match) -> str:
+            name = m.group(1)
+            value = os.environ.get(name)
+            if value is None:
+                logger.warning("env var %s is not set, using empty string", name)
+                return ""
+            return value
+
+        return re.sub(r"\$\{([^}]+)\}", _replace, data)
     if isinstance(data, dict):
         return {k: _expand_env_vars(v) for k, v in data.items()}
     if isinstance(data, list):
