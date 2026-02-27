@@ -153,10 +153,14 @@ def _update_agents(config, data):
             agent = AgentConfig()
 
         for key, value in agent_data.items():
-            if key == "params" and isinstance(value, dict):
+            if key == "model_params" and isinstance(value, dict):
                 for pk, pv in value.items():
-                    if hasattr(agent.params, pk):
-                        setattr(agent.params, pk, pv)
+                    if hasattr(agent.model_params, pk):
+                        setattr(agent.model_params, pk, pv)
+            elif key == "agent_params" and isinstance(value, dict):
+                for pk, pv in value.items():
+                    if hasattr(agent.agent_params, pk):
+                        setattr(agent.agent_params, pk, pv)
             elif hasattr(agent, key):
                 setattr(agent, key, value)
 

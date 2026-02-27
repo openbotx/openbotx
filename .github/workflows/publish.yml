@@ -1,30 +1,21 @@
-name: Build
+name: Publish
 
 on:
   push:
-    paths-ignore:
-      - 'docs/**'
-      - 'extras/**'
-      - '*.md'
-      - 'LICENSE'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - 'extras/**'
-      - '*.md'
-      - 'LICENSE'
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
           sed -i "s/0.0.0-dev/$VERSION/" openbotx/version.py
           sed -i "s/0.0.0-dev/$VERSION/" webclient/package.json
 
@@ -48,12 +39,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install openbotx
-        run: pip install .
+      - name: Install build tools
+        run: pip install build twine
 
-      - name: Verify install
-        run: |
-          python -c "from openbotx.version import __version__; print(f'openbotx v{__version__}')"
-          python -c "from openbotx.config.schema import Config; print('config ok')"
-          python -c "from openbotx.tools.registry import ToolRegistry; print('tools ok')"
-          python -c "from openbotx.server.app import create_app; print('server ok')"
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload dist/*

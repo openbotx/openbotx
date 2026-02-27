@@ -366,7 +366,7 @@ Key configuration sections:
 | ------------ | ------------------------------------------------------------ |
 | `bot`        | Name and description                                         |
 | `server`     | Host, port, and public URL                                   |
-| `agents`     | Named agent configs (model, workspace, description, instructions, tools, params) |
+| `agents`     | Named agent configs (model, workspace, description, instructions, tools, model_params, agent_params) |
 | `auth`       | Username, password, JWT secret                               |
 | `providers`  | API keys, base URLs, headers, and options per provider       |
 | `channels`   | Telegram settings, progress/tool hint broadcasting           |

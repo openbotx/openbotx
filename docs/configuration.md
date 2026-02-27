@@ -66,9 +66,10 @@ agents:
     description: ""               # str  -- Short description of this agent's purpose. Used by the AgentClassifier to route messages when multiple agents are configured.
     instructions: ""              # str  -- Agent-specific instructions appended to the system prompt as a dedicated section. Use for behavioral rules, domain expertise, or role-specific guidelines.
     tools: []                     # list[str] -- Whitelist of tool names available to this agent. When empty (default), all tools are registered. When set, only tools whose name appears in this list are available.
-    params:
+    model_params:
       max_tokens: 8192            # int  -- Maximum tokens in the model response.
       temperature: 0.1            # float -- Sampling temperature (0.0 = deterministic, higher = more creative).
+    agent_params:
       max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
       memory_window: 100          # int  -- Number of recent messages to keep in context before triggering consolidation.
 
@@ -260,7 +261,7 @@ providers:
 agents:
   main:
     model: "anthropic/claude-sonnet-4-20250514"
-    params:
+    model_params:
       max_tokens: 4096
       temperature: 0.2
 
@@ -281,7 +282,7 @@ providers:
 agents:
   main:
     model: "openrouter/anthropic/claude-sonnet-4-20250514"
-    params:
+    model_params:
       max_tokens: 8192
       temperature: 0.1
 ```
@@ -305,9 +306,10 @@ agents:
     model: "anthropic/claude-sonnet-4-20250514"
     description: "General-purpose assistant for everyday tasks"
     instructions: "You are a helpful general assistant. Route specialized requests to appropriate agents."
-    params:
+    model_params:
       max_tokens: 8192
       temperature: 0.1
+    agent_params:
       max_iterations: 40
       memory_window: 100
 
@@ -317,9 +319,10 @@ agents:
     description: "Research specialist for deep analysis and information gathering"
     instructions: "Focus on thorough research. Cite sources when possible. Save findings to reports."
     tools: [read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, http_client, rss_reader, browser, message, memory_save, memory_read, memory_search]
-    params:
+    model_params:
       max_tokens: 4096
       temperature: 0.3
+    agent_params:
       max_iterations: 20
       memory_window: 50
 
@@ -329,9 +332,10 @@ agents:
     description: "Code specialist for programming tasks"
     instructions: "Write clean, well-structured code. Always test your changes."
     tools: [read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, message]
-    params:
+    model_params:
       max_tokens: 16384
       temperature: 0.0
+    agent_params:
       max_iterations: 60
       memory_window: 80
 

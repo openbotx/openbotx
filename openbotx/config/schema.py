@@ -17,6 +17,9 @@ class ServerConfig(BaseModel):
 class ModelParams(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.1
+
+
+class AgentParams(BaseModel):
     max_iterations: int = 40
     memory_window: int = 100
 
@@ -27,7 +30,8 @@ class AgentConfig(BaseModel):
     description: str = ""
     instructions: str = ""
     tools: list[str] = Field(default_factory=list)
-    params: ModelParams = Field(default_factory=ModelParams)
+    model_params: ModelParams = Field(default_factory=ModelParams)
+    agent_params: AgentParams = Field(default_factory=AgentParams)
 
     @field_validator("workspace", mode="before")
     @classmethod

@@ -134,9 +134,8 @@ providers:
 | Server | `host: 0.0.0.0`, `port: 8000`, `public_url: ""` |
 | Authentication | `username: admin`, `password: admin` |
 | Model | `anthropic/claude-sonnet-4-20250514` |
-| Model params | `max_tokens: 8192`, `temperature: 0.1` |
-| Max iterations | `max_iterations: 40` |
-| Memory window | `memory_window: 100` |
+| Model params | `model_params.max_tokens: 8192`, `model_params.temperature: 0.1` |
+| Agent params | `agent_params.max_iterations: 40`, `agent_params.memory_window: 100` |
 | Shell timeout | `exec.timeout: 60` seconds |
 | Workspace restriction | `general.restrict_to_workspace: true` |
 | WebSocket progress | `send_progress: true` |
@@ -757,7 +756,7 @@ For models that don't support extended thinking, `reasoning_content` is simply `
 
 ### Iteration Limit
 
-The loop has a maximum iteration limit (default: **40**, configurable via `params.max_iterations`). If the agent hits this limit without reaching a final response, it returns:
+The loop has a maximum iteration limit (default: **40**, configurable via `agent_params.max_iterations`). If the agent hits this limit without reaching a final response, it returns:
 
 ```
 "I've reached my processing limit. Please try again or simplify your request."
