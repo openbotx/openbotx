@@ -143,7 +143,6 @@ class ChromeLauncher(BrowserLauncher):
                 if self._window_width is not None and self._window_height is not None
                 else "--start-maximized"
             ),
-            f"--user-data-dir={self._profile}" if self._profile is not None else "",
             "--no-first-run",
             "--no-service-autorun",
             "--no-default-browser-check",
@@ -159,6 +158,8 @@ class ChromeLauncher(BrowserLauncher):
             "--disable-background-networking",
             "--disable-dev-shm-usage",
         ]
+        if self._profile is not None:
+            cmd.append(f"--user-data-dir={self._profile}")
         if os.name == "posix":
             cmd.append("--enable-logging")
             cmd.append("--v=2")

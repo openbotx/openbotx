@@ -127,9 +127,8 @@ openbotx/
 │   ├── message.py          # message (send to user, rate-limited per turn)
 │   ├── spawn.py            # spawn (create subagent)
 │   ├── cron.py             # cron (add/list/remove scheduled jobs)
-│   ├── memory_tool.py      # save_memory (write to MEMORY.md/HISTORY.md)
-│   ├── image.py            # image_generation (configurable provider)
-│   └── twitter.py          # twitter_post (OAuth 1.0a)
+│   ├── memory_tool.py      # memory_save, memory_read, memory_search
+│   └── image.py            # generate_image (configurable provider)
 │
 ├── channels/               # Communication channels
 │   ├── base.py             # BaseChannel interface
@@ -166,7 +165,9 @@ openbotx/
 │
 ├── helpers/
 │   ├── path.py             # PathResolver: workspace-scoped path resolution
+│   ├── oauth.py            # OAuth 1.0a signature generation (HMAC-SHA1)
 │   ├── text.py             # humanize(), describe_tool_use()
+│   ├── config.py           # Configuration helper utilities
 │   └── transcription.py    # Audio transcription (faster-whisper)
 │
 ├── skills/                 # Built-in SKILL.md files (one folder per skill)
@@ -245,5 +246,5 @@ Each agent in `agents` has: `model`, `workspace`, `description`, `instructions`,
 - Bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`) live at the project root and are injected into every system prompt. They are read on every message (changes take effect immediately).
 - Skills are `SKILL.md` files with YAML frontmatter in `openbotx/skills/` (builtin) or `workspace/skills/` (project). Project skills override builtin ones with the same name.
 - Memory files (`MEMORY.md`, `HISTORY.md`) live in `workspace/memory/`. `MEMORY.md` is included in the system prompt. `HISTORY.md` is append-only archival.
-- All media goes to `public/media/YYYY/MM/DD/` via `PathResolver.media_path()`.
+- All media goes to `public/media/YYYY/MM/DD/` via `media_path()` from `openbotx/helpers/path.py`.
 - The built web client is packaged inside `openbotx/webclient/` in the Python distribution. Served as SPA at `/app/` with catch-all fallback.

@@ -137,11 +137,18 @@ tools:
   web_search:
     api_key: ""                   # str  -- Brave Search API key for the web search tool.
     max_results: 5                # int  -- Maximum number of search results to return per query.
-  twitter:
-    consumer_key: ""              # str  -- Twitter/X consumer key.
-    consumer_secret: ""           # str  -- Twitter/X consumer secret.
-    access_token: ""              # str  -- Twitter/X OAuth access token.
-    access_token_secret: ""       # str  -- Twitter/X OAuth access token secret.
+  http_client:
+    auth_profiles:                # dict -- Named authentication profiles for http_client.
+      # Example:
+      # twitter:
+      #   type: oauth1
+      #   consumer_key: ${TWITTER_CONSUMER_KEY}
+      #   consumer_secret: ${TWITTER_CONSUMER_SECRET}
+      #   access_token: ${TWITTER_ACCESS_TOKEN}
+      #   access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
+      # my_api:
+      #   type: bearer
+      #   token: ${MY_API_TOKEN}
 
 # ---------------------------------------------------------------------------
 # Storage
@@ -203,7 +210,7 @@ When `restrict_to_workspace` is `false`, all filesystem paths are accessible wit
 
 The `tools` field accepts a list of tool names. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
 
-Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `save_memory`, `image_generation`, `twitter_post`.
+Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `memory_save`, `memory_read`, `memory_search`, `generate_image`.
 
 ### Agent Instructions
 
@@ -309,7 +316,7 @@ agents:
     model: "openai/gpt-4o"
     description: "Research specialist for deep analysis and information gathering"
     instructions: "Focus on thorough research. Cite sources when possible. Save findings to reports."
-    tools: [read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, http_client, rss_reader, browser, message, save_memory]
+    tools: [read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, http_client, rss_reader, browser, message, memory_save, memory_read, memory_search]
     params:
       max_tokens: 4096
       temperature: 0.3
@@ -407,11 +414,14 @@ channels:
 tools:
   web_search:
     api_key: ${BRAVE_SEARCH_API_KEY}
-  twitter:
-    consumer_key: ${TWITTER_CONSUMER_KEY}
-    consumer_secret: ${TWITTER_CONSUMER_SECRET}
-    access_token: ${TWITTER_ACCESS_TOKEN}
-    access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
+  http_client:
+    auth_profiles:
+      twitter:
+        type: oauth1
+        consumer_key: ${TWITTER_CONSUMER_KEY}
+        consumer_secret: ${TWITTER_CONSUMER_SECRET}
+        access_token: ${TWITTER_ACCESS_TOKEN}
+        access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
 
 storage:
   type: "s3"

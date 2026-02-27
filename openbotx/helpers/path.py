@@ -12,8 +12,8 @@ class PathResolver:
     """Resolves paths against a workspace with directory restriction enforcement."""
 
     def __init__(self, workspace: Path | None = None, allowed_dirs: list[Path] | None = None):
-        self._workspace = workspace
-        self._allowed_dirs = allowed_dirs
+        self._workspace = workspace.resolve() if workspace else None
+        self._allowed_dirs = [d.resolve() for d in allowed_dirs] if allowed_dirs else None
 
     @property
     def workspace(self) -> Path | None:
@@ -31,7 +31,7 @@ class PathResolver:
         if self._allowed_dirs:
             for allowed in self._allowed_dirs:
                 try:
-                    resolved.relative_to(allowed.resolve())
+                    resolved.relative_to(allowed)
                     return resolved
                 except ValueError:
                     continue

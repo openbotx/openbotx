@@ -59,7 +59,7 @@ Each agent can optionally define a `tools` list in its configuration. When set, 
 ```yaml
 agents:
   crypto:
-    tools: [read_file, write_file, exec, web_search, web_fetch, http_client, rss_reader, browser, message, spawn, cron, save_memory]
+    tools: [read_file, write_file, exec, web_search, web_fetch, http_client, rss_reader, browser, message, spawn, cron, memory_save, memory_read, memory_search]
 ```
 
 ---
@@ -142,6 +142,7 @@ Search the web using the Brave Search API.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | Yes | The search query. |
+| `count` | integer | No | Number of results to return (1-10). |
 
 Requires the Brave Search API key to be configured (`tools.web_search.api_key` in `config.yml`).
 
@@ -152,6 +153,7 @@ Fetch and extract content from a URL.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `url` | string | Yes | The URL to fetch. |
+| `max_chars` | integer | No | Max characters to return (minimum: 100, default: 50000). |
 
 Uses `readability-lxml` for content extraction.
 
@@ -184,7 +186,7 @@ Launch a subagent for independent background tasks.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `task` | string | Yes | Description of the task for the subagent. |
-| `context` | string | Yes | Additional context for the subagent. |
+| `label` | string | No | Optional short label for the task. |
 
 Only available to the main agent. Creates a child task on the task board.
 
@@ -201,9 +203,12 @@ Schedule reminders and recurring tasks.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `action` | string | Yes | One of `add`, `list`, or `remove`. |
-| `name` | string | Yes | Unique name for the scheduled task. |
-| `message` | string | Yes | The message or task description. |
-| schedule params | various | Conditional | Schedule parameters (depends on action). |
+| `message` | string | Conditional | The message or task description (required for `add`). |
+| `every_seconds` | integer | Conditional | Interval in seconds for recurring tasks. |
+| `cron_expr` | string | Conditional | Cron expression (e.g. `0 9 * * *`). |
+| `tz` | string | No | IANA timezone for cron expressions. |
+| `at` | string | Conditional | ISO datetime for one-time execution. |
+| `job_id` | string | Conditional | Job ID (required for `remove`). |
 
 Only available to the main agent.
 
@@ -213,16 +218,33 @@ Only available to the main agent.
 
 **Source:** `openbotx/tools/memory_tool.py`
 
-#### save_memory
+#### memory_save
 
-Persist important facts or conversation summaries.
+Save conversation history and updated long-term memory. Used during memory consolidation.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `key` | string | Yes | A unique key for the memory entry. |
-| `content` | string | Yes | The content to persist. |
+| `history_entry` | string | Yes | Summary of recent conversation for HISTORY.md. |
+| `updated_memory` | string | Yes | Updated long-term memory content for MEMORY.md. |
 
-Memory entries are saved to the `workspace/memory/` directory.
+#### memory_read
+
+Read memory files on demand.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file` | string | Yes | Which file to read: `memory` for MEMORY.md, `history` for HISTORY.md. |
+| `max_lines` | integer | No | Max lines to return from the end (default: all). Useful for HISTORY.md. |
+
+#### memory_search
+
+Search across memory and history files for specific information.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Search term (case-insensitive substring match). |
+
+Returns matching lines with 1 line of context before/after, prefixed with the source file and line number.
 
 ---
 
@@ -278,7 +300,7 @@ Chrome automation via the Chrome DevTools Protocol (CDP). Requires Google Chrome
 
 #### http_client
 
-Full HTTP client with download and upload support. Uses a `PathResolver` for file path resolution in download and upload operations.
+Full HTTP client with download, upload, and authentication support. Uses a `PathResolver` for file path resolution and `AuthProfileConfig` for named auth profiles.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -287,6 +309,7 @@ Full HTTP client with download and upload support. Uses a `PathResolver` for fil
 | `headers` | object | No | HTTP headers as key-value pairs. |
 | `body` | string | No | The request body. |
 | `content_type` | string | No | Body content type: `json` (default), `form`, `text`, or `xml`. Maps to the appropriate `Content-Type` header. |
+| `auth` | string | No | Auth profile name from config. Automatically applies authentication headers (OAuth 1.0a, Basic, or Bearer). |
 | `timeout` | integer | No | Request timeout in seconds (default: 30). |
 | `follow_redirects` | boolean | No | Follow HTTP redirects (default: true). |
 | `download_path` | string | No | Save the response body to this file path instead of returning it. Path is resolved via `PathResolver`. |
@@ -307,6 +330,30 @@ Full HTTP client with download and upload support. Uses a `PathResolver` for fil
 **Download mode:** When `download_path` is set, the file is saved and the response returns `status`, `path`, `size`, and `content_type` instead of the body.
 
 **Upload mode:** When `upload_file` is set, the file is sent as multipart form data. The MIME type is auto-detected from the file extension. Additional form fields can be passed as JSON in the `body` parameter.
+
+**Authentication:** When `auth` is set, the tool looks up the named profile from `tools.http_client.auth_profiles` in the config and applies the appropriate `Authorization` header:
+
+| Auth type | Config fields | Header format |
+|-----------|--------------|---------------|
+| `oauth1` | `consumer_key`, `consumer_secret`, `access_token`, `access_token_secret` | `OAuth oauth_consumer_key="...", ...` (HMAC-SHA1) |
+| `basic` | `username`, `password` | `Basic base64(username:password)` |
+| `bearer` | `token` | `Bearer {token}` |
+
+Config example:
+```yaml
+tools:
+  http_client:
+    auth_profiles:
+      twitter:
+        type: oauth1
+        consumer_key: ${TWITTER_CONSUMER_KEY}
+        consumer_secret: ${TWITTER_CONSUMER_SECRET}
+        access_token: ${TWITTER_ACCESS_TOKEN}
+        access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
+      my_api:
+        type: bearer
+        token: ${MY_API_TOKEN}
+```
 
 ---
 
@@ -333,38 +380,17 @@ Supports both RSS 2.0 and Atom feed formats. Automatically detects the format by
 
 **Source:** `openbotx/tools/image.py`
 
-#### image_generation
+#### generate_image
 
 Generate images using AI models.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prompt` | string | Yes | Description of the image to generate. |
+| `prompt` | string | Yes | Description of the image to generate or edit. |
 | `filename` | string | Yes | Output filename for the generated image. |
+| `reference_images` | array | No | List of storage paths to reference images for image-to-image editing. |
 
 Requires image generation configuration with an API key. Only registered when `image.provider.api_key` is set in the config.
-
----
-
-### Twitter
-
-**Source:** `openbotx/tools/twitter.py`
-
-#### twitter_post
-
-Post tweets on Twitter/X. Supports text-only tweets, tweets with images from storage, and threads via reply_to_id. Uses OAuth 1.0a (HMAC-SHA1) for authentication.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `text` | string | Yes | Tweet text (max 280 characters). |
-| `media_path` | string | No | Storage path to an image to attach. |
-| `reply_to_id` | string | No | Tweet ID to reply to (for creating threads). |
-
-Requires Twitter API credentials (`tools.twitter.consumer_key`) and a storage provider. Only registered when both are configured.
-
-**Response format:** Returns JSON with `success`, `tweet_id`, and `text` on success. Returns `error` and `details` on failure.
-
-**Media upload:** When `media_path` is provided, the image is read from storage, uploaded to the Twitter media endpoint (v1.1), and attached to the tweet (v2 API).
 
 ---
 
@@ -384,15 +410,16 @@ Not all tools are available to every agent type. The main agent has full access,
 | `http_client` | Yes | Yes |
 | `rss_reader` | Yes | Yes |
 | `browser` | Yes | Yes |
-| `image_generation` | Yes | Yes* |
-| `twitter_post` | Yes | Yes* |
+| `generate_image` | Yes | Yes* |
 | `message` | Yes | No |
 | `spawn` | Yes | No |
 | `cron` | Yes | No |
-| `save_memory` | Yes | No |
+| `memory_save` | Yes | No |
+| `memory_read` | Yes | No |
+| `memory_search` | Yes | No |
 
-\* `image_generation`, `twitter_post`, and `browser` are available to subagents only when their dependencies are satisfied (Chrome installed for browser, image API key configured for image_generation, Twitter API credentials configured for twitter_post).
+\* `generate_image` and `browser` are available to subagents only when their dependencies are satisfied (Chrome installed for browser, image API key configured for generate_image).
 
-Subagents have access to file operations, shell execution, web tools, the HTTP client, RSS reader, browser automation, image generation, and Twitter posting. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), or persist memory state (`save_memory`) are restricted to the main agent.
+Subagents have access to file operations, shell execution, web tools, the HTTP client, RSS reader, browser automation, and image generation. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), or access memory (`memory_save`, `memory_read`, `memory_search`) are restricted to the main agent.
 
 Both main agents and subagents share the same `PathResolver` instance, so they have identical directory access restrictions.

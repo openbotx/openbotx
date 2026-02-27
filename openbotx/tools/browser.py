@@ -185,6 +185,7 @@ class BrowserTool(Tool):
     def __init__(self):
         self._session: CDPSession | None = None
         self._target_id: cdp.target.TargetID | None = None
+        self._tab_lock = asyncio.Lock()
 
     async def execute(self, action: str, **kwargs: Any) -> str:
         if action == "wait":
@@ -215,10 +216,11 @@ class BrowserTool(Tool):
         return f"Unknown action: {action}"
 
     async def _ensure_tab(self, headless: bool = False) -> None:
-        if self._session is not None:
-            return
-        chrome = _ChromeInstance.get()
-        self._session, self._target_id = await chrome.open_tab(headless=headless)
+        async with self._tab_lock:
+            if self._session is not None:
+                return
+            chrome = _ChromeInstance.get()
+            self._session, self._target_id = await chrome.open_tab(headless=headless)
 
     async def _navigate(self, url: str) -> str:
         if not url:
@@ -242,9 +244,10 @@ class BrowserTool(Tool):
 
     async def _resolve_element(self, selector: str) -> cdp.runtime.RemoteObjectId | None:
         """Resolve a CSS selector to a CDP RemoteObjectId."""
-        escaped = selector.replace("'", "\\'")
+        # Use JSON encoding for safe JS string interpolation (handles all special chars)
+        escaped = json.dumps(selector)
         result = await self._session.execute(
-            cdp.runtime.evaluate(expression=f"document.querySelector('{escaped}')")
+            cdp.runtime.evaluate(expression=f"document.querySelector({escaped})")
         )
         remote_obj = result[0]
         if not remote_obj or not remote_obj.object_id:

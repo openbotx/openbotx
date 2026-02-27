@@ -165,7 +165,7 @@ The agent subsystem is the intelligence layer of the platform.
 | `context.py`      | `ContextBuilder` -- assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL (when configured), and agent-specific instructions. Provides the directory context (workspace and public paths) and static helpers for building OpenAI-compatible message arrays with multimodal support (text + images). `add_tool_result()` appends tool results to messages without truncation — each tool manages its own output limits internally. |
 | `memory.py`       | `MemoryStore` -- reads/writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Auto-creates the `memory/` directory on initialization. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages (tool calls and tool results are excluded). |
 | `skills.py`       | `SkillsLoader` -- discovers SKILL.md files from both built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with a `source` field (`"builtin"` or `"project"`) and a `location` field (absolute path to the SKILL.md file, included in the skills summary XML so the LLM can read the file if needed). Skills marked `always: true` are injected into every system prompt, but only if their requirements are satisfied. Provides `load_skill_raw()` for the REST API (returns raw content with frontmatter + source) and `save_skill()` for updating project skills (validates source is not builtin). |
-| `subagent.py`     | `SubagentManager` -- spawns independent background agent loops for delegated tasks. Subagents run with a focused tool set (no `message`, `spawn`, `cron`, or `save_memory` tools), a lower iteration cap (15), and hardcoded `max_tokens=4096`, `temperature=0.1`. Their system prompt includes workspace and public directory absolute paths. They share the same `PathResolver` as the parent agent. Tool results are truncated to 500 characters inline (not via ContextBuilder). On completion, they announce results back to the main agent via the inbound queue with `system_message: true` metadata. |
+| `subagent.py`     | `SubagentManager` -- spawns independent background agent loops for delegated tasks. Subagents run with a focused tool set (no `message`, `spawn`, `cron`, or memory tools), a lower iteration cap (15), and hardcoded `max_tokens=4096`, `temperature=0.1`. Their system prompt includes workspace and public directory absolute paths. They share the same `PathResolver` as the parent agent. Tool results are truncated to 500 characters inline (not via ContextBuilder). On completion, they announce results back to the main agent via the inbound queue with `system_message: true` metadata. |
 
 **Multi-agent orchestration:**
 
@@ -272,14 +272,13 @@ Tools are the actions the agent can perform in the world.
 | `message.py`       | `MessageTool` -- send messages to channels from within the agent loop. Rate-limited to one message per turn. |
 | `spawn.py`         | `SpawnTool` -- delegate tasks to background subagents.                   |
 | `cron.py`          | `CronTool` -- create, list, and remove scheduled jobs.                   |
-| `memory_tool.py`   | `SaveMemoryTool` -- persist content to MEMORY.md and HISTORY.md.         |
+| `memory_tool.py`   | `MemorySaveTool` -- persist content to MEMORY.md and HISTORY.md. `MemoryReadTool` -- read MEMORY.md or HISTORY.md on demand. `MemorySearchTool` -- search across memory files with context. |
 | `browser.py`       | `BrowserTool` -- browser automation via CDP (Chrome DevTools Protocol) using the vendored `openbotx/cdp/` library. Singleton `_ChromeInstance` manages the Chrome process; each tool instance gets its own tab. Click uses pure CDP: resolve element → scroll into view → get content quads → dispatch mouse events. |
-| `http_client.py`   | `HttpClientTool` -- full HTTP client with download/upload support, content type mapping, and `PathResolver` integration. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. |
+| `http_client.py`   | `HttpClientTool` -- full HTTP client with download/upload support, content type mapping, `PathResolver` integration, and named auth profiles (OAuth 1.0a, Basic, Bearer). |
 | `rss.py`           | `RssReaderTool` -- read RSS 2.0 and Atom feeds. Auto-detects feed format, strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` -- generate images via configurable provider/model. |
-| `twitter.py`       | `TwitterTool` -- post tweets on Twitter/X with OAuth 1.0a authentication. Supports text, media, and threads. |
 
-**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, image generation, and Twitter posting. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and `SaveMemoryTool` to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
+**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and all memory tools to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
 
 ### Tasks
 
@@ -358,7 +357,7 @@ Configuration is defined as Pydantic models and loaded from YAML.
 
 | File          | Purpose                                                                          |
 | ------------- | -------------------------------------------------------------------------------- |
-| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `ModelParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `GeneralToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `TwitterConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
+| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `ModelParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `GeneralToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `HttpClientConfig`, `AuthProfileConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
 | `loader.py`   | `load_config()` reads YAML and expands `${ENV_VAR}` patterns. `save_config()` writes the config back to YAML. |
 
 Key configuration sections:
@@ -371,7 +370,7 @@ Key configuration sections:
 | `auth`       | Username, password, JWT secret                               |
 | `providers`  | API keys, base URLs, headers, and options per provider       |
 | `channels`   | Telegram settings, progress/tool hint broadcasting           |
-| `tools`      | General settings (workspace restriction), exec settings (timeout), web search API key, Twitter credentials |
+| `tools`      | General settings (workspace restriction), exec settings (timeout), web search API key, HTTP client auth profiles |
 | `storage`    | Backend type (local/S3), paths, credentials                  |
 | `image`      | Image generation provider, model, API key                    |
 | `heartbeat`  | Enabled flag, check interval                                 |
@@ -394,10 +393,12 @@ Utility modules shared across the codebase.
 
 | File               | Purpose                                                                         |
 | ------------------ | ------------------------------------------------------------------------------- |
-| `path.py`          | `PathResolver` -- resolves file paths against a workspace directory and enforces allowed directory restrictions. Supports relative and absolute paths, home directory expansion (`~`), and multi-directory allowlists (workspace + public). Used by all file-based tools and the HTTP client. Also provides `media_path(filename)` -- generates date-organized storage paths (`public/media/YYYY/MM/DD/filename`), used by `ImageGenerationTool` and `TelegramChannel`. |
+| `path.py`          | `PathResolver` -- resolves file paths against a workspace directory and enforces allowed directory restrictions. Supports relative and absolute paths, home directory expansion (`~`), and multi-directory allowlists (workspace + public). Used by all file-based tools and the HTTP client. Also provides a module-level `media_path(filename)` function -- generates date-organized storage paths (`public/media/YYYY/MM/DD/filename`), used by `ImageGenerationTool` and `TelegramChannel`. |
 | `transcription.py` | Audio transcription via faster-whisper. Lazy-loads the Whisper model on first use. |
 | `text.py`          | `humanize()` -- converts tool names to human-readable format. `describe_tool_use()` -- generates human-readable descriptions of tool calls for WebSocket events. |
-| `config.py`        | Configuration helper utilities.                                                  |
+| `oauth1.py`         | OAuth 1.0a signature generation (RFC 5849). `build_oauth1_header()` -- builds HMAC-SHA1 signed `Authorization` headers. Used by `HttpClientTool` for `oauth1` auth profiles. |
+| `ssrf.py`          | SSRF protection. `validate_url()` blocks requests to private/internal networks. `ssrf_event_hook()` is an httpx event hook for redirect validation. Used by `HttpClientTool`, `WebFetchTool`, and `RssReaderTool`. |
+| `secrets.py`       | Sensitive value masking for config display. `is_sensitive_key()`, `mask_dict()`, `is_masked_or_empty()`. Used by config routes to hide API keys and passwords. |
 
 ### Storage
 
@@ -478,9 +479,11 @@ openbotx/
 │   └── service.py       # HeartbeatService - reads workspace/HEARTBEAT.md
 ├── helpers/         # Utility modules
 │   ├── path.py          # PathResolver - workspace-scoped path resolution and directory restrictions
+│   ├── oauth1.py        # OAuth 1.0a signature generation (HMAC-SHA1)
+│   ├── ssrf.py          # SSRF protection - blocks requests to private/internal networks
 │   ├── transcription.py # Audio transcription via faster-whisper
 │   ├── text.py          # Text formatting utilities (humanize, describe_tool_use)
-│   └── config.py        # Configuration helper utilities
+│   └── secrets.py       # Sensitive value masking for config display
 ├── providers/       # LLM provider abstraction
 │   ├── base.py          # LLMProvider and LLMResponse
 │   ├── litellm_provider.py  # LiteLLM wrapper for multi-provider access
@@ -509,12 +512,11 @@ openbotx/
 │   ├── message.py       # message (send to channels)
 │   ├── spawn.py         # spawn (delegate to subagent)
 │   ├── cron.py          # cron (manage scheduled jobs)
-│   ├── memory_tool.py   # save_memory (persist to MEMORY.md/HISTORY.md)
+│   ├── memory_tool.py   # memory_save, memory_read, memory_search
 │   ├── browser.py       # browser (CDP-based browser automation)
-│   ├── http_client.py   # http_client (HTTP requests with download/upload)
+│   ├── http_client.py   # http_client (HTTP requests with auth profiles)
 │   ├── rss.py           # rss_reader (RSS/Atom feed reader)
-│   ├── image.py         # image_generation (AI image generation)
-│   └── twitter.py       # twitter_post (Twitter/X posting with OAuth 1.0a)
+│   └── image.py         # generate_image (AI image generation)
 └── version.py       # Package version
 ```
 

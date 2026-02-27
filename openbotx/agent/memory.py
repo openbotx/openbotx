@@ -49,7 +49,7 @@ class MemoryStore:
                     "preferences, and context about the user.\n\n"
                     "Current MEMORY.md content:\n"
                     f"{current_memory or '(empty)'}\n\n"
-                    "Use the save_memory tool to persist both."
+                    "Use the memory_save tool to persist both."
                 ),
             }
         ]

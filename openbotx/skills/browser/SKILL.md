@@ -8,11 +8,25 @@ requires:
 
 # Browser
 
-Control a headless Chrome browser to navigate pages, interact with elements, capture screenshots, and extract content.
+Control Chrome browser to navigate pages, interact with elements, capture screenshots, and extract content.
 
 ## Tool: `browser`
 
 All browser interactions go through the `browser` tool with an `action` parameter.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | One of: `navigate`, `snapshot`, `screenshot`, `click`, `type`, `press`, `inspect`, `evaluate`, `wait`. |
+| `url` | string | Conditional | URL to navigate to. Required for `navigate`. |
+| `selector` | string | Conditional | CSS selector. Required for `click` and `type`. |
+| `text` | string | Conditional | Text to type. Required for `type`. |
+| `key` | string | Conditional | Key name. Required for `press`. |
+| `script` | string | Conditional | JavaScript expression. Required for `evaluate`. |
+| `seconds` | integer | No | Seconds to wait (default: 2). |
+| `max_chars` | integer | No | Max characters for snapshot (default: 50000). |
+| `headless` | boolean | No | Run in headless mode (default: false). |
 
 ## Actions
 
@@ -24,15 +38,21 @@ Load a URL in the browser.
 browser(action="navigate", url="https://example.com")
 ```
 
+### inspect
+
+Discover interactive elements on the current page. Returns up to 50 visible elements with their CSS selectors, type, and label. **Always use this after navigating to find selectors for click/type.**
+
+```
+browser(action="inspect")
+```
+
 ### snapshot
 
-Return an accessibility-tree snapshot of the current page. Use this to understand page structure and find element references for click/type actions.
+Return the visible text content of the page (`document.body.innerText`).
 
 ```
 browser(action="snapshot")
 ```
-
-The snapshot returns a text representation of the DOM with element references (e.g., `[ref=42]`). Use these references in `click` and `type` actions.
 
 ### screenshot
 
@@ -42,67 +62,65 @@ Capture a PNG screenshot of the current viewport.
 browser(action="screenshot")
 ```
 
-Use screenshots to visually verify page state or capture rendered content.
-
 ### click
 
-Click on an element identified by its reference from a snapshot.
+Click on an element by CSS selector.
 
 ```
-browser(action="click", ref=42)
+browser(action="click", selector="#submit-button")
+browser(action="click", selector="[aria-label='Search']")
 ```
-
-Always take a snapshot first to find the correct element reference.
 
 ### type
 
-Type text into an input field identified by its reference from a snapshot.
+Type text into an input field by CSS selector. Clicks to focus first, then types character by character.
 
 ```
-browser(action="type", ref=15, text="search query")
+browser(action="type", selector="input[name='q']", text="search query")
 ```
 
-To submit a form after typing, add `submit=True`:
+### press
+
+Press a special key: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, Space.
+
 ```
-browser(action="type", ref=15, text="search query", submit=True)
+browser(action="press", key="Enter")
+browser(action="press", key="Escape")
 ```
 
 ### evaluate
 
-Execute arbitrary JavaScript in the page context and return the result.
+Execute JavaScript in the page context and return the result.
 
 ```
-browser(action="evaluate", expression="document.title")
-```
-
-Use for extracting data, scrolling, or any DOM manipulation:
-```
-browser(action="evaluate", expression="window.scrollTo(0, document.body.scrollHeight)")
+browser(action="evaluate", script="document.title")
+browser(action="evaluate", script="window.scrollTo(0, document.body.scrollHeight)")
 ```
 
 ### wait
 
-Wait for a specified number of seconds before proceeding.
+Wait for a specified number of seconds.
 
 ```
-browser(action="wait", seconds=2)
+browser(action="wait", seconds=3)
 ```
-
-Use after navigation or clicks to allow dynamic content to load.
 
 ## Typical Workflow
 
 1. **Navigate** to the target URL
-2. **Snapshot** to get the accessibility tree and element references
+2. **Inspect** to discover interactive elements and their CSS selectors
 3. **Click** or **type** to interact with elements
-4. **Wait** if dynamic content needs time to load
-5. **Snapshot** or **screenshot** to verify the result
-6. **Evaluate** JavaScript for advanced extraction or interaction
+4. **Press** Enter to submit forms, Escape to dismiss dialogs
+5. **Wait** if dynamic content needs time to load
+6. **Snapshot** or **screenshot** to verify the result
+7. **Evaluate** JavaScript for advanced extraction or interaction
 
 ## Tips
 
-- Always snapshot before clicking or typing to get fresh element references.
+- Always **inspect** before clicking or typing to get correct CSS selectors.
 - After navigation, wait briefly if the page has dynamic content.
-- Use evaluate for scroll, extracting `innerText`, or running custom JS.
-- For pages behind login, navigate to the login page first, then type credentials and submit.
-- If an element is not visible in the snapshot, try scrolling with evaluate before retrying.
+- Use **press** with Escape to dismiss overlays or dialogs before clicking.
+- Use **evaluate** for scrolling, extracting `innerText`, or running custom JS.
+- For pages behind login, navigate to the login page first, then type credentials and press Enter.
+- If an element is not visible, try scrolling with evaluate before retrying.
+- Set `headless=true` for background tasks that don't need a visible window.

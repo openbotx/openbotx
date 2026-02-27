@@ -10,3 +10,10 @@ body {
 .dark-mode body {
   background: var(--p-surface-950);
 }
+
+.p-dialog-close-button {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}

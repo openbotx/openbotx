@@ -5,6 +5,7 @@ from xml.etree.ElementTree import Element, fromstring
 
 import httpx
 
+from openbotx.helpers.ssrf import ssrf_event_hook, validate_url
 from openbotx.tools.base import Tool
 
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -73,6 +74,9 @@ def _parse_atom(root: Element) -> list[dict[str, str]]:
     return entries
 
 
+_MAX_FEED_SIZE = 2_000_000  # 2MB — reject oversized feeds (XML bomb protection)
+
+
 class RssReaderTool(Tool):
     """Read RSS and Atom feeds."""
 
@@ -97,9 +101,23 @@ class RssReaderTool(Tool):
 
     async def execute(self, url: str, count: int = 10, **kwargs: Any) -> str:
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+            validate_url(url)
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=15.0,
+                event_hooks={"request": [ssrf_event_hook]},
+            ) as client:
                 r = await client.get(url, headers={"User-Agent": "OpenBotX/1.0 RSS Reader"})
                 r.raise_for_status()
+
+            if len(r.text) > _MAX_FEED_SIZE:
+                return json.dumps(
+                    {
+                        "error": f"Feed too large ({len(r.text)} bytes, max {_MAX_FEED_SIZE})",
+                        "url": url,
+                    },
+                    ensure_ascii=False,
+                )
 
             root = fromstring(r.text)
             entries = _parse_rss(root) or _parse_atom(root)

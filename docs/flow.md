@@ -509,7 +509,7 @@ Using data URIs instead of HTTP URLs ensures compatibility with all cloud LLM pr
 
 ## 9. The .md Files
 
-These files reside at the workspace root and define the agent's personality and behavior:
+These files reside at the project root (where `config.yml` lives) and define the agent's personality and behavior:
 
 ### SOUL.md — The Agent's "Soul"
 
@@ -845,7 +845,7 @@ When enabled, `_apply_cache_control()` in `openbotx/providers/litellm_provider.p
 [{"type": "function", "function": {"name": "read_file", ...}}, ...]
 
 # After (last tool only):
-[..., {"type": "function", "function": {"name": "image_generation", ...}, "cache_control": {"type": "ephemeral"}}]
+[..., {"type": "function", "function": {"name": "generate_image", ...}, "cache_control": {"type": "ephemeral"}}]
 ```
 
 The `ephemeral` type means the cache is temporary — the provider decides how long to keep it (typically 5 minutes of inactivity for Anthropic). Non-system messages (user, assistant, tool results) are **not** cached because they change every turn.
@@ -893,10 +893,11 @@ When the AgentLoop calls the LLM, it sends tool definitions (name, description, 
 | `message` | Send intermediate messages to the user |
 | `spawn` | Create subagents for parallel tasks |
 | `cron` | Schedule recurring or one-time tasks |
-| `save_memory` | Save information to long-term memory |
+| `memory_save` | Save information to long-term memory |
+| `memory_read` | Read MEMORY.md or HISTORY.md on demand |
+| `memory_search` | Search across memory files for specific information |
 | `browser` | Browser automation (Chrome/Chromium via CDP) |
-| `image_generation` | Generate images (if configured) |
-| `twitter_post` | Post tweets on Twitter/X (if configured) |
+| `generate_image` | Generate images (if configured) |
 
 ### Parameter Validation
 
@@ -952,7 +953,7 @@ The `exec` tool (`openbotx/tools/shell.py`) has multiple layers of protection:
 
 ### Browser (CDP Automation)
 
-The `browser` tool controls Google Chrome in headless mode via **Chrome DevTools Protocol (CDP)**. It uses a multi-tab architecture that allows the main agent and subagents to use the browser concurrently, each in its own isolated tab.
+The `browser` tool controls Google Chrome via **Chrome DevTools Protocol (CDP)** (visible by default, headless optional). It uses a multi-tab architecture that allows the main agent and subagents to use the browser concurrently, each in its own isolated tab.
 
 **Architecture:**
 
@@ -1035,10 +1036,10 @@ Subagents have **limited access** to tools:
 | `read_file`, `write_file`, `edit_file`, `list_dir` | `message` (send messages to user) |
 | `exec` (shell) | `spawn` (create other subagents) |
 | `web_search`, `web_fetch` | `cron` (schedule tasks) |
-| `http_client`, `rss_reader` | `save_memory` |
-| `browser`, `image_generation`, `twitter_post` | |
+| `http_client`, `rss_reader` | `memory_save`, `memory_read`, `memory_search` |
+| `browser`, `generate_image` | |
 
-This prevents subagents from multiplying uncontrollably, sending unexpected messages, or modifying memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
+This prevents subagents from multiplying uncontrollably, sending unexpected messages, or accessing memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
 
 **Browser tab isolation** — Each subagent creates its own browser tab via `BrowserTool`. The tab is always closed in a `finally` block when the subagent finishes (whether it succeeds, fails, or throws an exception). This guarantees tabs are never leaked, even under error conditions. See section 14 for the multi-tab architecture.
 
@@ -1052,7 +1053,7 @@ This prevents subagents from multiplying uncontrollably, sending unexpected mess
 | System prompt | Full (SOUL + USER + memory + skills + agent instructions) | **Simplified** ("You are a subagent..." with workspace + public paths) |
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
-| Tools | All (16) | **12** (no message, spawn, cron, save_memory) |
+| Tools | All (17) | **11** (no message, spawn, cron, memory_save, memory_read, memory_search) |
 | Tool result truncation | Per-tool (each tool manages its own output limits) | **500 chars** (inline truncation after tool execution) |
 | Model | Configurable per agent | **Inherits from parent agent** |
 | PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |
@@ -1098,7 +1099,7 @@ workspace/
 
 ### How Memory Is Used
 
-Memory is loaded **on every message**, not once at startup. The `ContextBuilder.build_system_prompt()` calls `memory.get_memory_context()` each time it assembles the system prompt. This method reads `memory/MEMORY.md` from disk, so any changes to the file (whether from consolidation, the `save_memory` tool, or manual editing) take effect immediately on the next message.
+Memory is loaded **on every message**, not once at startup. The `ContextBuilder.build_system_prompt()` calls `memory.get_memory_context()` each time it assembles the system prompt. This method reads `memory/MEMORY.md` from disk, so any changes to the file (whether from consolidation, the `memory_save` tool, or manual editing) take effect immediately on the next message.
 
 The content is injected as a `# Memory` section in the system prompt, after the bootstrap files (AGENTS.md, SOUL.md, USER.md, TOOLS.md) and before the skills:
 
@@ -1125,7 +1126,7 @@ The two memory files serve different purposes:
 
 | File | Purpose | How it changes |
 |---|---|---|
-| `MEMORY.md` | Active long-term memory — facts, preferences, context about the user. Included in every system prompt | **Overwritten** on each consolidation with an updated version. Can also be written directly by the `save_memory` tool during conversation |
+| `MEMORY.md` | Active long-term memory — facts, preferences, context about the user. Included in every system prompt | **Overwritten** on each consolidation with an updated version. Can also be written directly by the `memory_save` tool during conversation |
 | `HISTORY.md` | Chronological conversation summaries with timestamps. Not included in the prompt — serves as an audit log | **Appended** to on each consolidation. Grows over time |
 
 Only `MEMORY.md` affects the agent's behavior. `HISTORY.md` is purely archival — it provides a timeline of past interactions but is never sent to the LLM.
@@ -1142,7 +1143,7 @@ graph TD
     C -->|Yes| E[Extract unconsolidated messages]
     E --> F[Create temporary consolidation agent]
     F --> G[Send to LLM with consolidation instructions]
-    G --> H["LLM calls save_memory(history_entry, updated_memory)"]
+    G --> H["LLM calls memory_save(history_entry, updated_memory)"]
     H --> I["Append summary to HISTORY.md"]
     H --> J["Overwrite MEMORY.md with updated content"]
     I --> K["Update last_consolidated to current position"]
@@ -1154,7 +1155,7 @@ The process in detail:
 
 1. `_check_consolidation()` checks: `total_messages - last_consolidated >= memory_window`
 2. If yes, extracts unconsolidated messages from the session. **Only user and assistant text messages are included** — tool calls (`role: "assistant"` with `tool_calls`) and tool results (`role: "tool"`) are filtered out. This keeps the consolidation input focused on the actual conversation content
-3. Creates a temporary "consolidation agent" with access **only** to the `save_memory` tool
+3. Creates a temporary "consolidation agent" with access **only** to the `memory_save` tool
 4. Sends the messages to the LLM with instructions:
 
 ```
@@ -1166,19 +1167,19 @@ The process in detail:
 Current MEMORY.md content:
 {current content or '(empty)'}
 
-Use the save_memory tool to persist both."
+Use the memory_save tool to persist both."
 ```
 
-5. The LLM analyzes and calls `save_memory` (loop of up to **5 iterations** to ensure the LLM has a chance to complete)
-6. `save_memory` writes:
+5. The LLM analyzes and calls `memory_save` (loop of up to **5 iterations** to ensure the LLM has a chance to complete)
+6. `memory_save` writes:
    - `history_entry` → **appended** to the end of `HISTORY.md`
    - `updated_memory` → **overwrites** the entire `MEMORY.md`
 7. The `last_consolidated` cursor is updated
 8. If consolidation fails, the error is logged but **does not interrupt** the main flow
 
-### save_memory Tool (Manual Use)
+### memory_save Tool (Manual Use)
 
-The agent can also call `save_memory` during a normal conversation if the user asks to remember something important. In this case, the information is saved directly to the memory files.
+The agent can also call `memory_save` during a normal conversation if the user asks to remember something important. In this case, the information is saved directly to the memory files.
 
 ---
 

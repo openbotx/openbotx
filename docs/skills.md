@@ -84,14 +84,14 @@ The skills summary is injected into the system prompt as XML:
 
 ## Built-in Skills
 
-OpenBotX ships with nine built-in skills.
+OpenBotX ships with ten built-in skills.
 
 ### browser
 
-Automate browser interactions for web scraping, testing, and navigation. Controls a headless Chrome browser via CDP (Chrome DevTools Protocol) to navigate pages, interact with elements, capture screenshots, and extract content.
+Automate browser interactions for web scraping, testing, and navigation. Controls Chrome browser via CDP (Chrome DevTools Protocol) to navigate pages, interact with elements, capture screenshots, and extract content.
 
 - **Tool:** `browser`
-- **Actions:** `navigate`, `snapshot`, `click`, `type`, `evaluate`, `screenshot`, `wait`
+- **Actions:** `navigate`, `snapshot`, `screenshot`, `click`, `type`, `press`, `inspect`, `evaluate`, `wait`
 - **Requires:** `google-chrome` binary on PATH
 
 ### cron
@@ -105,24 +105,32 @@ Schedule reminders and recurring tasks. Supports three modes: reminders (message
 
 ### http-client
 
-Make HTTP requests (GET, POST, PUT, PATCH, DELETE) to APIs and web services. Handles JSON, form-encoded, and plain text bodies, with support for Bearer tokens, Basic auth, and API key authentication.
+Make HTTP requests (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) to APIs and web services. Handles JSON, form-encoded, and plain text bodies. Supports named auth profiles (OAuth 1.0a, Basic, Bearer), file download, and multipart upload.
 
 - **Tool:** `http_client`
-- **Parameters:** `method`, `url`, `headers`, `body`
+- **Parameters:** `method`, `url`, `headers`, `body`, `auth`, `download_path`, `upload_file`
 
 ### image-generation
 
 Generate images from text descriptions using AI models. Supports configurable aspect ratios.
 
 - **Tool:** `generate_image`
-- **Parameters:** `prompt`, `output_path`, `aspect_ratio`
+- **Parameters:** `prompt`, `filename`
 
 ### memory
 
-Two-layer memory system with grep-based recall. Manages long-term facts in `memory/MEMORY.md` (always loaded into context) and an append-only event log in `memory/HISTORY.md` (searchable via grep).
+Two-layer memory system with search-based recall. Manages long-term facts in `memory/MEMORY.md` (always loaded into context) and an append-only event log in `memory/HISTORY.md` (searchable via `memory_search`).
 
+- **Tools:** `memory_save`, `memory_read`, `memory_search`
 - **Always loaded:** Yes
 - **Auto-consolidation:** Old conversations are automatically summarized and appended to the history file
+
+### rss-reader
+
+Read RSS and Atom feeds and return the latest entries. Auto-detects feed format, strips HTML from summaries.
+
+- **Tool:** `rss_reader`
+- **Parameters:** `url`, `count`
 
 ### skill-creator
 
@@ -137,10 +145,10 @@ Summarize or extract text and transcripts from URLs, podcasts, YouTube videos, a
 
 ### twitter
 
-Post tweets on Twitter/X with text and optional images. Supports text-only tweets, tweets with media from storage, and threads via reply_to_id.
+Post tweets on Twitter/X using the `http_client` tool with the `twitter` auth profile. Supports text tweets, media uploads, threads, and tweet deletion.
 
-- **Tool:** `twitter_post`
-- **Parameters:** `text`, `media_path`, `reply_to_id`
+- **Tool:** `http_client` with `auth: "twitter"`
+- **Requires:** `twitter` auth profile configured in `tools.http_client.auth_profiles`
 
 ### weather
 
@@ -150,7 +158,7 @@ Get current weather and forecasts using free services (no API key required). Use
 
 ## Context Files
 
-In addition to skills, OpenBotX uses context files placed in the project workspace root to shape agent behavior. These are loaded by `ContextBuilder` and included in every system prompt:
+In addition to skills, OpenBotX uses context files placed in the project root (where `config.yml` lives) to shape agent behavior. These are loaded by `ContextBuilder` and included in every system prompt:
 
 | File | Purpose |
 |------|---------|

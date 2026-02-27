@@ -211,15 +211,17 @@ async def restart_services(request: Request):
         except Exception as e:
             logger.warning("Error stopping %s: %s", name, e)
 
+    from openbotx.server.app import ServerFactory
+
+    factory = ServerFactory(config)
     workspace = config.workspace_path
     public_dir = config.project_path / "public"
     public_dir.mkdir(parents=True, exist_ok=True)
     (public_dir / "media").mkdir(parents=True, exist_ok=True)
+    (public_dir / "documents").mkdir(parents=True, exist_ok=True)
     public_url = config.server.public_url or f"http://localhost:{config.server.port}"
 
-    from openbotx.server.app import _create_storage
-
-    storage = _create_storage(config, config.project_path, public_url)
+    storage = factory.create_storage(public_url)
     app.state.storage = storage
 
     bus = app.state.bus
@@ -230,32 +232,13 @@ async def restart_services(request: Request):
     skills_loader = SkillsLoader(workspace)
     app.state.skills_loader = skills_loader
 
-    from openbotx.bus.events import InboundMessage
-    from openbotx.cron.types import CronJob
-
-    def _build_cron_callback():
-        async def _on_job(job: CronJob) -> None:
-            msg = InboundMessage(
-                channel=job.payload.channel or "web",
-                sender_id="cron",
-                chat_id=job.payload.to or "direct",
-                content=job.payload.message,
-                metadata={"cron_job_id": job.id, "cron_job_name": job.name},
-            )
-            await bus.publish_inbound(msg)
-
-        return _on_job
-
-    cron_service = CronService(workspace, on_job_callback=_build_cron_callback())
+    cron_service = CronService(workspace, on_job_callback=factory.create_cron_callback(bus))
     app.state.cron_service = cron_service
     asyncio.create_task(cron_service.run())
 
-    from openbotx.server.app import _create_orchestrator
-
-    orchestrator = _create_orchestrator(
-        config=config,
+    orchestrator = factory.create_orchestrator(
         bus=bus,
-        workspace=workspace,
+        public_dir=public_dir,
         dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,

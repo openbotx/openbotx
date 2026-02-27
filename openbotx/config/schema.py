@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_serializer
 
 
 class BotConfig(BaseModel):
@@ -86,11 +86,38 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
-class TwitterConfig(BaseModel):
+_AUTH_FIELDS_BY_TYPE = {
+    "oauth1": {"type", "consumer_key", "consumer_secret", "access_token", "access_token_secret"},
+    "basic": {"type", "username", "password"},
+    "bearer": {"type", "token"},
+}
+
+
+class AuthProfileConfig(BaseModel):
+    type: str = ""  # "oauth1", "basic", "bearer"
+    # oauth1
     consumer_key: str = ""
     consumer_secret: str = ""
     access_token: str = ""
     access_token_secret: str = ""
+    # basic
+    username: str = ""
+    password: str = ""
+    # bearer
+    token: str = ""
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        auth_type = data.get("type", "") if isinstance(data, dict) else self.type
+        fields = _AUTH_FIELDS_BY_TYPE.get(auth_type)
+        if fields and isinstance(data, dict):
+            return {k: v for k, v in data.items() if k in fields}
+        return data
+
+
+class HttpClientConfig(BaseModel):
+    auth_profiles: dict[str, AuthProfileConfig] = Field(default_factory=dict)
 
 
 class GeneralToolsConfig(BaseModel):
@@ -101,7 +128,7 @@ class ToolsConfig(BaseModel):
     general: GeneralToolsConfig = Field(default_factory=GeneralToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    twitter: TwitterConfig = Field(default_factory=TwitterConfig)
+    http_client: HttpClientConfig = Field(default_factory=HttpClientConfig)
 
 
 class StorageConfig(BaseModel):

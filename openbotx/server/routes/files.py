@@ -275,9 +275,7 @@ async def delete_path(path: str, request: Request):
         if _is_protected(safe_path):
             return {"error": "This file cannot be deleted"}
         if not await storage.exists(safe_path):
-            is_dir = await storage.is_directory(safe_path)
-            if not is_dir:
-                return {"error": "Not found"}
+            return {"error": "Not found"}
 
         if await storage.is_directory(safe_path):
             await storage.delete_dir(safe_path)

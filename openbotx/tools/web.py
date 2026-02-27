@@ -3,10 +3,11 @@ import json
 import os
 import re
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
+from openbotx.helpers.ssrf import ssrf_event_hook
+from openbotx.helpers.ssrf import validate_url as ssrf_validate_url
 from openbotx.tools.base import Tool
 
 
@@ -86,16 +87,20 @@ class WebFetchTool(Tool):
 
         max_chars = max_chars or self.max_chars
 
-        is_valid, error_msg = self._validate_url(url)
-        if not is_valid:
+        try:
+            ssrf_validate_url(url)
+        except ValueError as e:
             return json.dumps(
-                {"error": f"URL validation failed: {error_msg}", "url": url},
+                {"error": f"URL validation failed: {e}", "url": url},
                 ensure_ascii=False,
             )
 
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True, max_redirects=self.MAX_REDIRECTS, timeout=30.0
+                follow_redirects=True,
+                max_redirects=self.MAX_REDIRECTS,
+                timeout=30.0,
+                event_hooks={"request": [ssrf_event_hook]},
             ) as client:
                 r = await client.get(url, headers={"User-Agent": self.USER_AGENT})
                 r.raise_for_status()
@@ -167,15 +172,3 @@ class WebFetchTool(Tool):
     def _normalize(text: str) -> str:
         text = re.sub(r"[ \t]+", " ", text)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
-
-    @staticmethod
-    def _validate_url(url: str) -> tuple[bool, str]:
-        try:
-            p = urlparse(url)
-            if p.scheme not in ("http", "https"):
-                return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
-            if not p.netloc:
-                return False, "Missing domain"
-            return True, ""
-        except Exception as e:
-            return False, str(e)

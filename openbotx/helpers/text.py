@@ -35,8 +35,12 @@ def describe_tool_use(name: str, arguments: dict) -> str:
             return "Sending message"
         case "cron":
             return f"Cron {args.get('action', '')}"
-        case "save_memory":
+        case "memory_save":
             return "Saving memory"
+        case "memory_read":
+            return "Reading memory"
+        case "memory_search":
+            return "Searching memory"
         case "generate_image":
             return "Generating image"
         case _:

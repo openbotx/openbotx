@@ -29,13 +29,12 @@ from openbotx.tools.filesystem import (
 )
 from openbotx.tools.http_client import HttpClientTool
 from openbotx.tools.image import ImageGenerationTool
-from openbotx.tools.memory_tool import SaveMemoryTool
+from openbotx.tools.memory_tool import MemoryReadTool, MemorySaveTool, MemorySearchTool
 from openbotx.tools.message import MessageTool
 from openbotx.tools.registry import ToolRegistry
 from openbotx.tools.rss import RssReaderTool
 from openbotx.tools.shell import ExecTool
 from openbotx.tools.spawn import SpawnTool
-from openbotx.tools.twitter import TwitterTool
 from openbotx.tools.web import WebFetchTool, WebSearchTool
 
 logger = logging.getLogger(__name__)
@@ -66,9 +65,10 @@ class AgentLoop:
         max_tokens: int = 8192,
         memory_window: int = 100,
         brave_api_key: str = "",
+        web_search_max_results: int = 5,
         exec_timeout: int = 60,
         image_config=None,
-        twitter_config=None,
+        auth_profiles=None,
         storage=None,
         public_url: str = "",
         agent_name: str = "main",
@@ -94,9 +94,10 @@ class AgentLoop:
         self._max_tokens = max_tokens
         self._memory_window = memory_window
         self._brave_api_key = brave_api_key
+        self._web_search_max_results = web_search_max_results
         self._exec_timeout = exec_timeout
         self._image_config = image_config
-        self._twitter_config = twitter_config
+        self._auth_profiles = auth_profiles or {}
         self._agent_name = agent_name
         self._agent_instructions = agent_instructions
         self._agent_tools = agent_tools
@@ -145,7 +146,9 @@ class AgentLoop:
                 restrict_to_workspace=self._resolver.is_restricted,
             )
         )
-        _register(WebSearchTool(api_key=self._brave_api_key))
+        _register(
+            WebSearchTool(api_key=self._brave_api_key, max_results=self._web_search_max_results)
+        )
         _register(WebFetchTool())
 
         self._message_tool = MessageTool(send_callback=self._bus.publish_outbound)
@@ -158,16 +161,15 @@ class AgentLoop:
             self._cron_tool = CronTool(cron_service=self._cron_service)
             _register(self._cron_tool)
 
-        _register(SaveMemoryTool(memory_store=self._memory))
+        _register(MemorySaveTool(memory_store=self._memory))
+        _register(MemoryReadTool(memory_store=self._memory))
+        _register(MemorySearchTool(memory_store=self._memory))
         _register(BrowserTool())
-        _register(HttpClientTool(self._resolver))
+        _register(HttpClientTool(self._resolver, auth_profiles=self._auth_profiles))
         _register(RssReaderTool())
 
         if self._image_config and self._image_config.provider.api_key and self._storage:
             _register(ImageGenerationTool(config=self._image_config, storage=self._storage))
-
-        if self._twitter_config and self._twitter_config.consumer_key and self._storage:
-            _register(TwitterTool(config=self._twitter_config, storage=self._storage))
 
     async def stop(self) -> None:
         browser_tool = self._registry.get("browser")
@@ -420,9 +422,10 @@ class AgentLoop:
             return
 
         consolidation_registry = ToolRegistry()
-        consolidation_registry.register(SaveMemoryTool(memory_store=self._memory))
+        consolidation_registry.register(MemorySaveTool(memory_store=self._memory))
 
         try:
+            memory_save_called = False
             for _ in range(5):
                 response = await self._provider.chat(
                     messages=consolidation_messages,
@@ -455,6 +458,8 @@ class AgentLoop:
 
                     for tc in response.tool_calls:
                         result = await consolidation_registry.execute(tc.name, tc.arguments)
+                        if tc.name == "memory_save":
+                            memory_save_called = True
                         consolidation_messages.append(
                             {
                                 "role": "tool",
@@ -466,9 +471,12 @@ class AgentLoop:
                 else:
                     break
 
-            self._memory.mark_consolidated(session, total)
-            self._session_manager.save(session)
-            logger.info("memory consolidation completed for session %s", session.key)
+            if memory_save_called:
+                self._memory.mark_consolidated(session, total)
+                self._session_manager.save(session)
+                logger.info("memory consolidation completed for session %s", session.key)
+            else:
+                logger.info("memory consolidation skipped (no save) for session %s", session.key)
 
         except Exception as e:
             logger.error("memory consolidation failed: %s", e, exc_info=True)

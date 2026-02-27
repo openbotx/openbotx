@@ -18,6 +18,7 @@ Use the `http_client` tool to make HTTP requests directly without needing curl o
 | `headers` | object | No | HTTP headers as key-value pairs |
 | `body` | string | No | Request body |
 | `content_type` | string | No | Body content type: `json` (default), `form`, `text`, or `xml` |
+| `auth` | string | No | Auth profile name for authenticated requests (configured in config) |
 | `timeout` | integer | No | Timeout in seconds (default: 30) |
 | `follow_redirects` | boolean | No | Follow redirects (default: true) |
 | `download_path` | string | No | Save response body to this file path |
@@ -94,21 +95,22 @@ http_client(method="OPTIONS", url="https://api.example.com/users")
 
 ## Authentication
 
-### Bearer token
+### Auth profiles (recommended)
+
+Use the `auth` parameter with a configured profile name. Auth profiles support OAuth 1.0a, Basic, and Bearer authentication automatically:
+
+```
+http_client(method="POST", url="https://api.twitter.com/2/tweets", auth="twitter", body="{\"text\": \"Hello!\"}")
+http_client(method="GET", url="https://api.example.com/data", auth="my_api")
+```
+
+### Manual headers
+
+You can also pass auth headers manually:
 
 ```
 http_client(method="GET", url="https://api.example.com/me", headers={"Authorization": "Bearer eyJhbGciOi..."})
-```
-
-### Basic auth
-
-```
 http_client(method="GET", url="https://api.example.com/me", headers={"Authorization": "Basic dXNlcjpwYXNz"})
-```
-
-### API key in header
-
-```
 http_client(method="GET", url="https://api.example.com/data", headers={"X-API-Key": "your-api-key"})
 ```
 
@@ -171,7 +173,7 @@ http_client(method="GET", url="https://example.com/redirect", follow_redirects=f
 ## Tips
 
 - The response includes `status`, `headers`, `body`, and `truncated` fields.
-- Response bodies larger than 10,000 characters are truncated.
+- Response bodies larger than 50,000 characters are truncated.
 - For APIs that return JSON, parse the response body as needed.
 - The `content_type` parameter sets the `Content-Type` header automatically: `json` → `application/json`, `form` → `application/x-www-form-urlencoded`, `text` → `text/plain`, `xml` → `application/xml`.
 - Use GET for reads, POST for creates, PUT for full replacements, PATCH for partial updates, DELETE for removals, HEAD for existence checks, OPTIONS for CORS/capability checks.

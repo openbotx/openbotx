@@ -117,9 +117,10 @@ class ServerFactory:
                 task_manager=task_manager,
                 model=agent_cfg.model,
                 brave_api_key=self._config.tools.web_search.api_key,
+                web_search_max_results=self._config.tools.web_search.max_results,
                 exec_timeout=self._config.tools.exec.timeout,
                 image_config=self._config.image,
-                twitter_config=self._config.tools.twitter,
+                auth_profiles=self._config.tools.http_client.auth_profiles,
                 storage=storage,
             )
 
@@ -142,9 +143,10 @@ class ServerFactory:
                 max_tokens=agent_cfg.params.max_tokens,
                 memory_window=agent_cfg.params.memory_window,
                 brave_api_key=self._config.tools.web_search.api_key,
+                web_search_max_results=self._config.tools.web_search.max_results,
                 exec_timeout=self._config.tools.exec.timeout,
                 image_config=self._config.image,
-                twitter_config=self._config.tools.twitter,
+                auth_profiles=self._config.tools.http_client.auth_profiles,
                 storage=storage,
                 public_url=public_url,
                 agent_name=name,
@@ -383,7 +385,11 @@ def create_app() -> FastAPI:
 
         @app.get("/app/{path:path}")
         async def spa_fallback(path: str):
-            file_path = WEBCLIENT_DIR / path
+            try:
+                file_path = (WEBCLIENT_DIR / path).resolve()
+                file_path.relative_to(WEBCLIENT_DIR.resolve())
+            except ValueError:
+                return JSONResponse({"error": "Access denied"}, status_code=403)
             if file_path.is_file():
                 return FileResponse(file_path)
             return FileResponse(WEBCLIENT_DIR / "index.html")

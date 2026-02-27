@@ -1,58 +1,84 @@
 ---
 name: twitter
-description: Post tweets on Twitter/X with text and optional images. Use when the user wants to publish content, announcements, or updates on Twitter.
+description: Post tweets on Twitter/X. Use when the user wants to tweet, post on X, create threads, or share content on Twitter. Requires the "twitter" auth profile configured in http_client.
+always: false
 ---
 
-# Twitter
+# Twitter / X Posting
 
-Post tweets using the `twitter_post` tool.
+Use the `http_client` tool with `auth: "twitter"` to interact with the Twitter/X API.
 
-## Tool: `twitter_post`
-
-### Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `text` | string | Yes | Tweet text (max 280 characters) |
-| `media_path` | string | No | Storage path to an image to attach |
-| `reply_to_id` | string | No | Tweet ID to reply to (for creating threads) |
-
-### Text-only tweet
+## Post a text tweet
 
 ```
-twitter_post(text="Hello from our bot!")
+http_client(
+  method="POST",
+  url="https://api.twitter.com/2/tweets",
+  auth="twitter",
+  body="{\"text\": \"Hello from OpenBotX!\"}"
+)
 ```
 
-### Tweet with image
+Response includes `data.id` (the tweet ID) and `data.text`.
+
+## Reply to a tweet (threads)
+
+Use `reply.in_reply_to_tweet_id` to create a reply or thread:
 
 ```
-twitter_post(text="Check out this visual!", media_path="images/chart.png")
+http_client(
+  method="POST",
+  url="https://api.twitter.com/2/tweets",
+  auth="twitter",
+  body="{\"text\": \"This is a reply\", \"reply\": {\"in_reply_to_tweet_id\": \"1234567890\"}}"
+)
 ```
 
-### Thread
+To create a thread, post the first tweet, then reply to it with the returned tweet ID.
 
-Post a series of connected tweets. The first call returns a `tweet_id`, use it as `reply_to_id` for subsequent tweets:
+## Upload media and attach to tweet
+
+### Step 1: Upload the image
+
+Upload the image file to Twitter's media endpoint using multipart form data:
 
 ```
-twitter_post(text="A thread about productivity (1/3)...")
-twitter_post(text="Second insight (2/3)...", reply_to_id="<tweet_id from previous>")
-twitter_post(text="Final takeaway (3/3)...", reply_to_id="<tweet_id from previous>")
+http_client(
+  method="POST",
+  url="https://upload.twitter.com/1.1/media/upload.json",
+  auth="twitter",
+  upload_file="/path/to/image.jpg",
+  upload_field="media"
+)
 ```
 
-## Response
+The response includes `media_id_string`.
 
-On success the tool returns JSON with:
-- `success`: true
-- `tweet_id`: the ID of the created tweet
-- `text`: the posted text
+### Step 2: Post tweet with media
 
-On error it returns:
-- `error`: error description
-- `details`: API error body (if available)
+```
+http_client(
+  method="POST",
+  url="https://api.twitter.com/2/tweets",
+  auth="twitter",
+  body="{\"text\": \"Check this out!\", \"media\": {\"media_ids\": [\"MEDIA_ID_HERE\"]}}"
+)
+```
+
+## Delete a tweet
+
+```
+http_client(
+  method="DELETE",
+  url="https://api.twitter.com/2/tweets/TWEET_ID_HERE",
+  auth="twitter"
+)
+```
 
 ## Tips
 
-- Twitter enforces a 280 character limit per tweet.
-- Supported media formats: PNG, JPEG, GIF, WEBP.
-- For threads, always chain `reply_to_id` from the previous tweet's response.
-- The user decides the content and tone of the tweet.
+- Tweet text max: 280 characters.
+- The `auth: "twitter"` parameter applies OAuth 1.0a signing automatically.
+- Media upload uses the v1.1 endpoint; tweet creation uses the v2 endpoint.
+- For threads, always save the `data.id` from each tweet to chain replies.
+- Supported image formats: JPEG, PNG, GIF, WEBP (max 5MB for images, 15MB for GIFs).

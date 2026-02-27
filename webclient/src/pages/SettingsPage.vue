@@ -32,7 +32,7 @@ const systemInfoLoading = ref(true)
 
 const bot = ref({ name: '', description: '' })
 const auth = ref({ username: 'admin', password: '', secret_key: '' })
-const tools = ref({ general: { restrict_to_workspace: true }, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 }, twitter: { consumer_key: '', consumer_secret: '', access_token: '', access_token_secret: '' } })
+const tools = ref({ general: { restrict_to_workspace: true }, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 }, http_client: { auth_profiles: {} } })
 const storage = ref({ type: 'local', s3_bucket: '', s3_region: 'us-east-1', s3_access_key: '', s3_secret_key: '' })
 const agentsConfig = ref({})
 const rawYaml = ref('')
@@ -80,7 +80,7 @@ onMounted(async () => {
       },
       exec: { timeout: configStore.config.tools?.exec?.timeout ?? 60 },
       web_search: { api_key: '', max_results: configStore.config.tools?.web_search?.max_results ?? 5 },
-      twitter: { consumer_key: '', consumer_secret: '', access_token: '', access_token_secret: '' },
+      http_client: { auth_profiles: parseAuthProfiles(configStore.config.tools?.http_client?.auth_profiles) },
     }
     const st = configStore.config.storage || {}
     storage.value = {
@@ -185,6 +185,60 @@ async function toggleTelegram(running) {
     toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to toggle Telegram channel', life: 3000 })
     await channelsStore.loadChannels()
   }
+}
+
+const authTypes = ref([
+  { label: 'OAuth 1.0a', value: 'oauth1' },
+  { label: 'Basic', value: 'basic' },
+  { label: 'Bearer', value: 'bearer' },
+])
+
+const newProfileName = ref('')
+const showAddProfile = ref(false)
+
+function parseAuthProfiles(profiles) {
+  if (!profiles || typeof profiles !== 'object') return {}
+  const result = {}
+  for (const [name, p] of Object.entries(profiles)) {
+    result[name] = {
+      type: p.type || 'bearer',
+      consumer_key: '', consumer_secret: '', access_token: '', access_token_secret: '',
+      username: '', password: '',
+      token: '',
+    }
+  }
+  return result
+}
+
+function emptyProfile(type = 'bearer') {
+  return {
+    type,
+    consumer_key: '', consumer_secret: '', access_token: '', access_token_secret: '',
+    username: '', password: '',
+    token: '',
+  }
+}
+
+function addAuthProfile() {
+  showAddProfile.value = true
+  newProfileName.value = ''
+}
+
+function confirmAddProfile() {
+  const name = newProfileName.value.trim().toLowerCase().replace(/\s+/g, '_')
+  if (!name) return
+  if (tools.value.http_client.auth_profiles[name]) {
+    toast.add({ severity: 'warn', summary: 'Exists', detail: `Profile "${name}" already exists`, life: 2000 })
+    return
+  }
+  tools.value.http_client.auth_profiles[name] = emptyProfile()
+  showAddProfile.value = false
+}
+
+function removeAuthProfile(name) {
+  const updated = { ...tools.value.http_client.auth_profiles }
+  delete updated[name]
+  tools.value.http_client.auth_profiles = updated
 }
 
 const newAgentName = ref('')
@@ -513,25 +567,57 @@ async function saveAgents() {
 
               <div class="channel-block">
                 <div class="channel-header">
-                  <i class="pi pi-twitter"></i>
-                  <strong>Twitter / X</strong>
+                  <i class="pi pi-lock"></i>
+                  <strong>HTTP Auth Profiles</strong>
                 </div>
-                <div class="form-group">
-                  <label>Consumer Key</label>
-                  <Password v-model="tools.twitter.consumer_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                <p class="channel-desc" style="margin-bottom: 0.75rem">Authentication profiles for http_client tool (oauth1, basic, bearer).</p>
+
+                <div v-for="(profile, name) in tools.http_client.auth_profiles" :key="name" class="auth-profile">
+                  <div class="channel-header">
+                    <strong>{{ name }}</strong>
+                    <Select v-model="profile.type" :options="authTypes" option-label="label" option-value="value" style="width: 10rem" />
+                    <Button icon="pi pi-trash" severity="danger" text rounded size="small" @click="removeAuthProfile(name)" />
+                  </div>
+
+                  <template v-if="profile.type === 'oauth1'">
+                    <div class="form-group">
+                      <label>Consumer Key</label>
+                      <Password v-model="profile.consumer_key" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                    </div>
+                    <div class="form-group">
+                      <label>Consumer Secret</label>
+                      <Password v-model="profile.consumer_secret" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                    </div>
+                    <div class="form-group">
+                      <label>Access Token</label>
+                      <Password v-model="profile.access_token" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                    </div>
+                    <div class="form-group">
+                      <label>Access Token Secret</label>
+                      <Password v-model="profile.access_token_secret" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                    </div>
+                  </template>
+
+                  <template v-if="profile.type === 'basic'">
+                    <div class="form-group">
+                      <label>Username</label>
+                      <InputText v-model="profile.username" class="w-full" autocomplete="off" />
+                    </div>
+                    <div class="form-group">
+                      <label>Password</label>
+                      <Password v-model="profile.password" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                    </div>
+                  </template>
+
+                  <template v-if="profile.type === 'bearer'">
+                    <div class="form-group">
+                      <label>Token</label>
+                      <Password v-model="profile.token" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
+                    </div>
+                  </template>
                 </div>
-                <div class="form-group">
-                  <label>Consumer Secret</label>
-                  <Password v-model="tools.twitter.consumer_secret" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
-                </div>
-                <div class="form-group">
-                  <label>Access Token</label>
-                  <Password v-model="tools.twitter.access_token" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
-                </div>
-                <div class="form-group">
-                  <label>Access Token Secret</label>
-                  <Password v-model="tools.twitter.access_token_secret" class="w-full" :feedback="false" toggle-mask input-class="w-full" autocomplete="off" placeholder="Leave empty to keep current" />
-                </div>
+
+                <Button label="Add Profile" icon="pi pi-plus" severity="secondary" size="small" @click="addAuthProfile" />
               </div>
 
               <Button label="Save" icon="pi pi-save" size="small" @click="saveSection('tools', tools)" />
@@ -599,6 +685,17 @@ async function saveAgents() {
       <template #footer>
         <Button label="Cancel" severity="secondary" text size="small" @click="showAddAgent = false" />
         <Button label="Add" icon="pi pi-plus" size="small" @click="confirmAddAgent" :disabled="!newAgentName.trim()" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="showAddProfile" header="Add Auth Profile" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
+      <div class="form-group">
+        <label>Profile Name</label>
+        <InputText v-model="newProfileName" class="w-full" placeholder="e.g. twitter, my_api" @keyup.enter="confirmAddProfile" />
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" text size="small" @click="showAddProfile = false" />
+        <Button label="Add" icon="pi pi-plus" size="small" @click="confirmAddProfile" :disabled="!newProfileName.trim()" />
       </template>
     </Dialog>
   </div>
@@ -689,6 +786,13 @@ async function saveAgents() {
   margin: 0;
   font-size: 0.85rem;
   color: var(--p-text-muted-color);
+}
+
+.auth-profile {
+  padding: 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
+  margin-bottom: 0.75rem;
 }
 
 .raw-editor {

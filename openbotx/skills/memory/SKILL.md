@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Two-layer memory system with grep-based recall.
+description: Two-layer memory system with search-based recall.
 always: true
 ---
 
@@ -9,19 +9,33 @@ always: true
 ## Structure
 
 - `memory/MEMORY.md` -- Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/HISTORY.md` -- Append-only event log. NOT loaded into context. Search it with grep.
+- `memory/HISTORY.md` -- Append-only event log. NOT loaded into context. Search it with `memory_search`.
 
 ## Search Past Events
 
-```bash
-grep -i "keyword" memory/HISTORY.md
+Use `memory_search` to find information across both memory files:
+
+```
+memory_search(query="keyword")
 ```
 
-Use the `exec` tool to run grep. Combine patterns: `grep -iE "meeting|deadline" memory/HISTORY.md`
+Returns matching lines with surrounding context, indicating which file each match came from.
+
+## Read Memory Files
+
+Use `memory_read` to read a full memory file:
+
+```
+memory_read(file="memory")
+memory_read(file="history")
+memory_read(file="history", max_lines=50)
+```
+
+Use `max_lines` to read only the most recent entries from HISTORY.md.
 
 ## When to Update MEMORY.md
 
-Write important facts immediately using `edit_file` or `write_file`:
+Write important facts immediately using `memory_save`:
 - User preferences ("I prefer dark mode")
 - Project context ("The API uses OAuth2")
 - Relationships ("Alice is the project lead")
