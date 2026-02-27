@@ -95,7 +95,11 @@ class ServerFactory:
 
         for name, agent_cfg in self._config.agents.items():
             agent_cfg.name = name
+            provider_cfg = self._config.get_provider(agent_cfg.model)
             provider = self.create_provider(agent_cfg.model)
+
+            if provider_cfg and provider_cfg.model_params:
+                agent_cfg.model_params = {**provider_cfg.model_params, **agent_cfg.model_params}
 
             agent_workspace = agent_cfg.resolve_workspace(self._project_path)
             agent_workspace.mkdir(parents=True, exist_ok=True)

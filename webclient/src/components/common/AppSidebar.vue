@@ -107,7 +107,7 @@ function logout() {
 }
 
 .sidebar-header {
-  padding: 1rem;
+  padding: 0.75rem;
   border-bottom: 1px solid var(--p-content-border-color);
 }
 
@@ -115,7 +115,7 @@ function logout() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
 }
 
 .logo-icon {
@@ -157,7 +157,7 @@ function logout() {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  padding: 0.6rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   border: none;
   border-radius: var(--p-content-border-radius);
   background: transparent;

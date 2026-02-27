@@ -88,8 +88,7 @@ class AgentClassifier:
                 messages=messages,
                 tools=[ROUTE_TOOL],
                 model=self._model,
-                max_tokens=256,
-                temperature=0.0,
+                model_params={"max_tokens": 256, "temperature": 0.0},
             )
 
             if response.has_tool_calls:

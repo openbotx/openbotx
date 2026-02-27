@@ -116,8 +116,8 @@ async function confirmGoToSession() {
 .board-columns {
   flex: 1;
   display: flex;
-  gap: 1rem;
-  padding: 1rem;
+  gap: 0.75rem;
+  padding: 0.75rem;
   overflow-x: auto;
 }
 

@@ -133,9 +133,9 @@ providers:
 | Setting | Default |
 |---|---|
 | Server | `host: 0.0.0.0`, `port: 8000`, `public_url: ""` |
-| Authentication | `username: admin`, `password: admin` |
-| Model | `anthropic/claude-sonnet-4-20250514` |
-| Model params | `model_params.max_tokens: 8192`, `model_params.temperature: 0.1` |
+| Authentication | `username: ""`, `password: ""` (must be configured) |
+| Model | `""` (must be configured per agent) |
+| Model params | `model_params: {}` (empty dict — set via provider or agent config) |
 | Agent params | `agent_params.max_iterations: 40`, `agent_params.memory_window: 100` |
 | Shell timeout | `exec.timeout: 60` seconds |
 | Workspace restriction | `general.restrict_to_workspace: true` |
@@ -809,6 +809,15 @@ graph TD
     I -->|No| K[No provider available]
 ```
 
+### Model Parameters Resolution
+
+Each provider can define a default `model_params` dict with arbitrary key-value pairs (e.g., `max_tokens`, `temperature`, `top_p`). At startup, these are merged into each agent's `model_params` using simple dict merge. The resolution order is:
+
+1. **Provider `model_params`** — default parameters for all agents using the provider
+2. **Agent `model_params`** — override provider defaults (agent keys always take precedence)
+
+This merge happens once in `ServerFactory.create_orchestrator` before agent loops are created: `{**provider_params, **agent_params}`.
+
 ### Model Name Resolution
 
 The `LiteLLMProvider` (`openbotx/providers/litellm_provider.py`) transforms the model name before sending to LiteLLM:
@@ -1398,14 +1407,20 @@ Each task stores the following fields:
 | `description` | Full message content |
 | `state` | Current state: `TODO`, `DOING`, `DONE`, or `ERROR` |
 | `agent_type` | `"agent"` (main) or `"subagent"` |
+| `agent_name` | Name of the agent handling this task |
 | `channel` | Origin channel (`"web"`, `"telegram"`) — used for recovery routing |
 | `chat_id` | Origin chat/session ID — used for recovery routing |
 | `parent_task_id` | ID of the parent task (for subagents) |
 | `subagent_ids` | List of child subagent task IDs |
 | `result` | First 200 characters of the result (on DONE) |
 | `error` | Error message (on ERROR) |
-| `created_at` | ISO 8601 timestamp |
-| `updated_at` | ISO 8601 timestamp |
+| `created_at` | ISO 8601 timestamp — when the task was created |
+| `updated_at` | ISO 8601 timestamp — last state change |
+| `started_at` | ISO 8601 timestamp — set automatically when state transitions to DOING |
+| `completed_at` | ISO 8601 timestamp — set automatically when state transitions to DONE or ERROR |
+| `tool_count` | Number of tool calls executed during the task |
+| `iteration_count` | Number of LLM call iterations performed |
+| `duration_ms` | Computed property: milliseconds from `started_at` to `completed_at` (or now if still running) |
 | `live_state` | Transient runtime state (e.g., `tool_uses` list). Populated during agent execution and included in API responses when non-empty, but **never persisted** to JSONL. Cleared when the task completes. Allows the frontend to restore active tool status on page refresh |
 
 The `channel` and `chat_id` fields are set when the task is created and record which conversation originated it. This is essential for task recovery on restart — without them, the system wouldn't know where to route the re-queued message (see below).

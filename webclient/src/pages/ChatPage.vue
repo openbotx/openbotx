@@ -142,7 +142,7 @@ function toggleSessions() {
   align-items: center;
   justify-content: space-between;
   padding: 0 1rem;
-  height: 3.25rem;
+  height: 2.75rem;
   box-sizing: border-box;
   border-bottom: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import Tabs from 'primevue/tabs'
 import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
@@ -17,25 +17,38 @@ import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
 import { useToast } from 'primevue/usetoast'
+import { Codemirror } from 'vue-codemirror'
+import { yaml } from '@codemirror/lang-yaml'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { useConfigStore } from '../stores/config'
 import { useChannelsStore } from '../stores/channels'
 import { useApi } from '../composables/useApi'
+import { useDark } from '../composables/useDark'
 import jsYaml from 'js-yaml'
 
 const toast = useToast()
 const configStore = useConfigStore()
 const channelsStore = useChannelsStore()
 const api = useApi()
+const isDark = useDark()
+
+const editorExtensions = computed(() => {
+  const ext = [yaml()]
+  if (isDark.value) ext.push(oneDark)
+  return ext
+})
 
 const systemInfo = ref(null)
 const systemInfoLoading = ref(true)
 
 const bot = ref({ name: '', description: '' })
-const auth = ref({ username: 'admin', password: '', secret_key: '' })
+const auth = ref({ username: '', password: '', secret_key: '' })
 const tools = ref({ general: { restrict_to_workspace: true }, exec: { timeout: 60 }, web_search: { api_key: '', max_results: 5 }, http_client: { auth_profiles: {} } })
-const storage = ref({ type: 'local', s3_bucket: '', s3_region: 'us-east-1', s3_access_key: '', s3_secret_key: '' })
+const storage = ref({ type: 'local', s3_bucket: '', s3_region: '', s3_access_key: '', s3_secret_key: '' })
 const agentsConfig = ref({})
+const activeTab = ref('info')
 const rawYaml = ref('')
+const yamlLoading = ref(false)
 const restarting = ref(false)
 
 const telegramToken = ref('')
@@ -86,7 +99,7 @@ onMounted(async () => {
     storage.value = {
       type: st.type || 'local',
       s3_bucket: st.s3_bucket || '',
-      s3_region: st.s3_region || 'us-east-1',
+      s3_region: st.s3_region || '',
       s3_access_key: '',
       s3_secret_key: '',
     }
@@ -115,13 +128,22 @@ async function saveSection(section, data) {
 }
 
 async function loadYaml() {
+  yamlLoading.value = true
   try {
     const res = await api.get('/config/yaml')
     rawYaml.value = res.yaml || ''
   } catch {
     rawYaml.value = ''
+  } finally {
+    yamlLoading.value = false
   }
 }
+
+watch(activeTab, (tab) => {
+  if (tab === 'advanced') {
+    loadYaml()
+  }
+})
 
 function validateYaml() {
   try {
@@ -299,7 +321,7 @@ async function saveAgents() {
       <h2>Settings</h2>
     </div>
     <div class="settings-content">
-      <Tabs value="info" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
+      <Tabs v-model:value="activeTab" :pt="{ root: { style: { flex: '1', display: 'flex', flexDirection: 'column' } } }">
         <TabList>
           <Tab value="info">Info</Tab>
           <Tab value="bot">Bot</Tab>
@@ -505,7 +527,7 @@ async function saveAgents() {
                 <Select v-model="storage.type" :options="storageTypes" option-label="label" option-value="value" class="w-full" />
               </div>
               <template v-if="!isS3">
-                <Message severity="info" :closable="false" class="tab-message">Files are stored in the workspace directory.</Message>
+                <Message severity="info" :closable="false" class="tab-message">Files are stored in the project directory.</Message>
               </template>
               <template v-if="isS3">
                 <div class="form-group">
@@ -645,19 +667,20 @@ async function saveAgents() {
           <TabPanel value="advanced" :pt="{ root: { style: { minHeight: '100%' } } }">
             <div class="tab-content tab-content-wide">
               <Message severity="warn" :closable="false" class="tab-message">Edit raw config with care. Invalid changes may break the application.</Message>
-              <div class="form-group">
-                <div class="button-row">
-                  <Button label="Reload" icon="pi pi-refresh" size="small" severity="secondary" @click="loadYaml" />
-                  <Button label="Validate" icon="pi pi-check-circle" size="small" severity="info" @click="validateYaml" :disabled="!rawYaml" />
+              <div class="advanced-toolbar">
+                <div class="toolbar-group">
+                  <Button label="Reload" icon="pi pi-refresh" size="small" severity="secondary" :loading="yamlLoading" @click="loadYaml" />
+                  <Button label="Validate" icon="pi pi-check-circle" size="small" severity="info" @click="validateYaml" :disabled="!rawYaml || yamlLoading" />
+                </div>
+                <div class="toolbar-group">
+                  <Button label="Save" icon="pi pi-save" size="small" @click="showSaveConfirm = true" :disabled="!rawYaml || yamlLoading" />
+                  <Button label="Restart" icon="pi pi-replay" size="small" severity="warn" :loading="restarting" @click="showRestartConfirm = true" />
                 </div>
               </div>
-              <div class="form-group">
-                <Textarea v-model="rawYaml" rows="24" class="w-full raw-editor" auto-resize />
+              <div v-if="yamlLoading" class="yaml-loading">
+                <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
               </div>
-              <div class="button-row">
-                <Button label="Save Config" icon="pi pi-save" size="small" @click="showSaveConfirm = true" :disabled="!rawYaml" />
-                <Button label="Restart Services" icon="pi pi-replay" size="small" severity="warn" :loading="restarting" @click="showRestartConfirm = true" />
-              </div>
+              <Codemirror v-else v-model="rawYaml" :extensions="editorExtensions" :style="{ fontSize: '0.85rem' }" class="yaml-editor" />
             </div>
           </TabPanel>
         </TabPanels>
@@ -730,7 +753,7 @@ async function saveAgents() {
 
 .tab-content {
   max-width: 600px;
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .tab-content-wide {
@@ -747,7 +770,7 @@ async function saveAgents() {
 }
 
 .form-group {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .form-group label {
@@ -772,10 +795,10 @@ async function saveAgents() {
 }
 
 .channel-block {
-  padding: 1rem;
+  padding: 0.75rem;
   border: 1px solid var(--p-content-border-color);
   border-radius: var(--p-content-border-radius);
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .channel-header {
@@ -798,9 +821,30 @@ async function saveAgents() {
   margin-bottom: 0.75rem;
 }
 
-.raw-editor {
-  font-family: monospace;
-  font-size: 0.85rem;
+.advanced-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.yaml-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 1rem;
+  color: var(--p-text-muted-color);
+}
+
+.yaml-editor {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
+  overflow: hidden;
 }
 
 .info-loading {
@@ -852,6 +896,16 @@ async function saveAgents() {
 
   .tab-content {
     padding: 0.75rem;
+  }
+
+  .advanced-toolbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .toolbar-group {
+    display: contents;
   }
 }
 </style>

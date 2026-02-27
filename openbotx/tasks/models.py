@@ -26,7 +26,22 @@ class Task:
     error: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    started_at: str | None = None
+    completed_at: str | None = None
+    tool_count: int = 0
+    iteration_count: int = 0
     live_state: dict = field(default_factory=dict)
+
+    @property
+    def duration_ms(self) -> int | None:
+        if not self.started_at:
+            return None
+        try:
+            start = datetime.fromisoformat(self.started_at)
+            end = datetime.fromisoformat(self.completed_at) if self.completed_at else datetime.now()
+            return int((end - start).total_seconds() * 1000)
+        except (ValueError, TypeError):
+            return None
 
     def to_dict(self) -> dict:
         d = {
@@ -44,6 +59,11 @@ class Task:
             "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "tool_count": self.tool_count,
+            "iteration_count": self.iteration_count,
+            "duration_ms": self.duration_ms,
         }
         if self.live_state:
             d["live_state"] = self.live_state

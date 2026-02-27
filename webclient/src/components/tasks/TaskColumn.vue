@@ -41,7 +41,7 @@ const emit = defineEmits(['go-to-session'])
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
   font-weight: 600;
 }
 

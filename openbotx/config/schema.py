@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer
 
 
 class BotConfig(BaseModel):
@@ -14,11 +14,6 @@ class ServerConfig(BaseModel):
     public_url: str = ""
 
 
-class ModelParams(BaseModel):
-    max_tokens: int = 8192
-    temperature: float = 0.1
-
-
 class AgentParams(BaseModel):
     max_iterations: int = 40
     memory_window: int = 100
@@ -27,11 +22,11 @@ class AgentParams(BaseModel):
 class AgentConfig(BaseModel):
     name: str = ""
     workspace: str = "./workspace"
-    model: str = "anthropic/claude-sonnet-4-20250514"
+    model: str = ""
     description: str = ""
     instructions: str = ""
     tools: list[str] = Field(default_factory=list)
-    model_params: ModelParams = Field(default_factory=ModelParams)
+    model_params: dict = Field(default_factory=dict)
     agent_params: AgentParams = Field(default_factory=AgentParams)
 
     @field_validator("workspace", mode="before")
@@ -55,16 +50,17 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     options: dict = Field(default_factory=dict)
+    model_params: dict = Field(default_factory=dict)
 
 
 class ImageConfig(BaseModel):
-    model: str = "gemini-3-pro-image-preview"
-    provider: ProviderConfig = Field(default_factory=lambda: ProviderConfig(name="gemini"))
+    model: str = ""
+    provider: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class AuthConfig(BaseModel):
-    username: str = "admin"
-    password: str = "admin"
+    username: str = ""
+    password: str = ""
     secret_key: str = ""
 
 
@@ -122,6 +118,7 @@ class AuthProfileConfig(BaseModel):
 
 
 class HttpClientConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
     auth_profiles: dict[str, AuthProfileConfig] = Field(default_factory=dict)
 
 
@@ -140,7 +137,7 @@ class StorageConfig(BaseModel):
     type: str = "local"
     local_path: str = "./workspace"
     s3_bucket: str = ""
-    s3_region: str = "us-east-1"
+    s3_region: str = ""
     s3_access_key: str = ""
     s3_secret_key: str = ""
 

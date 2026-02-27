@@ -11,7 +11,7 @@ const emit = defineEmits(['go-to-session'])
 
 const tasksStore = useTasksStore()
 
-const activeTool = computed(() => tasksStore.activeTools.get(props.task.id))
+const activeTool = computed(() => tasksStore.activeTools[props.task.id])
 
 function handleTitleClick() {
   if (props.task.channel && props.task.chat_id) {
@@ -56,10 +56,11 @@ watch(() => props.task.state, (state) => {
 onUnmounted(stopTimer)
 
 const elapsed = computed(() => {
-  if (!props.task.created_at) return 0
-  const start = new Date(props.task.created_at).getTime()
+  const start = props.task.started_at || props.task.created_at
+  if (!start) return 0
+  const startMs = new Date(start).getTime()
   const end = props.task.state === 'DOING' ? now.value : new Date(props.task.updated_at).getTime()
-  return Math.max(0, end - start)
+  return Math.max(0, end - startMs)
 })
 
 function formatDuration(ms) {
@@ -119,6 +120,12 @@ function formatDuration(ms) {
         </span>
       </div>
       <div class="task-meta-right">
+        <span v-if="task.tool_count" class="metric-badge" title="Tool calls">
+          <i class="pi pi-wrench"></i> {{ task.tool_count }}
+        </span>
+        <span v-if="task.iteration_count" class="metric-badge" title="Iterations">
+          <i class="pi pi-sync"></i> {{ task.iteration_count }}
+        </span>
         <span v-if="elapsed > 0" :class="['task-duration', task.state === 'DOING' ? 'task-duration-live' : '']">
           <i :class="task.state === 'DOING' ? 'pi pi-spin pi-stopwatch' : 'pi pi-stopwatch'"></i>
           {{ formatDuration(elapsed) }}
@@ -249,6 +256,13 @@ function formatDuration(ms) {
   background: color-mix(in srgb, var(--p-text-color) 8%, transparent);
   padding: 0.1rem 0.4rem;
   border-radius: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.metric-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
   font-size: 0.7rem;
 }
 

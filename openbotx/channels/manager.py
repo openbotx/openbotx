@@ -30,12 +30,13 @@ class ChannelManager:
         self._send_progress = config.send_progress
         self._send_tool_hints = config.send_tool_hints
 
-    def _init_channels(self) -> None:
-        if self.config.telegram.enabled and self.config.telegram.token:
+    def _create_channel(self, name: str) -> BaseChannel | None:
+        """Create a channel instance from current config."""
+        if name == "telegram" and self.config.telegram.token:
             try:
                 from openbotx.channels.telegram import TelegramChannel
 
-                channel = TelegramChannel(
+                return TelegramChannel(
                     token=self.config.telegram.token,
                     storage=self._storage,
                     on_message=self.bus.publish_inbound,
@@ -43,9 +44,15 @@ class ChannelManager:
                     proxy=self.config.telegram.proxy,
                     reply_to_message=self.config.telegram.reply_to_message,
                 )
-                self._channels["telegram"] = channel
             except Exception as e:
-                logger.error("Failed to init Telegram channel: %s", e)
+                logger.error("Failed to create %s channel: %s", name, e)
+        return None
+
+    def _init_channels(self) -> None:
+        if self.config.telegram.enabled and self.config.telegram.token:
+            channel = self._create_channel("telegram")
+            if channel:
+                self._channels["telegram"] = channel
 
     async def start(self) -> None:
         self._init_channels()
@@ -76,26 +83,20 @@ class ChannelManager:
                 logger.error("Failed to stop channel %s: %s", name, e)
 
     async def start_channel(self, name: str) -> bool:
-        channel = self._channels.get(name)
+        existing = self._channels.get(name)
+        if existing and existing.is_running:
+            await existing.stop()
+
+        channel = self._create_channel(name)
         if not channel:
-            if name == "telegram" and self.config.telegram.token:
-                from openbotx.channels.telegram import TelegramChannel
+            self._channels.pop(name, None)
+            self._broadcast_channel_status(name, False)
+            return False
 
-                channel = TelegramChannel(
-                    token=self.config.telegram.token,
-                    storage=self._storage,
-                    on_message=self.bus.publish_inbound,
-                    allow_from=self.config.telegram.allowed_users,
-                    proxy=self.config.telegram.proxy,
-                    reply_to_message=self.config.telegram.reply_to_message,
-                )
-                self._channels[name] = channel
-
-        if channel and not channel.is_running:
-            await channel.start()
-            self._broadcast_channel_status(name, channel.is_running)
-            return True
-        return False
+        self._channels[name] = channel
+        await channel.start()
+        self._broadcast_channel_status(name, channel.is_running)
+        return True
 
     async def stop_channel(self, name: str) -> bool:
         channel = self._channels.get(name)

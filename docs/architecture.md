@@ -130,7 +130,7 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `create_provider(model)` | Resolves the model to a provider config and creates a `LiteLLMProvider`.            |
 | `create_storage(url)`   | Creates `S3Storage` or `LocalStorage` based on the config.                           |
 | `create_cron_callback(bus)` | Returns a callback that publishes `InboundMessage` to the bus when a cron job fires. |
-| `create_orchestrator(...)` | Receives a `ProjectContext` (shared across all agents). Builds all `AgentLoop` instances (one per agent), creates `SubagentManager`s, and the `AgentClassifier`. Each agent gets its `PathResolver` created internally by `build_registry()` via `ProjectContext.create_resolver()`. Returns an `Orchestrator` that routes messages. |
+| `create_orchestrator(...)` | Receives a `ProjectContext` (shared across all agents). Merges provider-level `model_params` into each agent's `model_params` via dict merge (agent keys take precedence). Builds all `AgentLoop` instances (one per agent), creates `SubagentManager`s, and the `AgentClassifier`. Each agent gets its `PathResolver` created internally by `build_registry()` via `ProjectContext.create_resolver()`. Returns an `Orchestrator` that routes messages. |
 | `setup_logging(path)`   | Configures rotating file handler + console handler for the `openbotx` logger.        |
 
 The built web client (`openbotx/webclient/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html` (served with `Cache-Control: no-cache` to prevent stale bundles). The build output lives inside the Python package so it is included in the `.whl` distribution — users who install via `pip install openbotx` get the web UI out of the box.
@@ -212,14 +212,16 @@ The orchestrator's `run()` loop catches exceptions per-message. If a single mess
 6. Build system prompt (ContextBuilder)
 7. Build message array (system + history + new user message)
 8. Loop:
-   a. Call LLM provider with messages + tool definitions
-   b. If response contains tool_calls:
+   a. Increment task.iteration_count
+   b. Call LLM provider with messages + tool definitions
+   c. If response contains tool_calls:
       - Execute each tool via ToolRegistry
+      - Increment task.tool_count per tool call
       - Broadcast chat:tool_use via EventDispatcher
       - Append tool entry to session.live_state and task.live_state
       - Append assistant message + tool results to messages
       - Continue loop
-   c. If response is plain text:
+   d. If response is plain text:
       - Break loop, return response
 9. Clear session.live_state and task.live_state
 10. Save messages to session
@@ -237,7 +239,7 @@ Channels are the communication endpoints that connect users to the platform.
 | File           | Purpose                                                                                  |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | `base.py`      | `BaseChannel` -- abstract interface defining `start()`, `stop()`, `send()`, and `is_running`. |
-| `manager.py`   | `ChannelManager` -- initializes channels from config, runs an outbound dispatch loop, and routes messages. Web channel messages are forwarded through `WebSocketManager`. External channels (Telegram) go through their respective implementations. |
+| `manager.py`   | `ChannelManager` -- initializes channels from config via `_create_channel()`, runs an outbound dispatch loop, and routes messages. `start_channel()` always recreates the channel from current config, enabling token changes without server restart. Web channel messages are forwarded through `WebSocketManager`. External channels (Telegram) go through their respective implementations. |
 | `telegram.py`  | `TelegramChannel` -- Telegram bot integration via `python-telegram-bot`. Supports allowed user filtering, proxy configuration, and reply-to-message mode. |
 
 The web channel is implicit -- it does not have a `BaseChannel` implementation. Instead, the WebSocket endpoint in the server layer handles web client communication directly, and `ChannelManager._route_message` broadcasts web-bound outbound messages via `WebSocketManager`.
@@ -255,6 +257,8 @@ The provider subsystem abstracts LLM access behind a uniform interface.
 | `registry.py`          | `PROVIDERS` tuple of `ProviderSpec` objects. Defines metadata for each supported provider: custom, openrouter, anthropic, openai, deepseek, gemini, groq. Includes keyword matching, API key prefix detection, and gateway detection. |
 
 **Provider resolution:** The `Config.get_provider()` method matches a model name to a provider by first checking the LiteLLM-style prefix (e.g., `anthropic/claude-sonnet-4-20250514`), then falling back to keyword matching, and finally returning any provider with an API key configured.
+
+**Provider-level `model_params`:** Each `ProviderConfig` can define a default `model_params` dict (arbitrary key-value pairs like `max_tokens`, `temperature`, `top_p`, etc.). At startup, `ServerFactory.create_orchestrator` merges provider defaults into each agent's `model_params` using simple dict merge (`{**provider_params, **agent_params}`). Agent-level keys always take precedence.
 
 ### Tools
 
@@ -288,8 +292,8 @@ Tasks provide observability into what the agent is doing.
 
 | File          | Purpose                                                                             |
 | ------------- | ----------------------------------------------------------------------------------- |
-| `models.py`   | `Task` dataclass with fields: `id`, `title`, `description`, `state`, `agent_type`, `agent_name`, `parent_task_id`, `subagent_ids`, `result`, `error`, `created_at`, `updated_at`, `live_state`. The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory — it is included in API responses when non-empty but never persisted to JSONL. |
-| `manager.py`  | `TaskManager` -- creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events via the EventDispatcher. |
+| `models.py`   | `Task` dataclass with fields: `id`, `title`, `description`, `state`, `agent_type`, `agent_name`, `channel`, `chat_id`, `parent_task_id`, `subagent_ids`, `result`, `error`, `created_at`, `updated_at`, `started_at`, `completed_at`, `tool_count`, `iteration_count`, `live_state`. Computed property `duration_ms` returns elapsed milliseconds (from `started_at` to `completed_at`, or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory — it is included in API responses when non-empty but never persisted to JSONL. |
+| `manager.py`  | `TaskManager` -- creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events via the EventDispatcher. Auto-sets `started_at` on transition to `DOING` and `completed_at` on `DONE`/`ERROR`. Provides `increment_tool_count()` and `increment_iteration_count()` for in-memory metric tracking (persisted on next state transition). |
 
 Task states follow a Kanban model:
 
@@ -357,7 +361,7 @@ Configuration is defined as Pydantic models and loaded from YAML.
 
 | File          | Purpose                                                                          |
 | ------------- | -------------------------------------------------------------------------------- |
-| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `ModelParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `GeneralToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `HttpClientConfig`, `AuthProfileConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
+| `schema.py`   | Pydantic models: `Config`, `BotConfig`, `ServerConfig`, `AgentConfig`, `AgentParams`, `ImageConfig`, `AuthConfig`, `ProviderConfig`, `ChannelsConfig`, `TelegramConfig`, `ToolsConfig`, `GeneralToolsConfig`, `WebSearchConfig`, `ExecToolConfig`, `HttpClientConfig`, `AuthProfileConfig`, `StorageConfig`, `HeartbeatConfig`, `CronConfig`, `ClassifierConfig`. |
 | `loader.py`   | `load_config()` reads YAML and expands `${ENV_VAR}` patterns. `save_config()` writes the config back to YAML. |
 
 Key configuration sections:

@@ -23,6 +23,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
     ws.onopen = () => {
       connected.value = true
       reconnectDelay = 1000
+      syncAfterReconnect()
     }
 
     ws.onclose = (event) => {
@@ -99,6 +100,13 @@ export const useWebSocketStore = defineStore('websocket', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type, data }))
     }
+  }
+
+  function syncAfterReconnect() {
+    const tasks = useTasksStore()
+    const chat = useChatStore()
+    tasks.loadTasks()
+    chat.loadHistory(chat.currentSessionId)
   }
 
   function disconnect() {

@@ -62,13 +62,13 @@ server:
 agents:
   main:                           # Agent name (used as identifier).
     workspace: "./workspace"      # str  -- Working directory for this agent's files. Resolved relative to the project root. Empty or null defaults to "./workspace".
-    model: "anthropic/claude-sonnet-4-20250514"  # str  -- Model identifier in "provider/model" format.
+    model: ""                       # str  -- Model identifier in "provider/model" format (required).
     description: ""               # str  -- Short description of this agent's purpose. Used by the AgentClassifier to route messages when multiple agents are configured.
     instructions: ""              # str  -- Agent-specific instructions appended to the system prompt as a dedicated section. Use for behavioral rules, domain expertise, or role-specific guidelines.
     tools: []                     # list[str] -- Whitelist of tool names available to this agent. When empty (default), all tools are registered. When set, only tools whose name appears in this list are available.
-    model_params:
-      max_tokens: 8192            # int  -- Maximum tokens in the model response.
-      temperature: 0.1            # float -- Sampling temperature (0.0 = deterministic, higher = more creative).
+    model_params:                   # dict -- Arbitrary model parameters passed to the LLM provider. Common keys: max_tokens, temperature, top_p, etc.
+      max_tokens: 8192
+      temperature: 0.1
     agent_params:
       max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
       memory_window: 100          # int  -- Number of recent messages to keep in context before triggering consolidation.
@@ -86,9 +86,9 @@ classifier:
 # Image Generation
 # ---------------------------------------------------------------------------
 image:
-  model: "gemini-3-pro-image-preview"  # str  -- Model name for image generation.
+  model: ""                            # str  -- Model name for image generation (required if using image generation).
   provider:                            # ProviderConfig -- Provider connection settings (same schema as providers.*).
-    name: "gemini"                     # str  -- Image generation backend (e.g. "gemini", "openai").
+    name: ""                           # str  -- Image generation backend (e.g. "gemini", "openai").
     api_key: ""                        # str  -- API key for the image provider.
     api_base: null                     # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
     headers: {}                        # dict[str, str] -- Custom HTTP headers sent with every API request.
@@ -98,8 +98,8 @@ image:
 # Authentication
 # ---------------------------------------------------------------------------
 auth:
-  username: "admin"               # str  -- Username for the web UI login.
-  password: "admin"               # str  -- Password for the web UI login.
+  username: ""                    # str  -- Username for the web UI login (required).
+  password: ""                    # str  -- Password for the web UI login (required).
   secret_key: ""                  # str  -- Secret used for signing tokens. Auto-generated at startup if left empty.
 
 # ---------------------------------------------------------------------------
@@ -113,6 +113,9 @@ providers:
     api_base: null                # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
     headers: {}                   # dict[str, str] -- Custom HTTP headers sent with every API request.
     options: {}                   # dict -- Additional provider-specific parameters merged into the request body.
+    model_params:                 # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these.
+      max_tokens: 8192
+      temperature: 0.1
 
 # ---------------------------------------------------------------------------
 # Channels
@@ -158,7 +161,7 @@ storage:
   type: "local"                   # str  -- Storage backend: "local" for filesystem, "s3" for Amazon S3.
   local_path: "./workspace"       # str  -- Directory path when using local storage.
   s3_bucket: ""                   # str  -- S3 bucket name (required when type is "s3").
-  s3_region: "us-east-1"         # str  -- AWS region for the S3 bucket.
+  s3_region: ""                  # str  -- AWS region for the S3 bucket (required when type is "s3").
   s3_access_key: ""              # str  -- AWS access key ID.
   s3_secret_key: ""              # str  -- AWS secret access key.
 
@@ -236,6 +239,37 @@ When multiple agents are configured, the `Orchestrator` uses the `AgentClassifie
 5. Falls back to the first (default) agent on error.
 
 For single-agent setups, no classification is performed — all messages go to the default agent.
+
+### Model Parameters Resolution
+
+Model parameters are flexible dictionaries passed directly to the LLM provider. Any key-value pair supported by the underlying model API can be used (e.g., `max_tokens`, `temperature`, `top_p`, `frequency_penalty`). Resolution order:
+
+1. **Provider `model_params`** — default parameters for all agents using the provider
+2. **Agent `model_params`** — override provider defaults for this specific agent
+
+At startup, `ServerFactory.create_orchestrator` merges provider defaults with agent overrides using simple dict merge (`{**provider_params, **agent_params}`). Agent-level keys always take precedence.
+
+Example:
+
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    model_params:
+      max_tokens: 16384
+      temperature: 0.2
+
+agents:
+  main:
+    model: "anthropic/claude-sonnet-4-20250514"
+    model_params:
+      max_tokens: 8192           # Overrides provider → effective: 8192
+      # temperature not set      → inherits 0.2 from provider
+
+  researcher:
+    model: "anthropic/claude-sonnet-4-20250514"
+    # model_params not set       → inherits all from provider
+```
 
 ---
 
