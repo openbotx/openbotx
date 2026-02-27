@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-    <a href="https://badge.fury.io/py/openbotx"><img src="https://badge.fury.io/py/openbotx.svg" alt="PyPI version"></a>
+    <a href="https://pypi.org/project/openbotx/"><img src="https://img.shields.io/pypi/v/openbotx?color=brightgreen" alt="PyPI version"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11--3.13-blue.svg" alt="Python 3.11-3.13"></a>
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
