@@ -1,7 +1,5 @@
-MASKED_VALUE = "***"
-
 _SENSITIVE_SUFFIXES = ("_key", "_secret", "_token", "_password")
-_SENSITIVE_EXACT = frozenset({"key", "token", "password", "secret", "api_key"})
+_SENSITIVE_EXACT = frozenset({"key", "token", "password", "secret", "api_key", "value"})
 
 
 def is_sensitive_key(name: str) -> bool:
@@ -21,11 +19,13 @@ def mask_dict(d: dict | list) -> dict | list:
         if isinstance(v, (dict, list)):
             masked[k] = mask_dict(v)
         elif is_sensitive_key(k):
-            masked[k] = MASKED_VALUE if v else ""
+            masked[k] = ""
         else:
             masked[k] = v
     return masked
 
 
-def is_masked_or_empty(value: str) -> bool:
-    return not value or value == MASKED_VALUE
+def is_empty_or_blank(value: str) -> bool:
+    if value is None:
+        return True
+    return isinstance(value, str) and not value.strip()

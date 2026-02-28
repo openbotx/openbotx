@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from openbotx.helpers.secrets import is_masked_or_empty, is_sensitive_key, mask_dict
+from openbotx.helpers.secrets import is_empty_or_blank, is_sensitive_key, mask_dict
 
 router = APIRouter()
 
@@ -47,7 +47,7 @@ async def update_credential(name: str, body: dict, request: Request):
     for key, value in body.items():
         if not hasattr(existing, key):
             continue
-        if is_sensitive_key(key) and is_masked_or_empty(value):
+        if is_sensitive_key(key) and is_empty_or_blank(value):
             continue
         setattr(existing, key, value)
 

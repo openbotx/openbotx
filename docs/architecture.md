@@ -442,7 +442,7 @@ Utility modules shared across the codebase.
 | `text.py`          | `humanize()` converts tool names to human-readable format. `describe_tool_use()` generates descriptions of tool calls for WebSocket events. |
 | `oauth1.py`         | OAuth 1.0a signature generation (RFC 5849). `build_oauth1_header()` builds HMAC-SHA1 signed `Authorization` headers. Used by `HttpClientTool`. |
 | `ssrf.py`          | SSRF protection. `validate_url()` blocks requests to private/internal networks. `ssrf_event_hook()` validates redirects. Used by `HttpClientTool`, `WebFetchTool`, and `RssReaderTool`. |
-| `secrets.py`       | Sensitive value masking for config display. `is_sensitive_key()`, `mask_dict()`, `is_masked_or_empty()`. Used by config routes to hide API keys and passwords. |
+| `secrets.py`       | Sensitive value masking for config display. `is_sensitive_key()`, `mask_dict()`, `is_empty_or_blank()`. Used by config routes to hide API keys and passwords. |
 
 ### Storage
 

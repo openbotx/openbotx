@@ -58,6 +58,8 @@ _CREDENTIAL_FIELDS_BY_TYPE = {
     "basic": {"type", "username", "password"},
     "login": {"type", "username", "password"},
     "aws": {"type", "access_key", "secret_key"},
+    "header": {"type", "header_name", "value"},
+    "bearer": {"type", "token"},
 }
 
 
@@ -76,6 +78,11 @@ class CredentialConfig(BaseModel):
     # aws
     access_key: str = ""
     secret_key: str = ""
+    # header
+    header_name: str = ""
+    value: str = ""
+    # bearer
+    token: str = ""
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):

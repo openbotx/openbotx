@@ -5,7 +5,7 @@ import yaml
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from openbotx.helpers.secrets import is_masked_or_empty, is_sensitive_key, mask_dict
+from openbotx.helpers.secrets import is_empty_or_blank, is_sensitive_key, mask_dict
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -153,7 +153,7 @@ async def _save_advanced_yaml(yaml_str: str, config):
 
 
 def _update_section(current, data: dict) -> None:
-    """Update a config section, preserving sensitive fields when masked or empty."""
+    """Update a config section, preserving sensitive fields when empty."""
     from pydantic import BaseModel
 
     for key, value in data.items():
@@ -166,7 +166,7 @@ def _update_section(current, data: dict) -> None:
             else:
                 setattr(current, key, value)
             continue
-        if is_sensitive_key(key) and is_masked_or_empty(value):
+        if is_sensitive_key(key) and is_empty_or_blank(value):
             continue
         setattr(current, key, value)
 
@@ -232,7 +232,7 @@ def _update_credentials(config, data):
             for key, value in pdata.items():
                 if not hasattr(existing, key):
                     continue
-                if is_sensitive_key(key) and is_masked_or_empty(value):
+                if is_sensitive_key(key) and is_empty_or_blank(value):
                     continue
                 setattr(existing, key, value)
         else:

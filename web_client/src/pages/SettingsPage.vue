@@ -109,7 +109,7 @@ onMounted(async () => {
     }
     webClientConfig.value = { credential: configStore.config.web_client?.credential || '' }
 
-    // credentials — initialize with type only (secrets are masked by backend)
+    // credentials
     const cfgCreds = configStore.config.credentials || {}
     const parsedCreds = {}
     for (const [name, cred] of Object.entries(cfgCreds)) {

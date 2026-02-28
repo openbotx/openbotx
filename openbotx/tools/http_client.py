@@ -21,7 +21,7 @@ class HttpClientTool(Tool):
     description = (
         "Make HTTP requests with full control over method, headers, body, "
         "and content type. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. "
-        "Use auth parameter with a configured profile name for authenticated requests (oauth1, basic, bearer). "
+        "Use auth parameter with a configured profile name for authenticated requests (oauth1, basic, bearer, header). "
         "Use download_path to save a response as a file. "
         "Use upload_file to upload a file as multipart form data."
     )
@@ -128,7 +128,14 @@ class HttpClientTool(Tool):
             ).decode()
             headers["Authorization"] = f"Basic {credentials}"
         elif profile.type == "simple":
-            headers["Authorization"] = f"Bearer {profile.key}"
+            if profile.key:
+                headers["Authorization"] = f"Bearer {profile.key}"
+        elif profile.type == "bearer":
+            if profile.token:
+                headers["Authorization"] = f"Bearer {profile.token}"
+        elif profile.type == "header":
+            if profile.header_name and profile.value:
+                headers[profile.header_name] = profile.value
         else:
             raise ValueError(f"Unknown auth type: {profile.type}")
 

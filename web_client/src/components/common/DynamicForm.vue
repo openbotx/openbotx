@@ -99,6 +99,7 @@ function refOptions(type) {
         :placeholder="field.placeholder || 'Leave empty to keep current'"
         class="w-full"
         inputClass="w-full"
+        :inputProps="{ autocomplete: 'off', 'data-1p-ignore': '' }"
       />
 
       <!-- long-text -->

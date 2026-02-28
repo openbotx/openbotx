@@ -10,7 +10,12 @@ from openbotx.cron.service import CronService
 from openbotx.tools.base import Tool
 from openbotx.tools.browser import BrowserTool
 from openbotx.tools.cron import CronTool
-from openbotx.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from openbotx.tools.filesystem import (
+    EditFileTool,
+    ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from openbotx.tools.http_client import HttpClientTool
 from openbotx.tools.image import ImageGenerationTool
 from openbotx.tools.memory_tool import MemoryReadTool, MemorySaveTool, MemorySearchTool
@@ -128,11 +133,11 @@ def build_registry(
     )
     _register(WebFetchTool())
 
-    # http client — all oauth1/basic/simple credentials are available as profiles
+    # http client — all oauth1/basic/simple/bearer/header credentials are available as profiles
     http_profiles = {
         name: cred
         for name, cred in project_ctx.credentials.items()
-        if cred.type in ("oauth1", "basic", "simple")
+        if cred.type in ("oauth1", "basic", "simple", "bearer", "header")
     }
     _register(HttpClientTool(resolver, auth_profiles=http_profiles))
     _register(RssReaderTool())

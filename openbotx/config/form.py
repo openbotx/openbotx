@@ -99,6 +99,8 @@ FORM_SCHEMAS: dict[str, list[dict]] = {
                 {"label": "Basic Auth", "value": "basic"},
                 {"label": "Login", "value": "login"},
                 {"label": "AWS", "value": "aws"},
+                {"label": "Header", "value": "header"},
+                {"label": "Bearer", "value": "bearer"},
             ],
         },
         # simple
@@ -108,24 +110,28 @@ FORM_SCHEMAS: dict[str, list[dict]] = {
             "name": "consumer_key",
             "type": "secret",
             "label": "Consumer Key",
+            "placeholder": "Leave empty to keep current",
             "visible_when": {"type": "oauth1"},
         },
         {
             "name": "consumer_secret",
             "type": "secret",
             "label": "Consumer Secret",
+            "placeholder": "Leave empty to keep current",
             "visible_when": {"type": "oauth1"},
         },
         {
             "name": "access_token",
             "type": "secret",
             "label": "Access Token",
+            "placeholder": "Leave empty to keep current",
             "visible_when": {"type": "oauth1"},
         },
         {
             "name": "access_token_secret",
             "type": "secret",
             "label": "Access Token Secret",
+            "placeholder": "Leave empty to keep current",
             "visible_when": {"type": "oauth1"},
         },
         # basic / login
@@ -153,6 +159,29 @@ FORM_SCHEMAS: dict[str, list[dict]] = {
             "type": "secret",
             "label": "Secret Key",
             "visible_when": {"type": "aws"},
+        },
+        # header
+        {
+            "name": "header_name",
+            "type": "text",
+            "label": "Header Name",
+            "placeholder": "e.g. Authorization, X-API-Key",
+            "visible_when": {"type": "header"},
+        },
+        {
+            "name": "value",
+            "type": "secret",
+            "label": "Value",
+            "placeholder": "Leave empty to keep current",
+            "visible_when": {"type": "header"},
+        },
+        # bearer
+        {
+            "name": "token",
+            "type": "secret",
+            "label": "Token",
+            "placeholder": "Leave empty to keep current",
+            "visible_when": {"type": "bearer"},
         },
     ],
     "login": [
