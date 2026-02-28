@@ -7,10 +7,10 @@ router = APIRouter()
 
 
 class ProviderUpdate(BaseModel):
-    api_key: str = ""
-    api_base: str = ""
-    headers: dict[str, str] = Field(default_factory=dict)
-    options: dict = Field(default_factory=dict)
+    credential: str = ""
+    base_url: str = ""
+    request_headers: dict[str, str] = Field(default_factory=dict)
+    request_options: dict = Field(default_factory=dict)
     model_params: dict = Field(default_factory=dict)
 
 
@@ -21,14 +21,16 @@ async def list_providers(request: Request):
     for spec in PROVIDERS:
         configured = spec.name in config.providers
         cfg = config.providers.get(spec.name)
+        cred = config.get_credential(cfg.credential) if cfg else None
         result.append(
             {
                 "name": spec.name,
                 "configured": configured,
-                "api_base": cfg.api_base if configured else "",
-                "has_key": bool(cfg.api_key) if configured else False,
-                "headers": dict(cfg.headers) if configured else {},
-                "options": dict(cfg.options) if configured else {},
+                "credential": cfg.credential if configured else "",
+                "has_key": bool(cred and cred.key) if configured else False,
+                "base_url": cfg.base_url if configured else "",
+                "request_headers": dict(cfg.request_headers) if configured else {},
+                "request_options": dict(cfg.request_options) if configured else {},
                 "model_params": cfg.model_params if configured else {},
             }
         )
@@ -45,14 +47,14 @@ async def update_provider(name: str, body: ProviderUpdate, request: Request):
         return {"error": f"Unknown provider: {name}"}
 
     existing = config.providers.get(name)
-    api_key = body.api_key or (existing.api_key if existing else "")
-    api_base = body.api_base or (existing.api_base if existing else None)
+    credential = body.credential or (existing.credential if existing else "")
 
     config.providers[name] = ProviderConfig(
-        api_key=api_key,
-        api_base=api_base,
-        headers=body.headers,
-        options=body.options,
+        name=name,
+        credential=credential,
+        base_url=body.base_url,
+        request_headers=body.request_headers,
+        request_options=body.request_options,
         model_params=body.model_params,
     )
     save_config(config, config._config_path)

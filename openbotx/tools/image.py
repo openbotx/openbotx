@@ -4,7 +4,7 @@ import logging
 
 from litellm import aimage_edit, aimage_generation
 
-from openbotx.config.schema import ImageConfig
+from openbotx.config.schema import CredentialConfig, ImageConfig, ProviderConfig
 from openbotx.helpers.path import media_path
 from openbotx.storage.base import StorageProvider
 from openbotx.tools.base import Tool
@@ -13,8 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerationTool(Tool):
-    def __init__(self, config: ImageConfig, storage: StorageProvider):
+    def __init__(
+        self,
+        config: ImageConfig,
+        provider: ProviderConfig,
+        credential: CredentialConfig,
+        storage: StorageProvider,
+    ):
         self._config = config
+        self._provider = provider
+        self._credential = credential
         self._storage = storage
 
     @property
@@ -57,20 +65,15 @@ class ImageGenerationTool(Tool):
         }
 
     def _build_model(self) -> str:
-        prov = self._config.provider
-        model = self._config.model
-        if prov.name:
-            model = f"{prov.name}/{model}"
-        return model
+        return self._config.model
 
     def _provider_kwargs(self) -> dict:
-        prov = self._config.provider
         return {
-            "api_key": prov.api_key or None,
-            "api_base": prov.api_base,
-            "extra_headers": prov.headers or None,
+            "api_key": self._credential.key or None,
+            "api_base": self._provider.base_url or None,
+            "extra_headers": self._provider.request_headers or None,
             "timeout": 120,
-            **prov.options,
+            **self._provider.request_options,
         }
 
     async def _load_images(self, paths: list[str]) -> list[io.BytesIO]:

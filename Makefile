@@ -1,4 +1,4 @@
-.PHONY: help setup dev-install install build clean clean-venv reset lint format webclient-install webclient-build webclient-dev dev publish-test publish version bump-patch bump-minor bump-major
+.PHONY: help setup dev-install install build clean clean-venv reset lint format web-client-install web-client-build web-client-dev dev publish-test publish version bump-patch bump-minor bump-major
 
 BLUE := \033[34m
 GREEN := \033[32m
@@ -27,16 +27,16 @@ dev-install: ## Install in editable mode
 install: ## Install package
 	uv pip install .
 
-# webclient
+# web client
 
-webclient-install: ## Install webclient dependencies
-	cd webclient && npm install
+web-client-install: ## Install web client dependencies
+	cd web_client && npm install
 
-webclient-build: ## Build webclient for production
-	cd webclient && npm run build
+web-client-build: ## Build web client for production
+	cd web_client && npm run build
 
-webclient-dev: ## Start webclient dev server
-	cd webclient && npm run dev
+web-client-dev: ## Start web client dev server
+	cd web_client && npm run dev
 
 # development
 
@@ -45,7 +45,7 @@ dev: ## Start backend dev server with reload
 
 # build
 
-build: clean webclient-build ## Build the package
+build: clean web-client-build ## Build the package
 	uv run python -m build
 
 clean: ## Clean build artifacts
@@ -53,7 +53,7 @@ clean: ## Clean build artifacts
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	rm -rf .pytest_cache/ .mypy_cache/ .ruff_cache/ htmlcov/
-	rm -rf openbotx/webclient/
+	rm -rf openbotx/web_client/
 
 clean-venv: ## Remove virtual environment
 	rm -rf .venv/

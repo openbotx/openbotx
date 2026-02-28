@@ -121,9 +121,10 @@ The `load_config()` in `openbotx/config/loader.py` does the following:
 
 ```yaml
 # config.yml
-providers:
+credentials:
   anthropic:
-    api_key: ${ANTHROPIC_API_KEY}  # will be replaced with the actual value
+    type: simple
+    key: ${ANTHROPIC_API_KEY}  # will be replaced with the actual value
 ```
 
 4. **Validates with Pydantic**: The resulting dictionary is validated by the `Config` model (Pydantic), which applies defaults for missing fields
@@ -181,7 +182,7 @@ sequenceDiagram
    - `/app/*` (static frontend)
    - `/ws` (authentication handled internally)
 
-If no `secret_key` is configured in `config.yml`, the server automatically generates a random UUID as the secret on startup.
+If no `server.credential` is configured, the server automatically creates a `simple` credential with a random key for JWT signing. If no `web_client.credential` is configured, a default `login` credential with admin/admin credentials is auto-created.
 
 ---
 
@@ -810,16 +811,18 @@ OpenBotX supports multiple AI providers via **LiteLLM**. The selection of which 
 graph TD
     A["Configured model (e.g., anthropic/claude-sonnet-4-20250514)"] --> B{Has prefix with /?}
     B -->|Yes| C["Extract prefix (e.g., 'anthropic')"]
-    C --> D{Prefix matches a configured provider with API key?}
+    C --> D{Prefix matches a provider whose credential has an API key?}
     D -->|Yes| E[Use that provider]
     D -->|No| F[Continue to keyword search]
     B -->|No| F
     F --> G{Any provider has a keyword matching the model name?}
     G -->|Yes| H[Use that provider]
-    G -->|No| I{Any provider configured with an API key?}
+    G -->|No| I{Any provider with a configured credential that has an API key?}
     I -->|Yes| J[Use the first one found]
     I -->|No| K[No provider available]
 ```
+
+`ServerFactory.create_provider()` then resolves through provider -> credential -> concrete key to build a `LiteLLMProvider`.
 
 ### Model Parameters Resolution
 
@@ -834,7 +837,7 @@ This merge happens once in `ServerFactory.create_orchestrator` before agent loop
 
 The `LiteLLMProvider` (`openbotx/providers/litellm_provider.py`) transforms the model name before sending to LiteLLM:
 
-1. If there's a configured **gateway** (explicit provider), it applies the gateway prefix and optionally strips the original prefix
+1. If there's a configured **gateway** (explicit model provider), it applies the gateway prefix and optionally strips the original prefix
 2. Otherwise, it looks up the provider specification by model name and adds the correct LiteLLM prefix
 
 ### Prompt Caching
@@ -1899,13 +1902,18 @@ server:
   port: 8000
   public_url: ""  # optional — only for generating public URLs and opening browser
 
+credentials:
+  s3:
+    type: aws
+    access_key: ${AWS_ACCESS_KEY}
+    secret_key: ${AWS_SECRET_KEY}
+
 storage:
   type: local  # or "s3"
   # S3-specific fields:
   s3_bucket: my-bucket
   s3_region: us-east-1
-  s3_access_key: ${AWS_ACCESS_KEY}
-  s3_secret_key: ${AWS_SECRET_KEY}
+  credential: s3
 ```
 
 ### `public_url` Behavior

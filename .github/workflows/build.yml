@@ -26,20 +26,20 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           sed -i "s/0.0.0-dev/$VERSION/" openbotx/version.py
-          sed -i "s/0.0.0-dev/$VERSION/" webclient/package.json
+          sed -i "s/0.0.0-dev/$VERSION/" web_client/package.json
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Install webclient dependencies
+      - name: Install web_client dependencies
         run: npm install
-        working-directory: webclient
+        working-directory: web_client
 
-      - name: Build webclient
+      - name: Build web_client
         run: npm run build
-        working-directory: webclient
+        working-directory: web_client
 
       - name: Setup Python
         uses: actions/setup-python@v5

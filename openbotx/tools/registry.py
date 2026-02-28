@@ -10,7 +10,12 @@ from openbotx.cron.service import CronService
 from openbotx.tools.base import Tool
 from openbotx.tools.browser import BrowserTool
 from openbotx.tools.cron import CronTool
-from openbotx.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from openbotx.tools.filesystem import (
+    EditFileTool,
+    ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from openbotx.tools.http_client import HttpClientTool
 from openbotx.tools.image import ImageGenerationTool
 from openbotx.tools.memory_tool import MemoryReadTool, MemorySaveTool, MemorySearchTool
@@ -117,14 +122,24 @@ def build_registry(
             restrict_to_workspace=resolver.is_restricted,
         )
     )
+
+    # web search — resolve api_key from credentials
+    ws_auth = project_ctx.credentials.get(project_ctx.tools.web_search.credential)
     _register(
         WebSearchTool(
-            api_key=project_ctx.tools.web_search.api_key,
+            api_key=ws_auth.key if ws_auth else "",
             max_results=project_ctx.tools.web_search.max_results,
         )
     )
     _register(WebFetchTool())
-    _register(HttpClientTool(resolver, auth_profiles=project_ctx.tools.http_client.auth_profiles))
+
+    # http client — all oauth1/basic/simple/bearer/header credentials are available as profiles
+    http_profiles = {
+        name: cred
+        for name, cred in project_ctx.credentials.items()
+        if cred.type in ("oauth1", "basic", "simple", "bearer", "header")
+    }
+    _register(HttpClientTool(resolver, auth_profiles=http_profiles))
     _register(RssReaderTool())
     _register(BrowserTool())
 
@@ -148,9 +163,21 @@ def build_registry(
         _register(MemoryReadTool(memory_store=memory_store))
         _register(MemorySearchTool(memory_store=memory_store))
 
-    image_cfg = project_ctx.image
-    if image_cfg and image_cfg.provider.api_key and project_ctx.storage:
-        _register(ImageGenerationTool(config=image_cfg, storage=project_ctx.storage))
+    # image — resolve provider from model prefix (same pattern as agents)
+    img_cfg = project_ctx.image
+    img_prefix = img_cfg.model.split("/", 1)[0] if "/" in img_cfg.model else ""
+    prov = project_ctx.providers.get(img_prefix) if img_prefix else None
+    if prov:
+        img_cred = project_ctx.credentials.get(prov.credential)
+        if img_cred and img_cred.key and project_ctx.storage:
+            _register(
+                ImageGenerationTool(
+                    config=img_cfg,
+                    provider=prov,
+                    credential=img_cred,
+                    storage=project_ctx.storage,
+                )
+            )
 
     return RegistryResult(
         registry=registry,

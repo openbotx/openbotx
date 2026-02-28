@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from openbotx.config.schema import AuthProfileConfig
+from openbotx.config.schema import CredentialConfig
 from openbotx.helpers.path import PathResolver
 from openbotx.helpers.ssrf import ssrf_event_hook, validate_url
 from openbotx.tools.base import Tool
@@ -21,7 +21,7 @@ class HttpClientTool(Tool):
     description = (
         "Make HTTP requests with full control over method, headers, body, "
         "and content type. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. "
-        "Use auth parameter with a configured profile name for authenticated requests (oauth1, basic, bearer). "
+        "Use auth parameter with a configured profile name for authenticated requests (oauth1, basic, simple, bearer, header). "
         "Use download_path to save a response as a file. "
         "Use upload_file to upload a file as multipart form data."
     )
@@ -84,7 +84,7 @@ class HttpClientTool(Tool):
     def __init__(
         self,
         resolver: PathResolver | None = None,
-        auth_profiles: dict[str, AuthProfileConfig] | None = None,
+        auth_profiles: dict[str, CredentialConfig] | None = None,
     ):
         self._resolver = resolver
         self._auth_profiles = auth_profiles or {}
@@ -127,8 +127,15 @@ class HttpClientTool(Tool):
                 f"{profile.username}:{profile.password}".encode()
             ).decode()
             headers["Authorization"] = f"Basic {credentials}"
+        elif profile.type == "simple":
+            if profile.key:
+                headers["Authorization"] = profile.key
         elif profile.type == "bearer":
-            headers["Authorization"] = f"Bearer {profile.token}"
+            if profile.token:
+                headers["Authorization"] = f"Bearer {profile.token}"
+        elif profile.type == "header":
+            if profile.header_name and profile.value:
+                headers[profile.header_name] = profile.value
         else:
             raise ValueError(f"Unknown auth type: {profile.type}")
 
@@ -166,7 +173,14 @@ class HttpClientTool(Tool):
                     follow_redirects,
                 )
             return await self._request(
-                method, url, headers, body, content_type, auth, timeout, follow_redirects
+                method,
+                url,
+                headers,
+                body,
+                content_type,
+                auth,
+                timeout,
+                follow_redirects,
             )
         except Exception as e:
             logger.error("http_client %s %s failed: %s", method, url, e, exc_info=True)

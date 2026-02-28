@@ -2,17 +2,20 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Card from 'primevue/card'
-import InputText from 'primevue/inputtext'
-import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useAuthStore } from '../stores/auth'
+import DynamicForm from '../components/common/DynamicForm.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const username = ref('')
-const password = ref('')
+const loginSchema = [
+  { name: 'username', type: 'text', label: 'Username', required: true },
+  { name: 'password', type: 'secret', label: 'Password', required: true },
+]
+
+const formData = ref({ username: '', password: '' })
 const error = ref('')
 const loading = ref(false)
 
@@ -20,7 +23,7 @@ async function handleLogin() {
   error.value = ''
   loading.value = true
   try {
-    await authStore.login(username.value, password.value)
+    await authStore.login(formData.value.username, formData.value.password)
     router.push('/')
   } catch (e) {
     error.value = e.message || 'Login failed'
@@ -42,14 +45,7 @@ async function handleLogin() {
       <template #content>
         <form @submit.prevent="handleLogin" class="login-form">
           <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-          <div class="form-field">
-            <label for="username">Username</label>
-            <InputText id="username" v-model="username" class="w-full" autofocus />
-          </div>
-          <div class="form-field">
-            <label for="password">Password</label>
-            <Password id="password" v-model="password" class="w-full" :feedback="false" toggle-mask input-class="w-full" />
-          </div>
+          <DynamicForm :schema="loginSchema" v-model="formData" />
           <Button type="submit" label="Login" icon="pi pi-sign-in" :loading="loading" class="w-full" />
         </form>
       </template>
@@ -95,17 +91,6 @@ async function handleLogin() {
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.form-field label {
-  font-size: 0.85rem;
-  font-weight: 600;
+  gap: 1rem;
 }
 </style>

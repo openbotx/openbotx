@@ -3,20 +3,35 @@ import { ref, watch, onMounted } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
-import InputNumber from 'primevue/inputnumber'
-import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
-import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
 import { useApi } from '../composables/useApi'
+import DynamicForm from '../components/common/DynamicForm.vue'
 
 const api = useApi()
 const toast = useToast()
 const jobs = ref([])
 const showDialog = ref(false)
 const loading = ref(true)
+
+const jobSchema = [
+  { name: 'name', type: 'text', label: 'Name', required: true },
+  { name: 'message', type: 'text', label: 'Message', required: true },
+  {
+    name: 'type',
+    type: 'select',
+    label: 'Schedule Type',
+    options: [
+      { label: 'Interval', value: 'every' },
+      { label: 'Cron Expression', value: 'cron' },
+      { label: 'One-time', value: 'at' },
+    ],
+  },
+  { name: 'every_seconds', type: 'int', label: 'Interval (seconds)', visible_when: { type: 'every' } },
+  { name: 'cron_expr', type: 'text', label: 'Cron Expression', placeholder: '0 9 * * *', visible_when: { type: 'cron' } },
+  { name: 'at', type: 'datetime', label: 'Date/Time', visible_when: { type: 'at' } },
+]
 
 const newJob = ref({
   name: '',
@@ -26,12 +41,6 @@ const newJob = ref({
   cron_expr: '',
   at: null,
 })
-
-const scheduleTypes = ref([
-  { label: 'Interval', value: 'every' },
-  { label: 'Cron Expression', value: 'cron' },
-  { label: 'One-time', value: 'at' },
-])
 
 watch(() => newJob.value.type, (val) => {
   if (val === 'at' && !newJob.value.at) {
@@ -130,37 +139,7 @@ function statusSeverity(status) {
     </div>
 
     <Dialog v-model:visible="showDialog" header="New Job" modal :style="{ width: '500px' }" :breakpoints="{ '768px': '95vw' }">
-      <div class="form-group">
-        <label>Name</label>
-        <InputText v-model="newJob.name" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label>Message</label>
-        <InputText v-model="newJob.message" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label>Schedule Type</label>
-        <Select v-model="newJob.type" :options="scheduleTypes" option-label="label" option-value="value" class="w-full" />
-      </div>
-      <div v-if="newJob.type === 'every'" class="form-group">
-        <label>Interval (seconds)</label>
-        <InputNumber v-model="newJob.every_seconds" class="w-full" />
-      </div>
-      <div v-if="newJob.type === 'cron'" class="form-group">
-        <label>Cron Expression</label>
-        <InputText v-model="newJob.cron_expr" placeholder="0 9 * * *" class="w-full" />
-      </div>
-      <div v-if="newJob.type === 'at'" class="form-group">
-        <label>Date/Time</label>
-        <DatePicker
-          v-model="newJob.at"
-          showTime
-          hourFormat="24"
-          showIcon
-          fluid
-          dateFormat="yy-mm-dd"
-        />
-      </div>
+      <DynamicForm :schema="jobSchema" v-model="newJob" />
       <div class="dialog-footer">
         <Button label="Cancel" severity="secondary" text @click="showDialog = false" />
         <Button label="Create" icon="pi pi-check" @click="createJob" />
@@ -216,17 +195,6 @@ function statusSeverity(status) {
   padding: 3rem 1rem;
   color: var(--p-text-muted-color);
   gap: 0.75rem;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.4rem;
-  font-size: 0.85rem;
-  font-weight: 600;
 }
 
 .dialog-footer {

@@ -150,7 +150,7 @@ Search the web using the Brave Search API.
 | `query` | string | Yes | The search query. |
 | `count` | integer | No | Number of results to return (1-10). |
 
-Requires the Brave Search API key to be configured (`tools.web_search.api_key` in `config.yml`).
+Requires a Brave Search API key to be configured via a credential (`tools.web_search.credential` in `config.yml`).
 
 #### web_fetch
 
@@ -306,7 +306,7 @@ Chrome automation via the Chrome DevTools Protocol (CDP). Requires Google Chrome
 
 #### http_client
 
-Full HTTP client with download, upload, and authentication support. Uses a `PathResolver` for file path resolution and `AuthProfileConfig` for named auth profiles.
+Full HTTP client with download, upload, and authentication support. Uses a `PathResolver` for file path resolution and `CredentialConfig` for authentication via credentials.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -315,7 +315,7 @@ Full HTTP client with download, upload, and authentication support. Uses a `Path
 | `headers` | object | No | HTTP headers as key-value pairs. |
 | `body` | string | No | The request body. |
 | `content_type` | string | No | Body content type: `json` (default), `form`, `text`, or `xml`. Maps to the appropriate `Content-Type` header. |
-| `auth` | string | No | Auth profile name from config. Automatically applies authentication headers (OAuth 1.0a, Basic, or Bearer). |
+| `auth` | string | No | Credential name from config. Automatically applies authentication headers (OAuth 1.0a, Basic, or Bearer) based on the credential's type. |
 | `timeout` | integer | No | Request timeout in seconds (default: 30). |
 | `follow_redirects` | boolean | No | Follow HTTP redirects (default: true). |
 | `download_path` | string | No | Save the response body to this file path instead of returning it. Path is resolved via `PathResolver`. |
@@ -337,28 +337,26 @@ Full HTTP client with download, upload, and authentication support. Uses a `Path
 
 **Upload mode:** When `upload_file` is set, the file is sent as multipart form data. The MIME type is auto-detected from the file extension. Additional form fields can be passed as JSON in the `body` parameter.
 
-**Authentication:** When `auth` is set, the tool looks up the named profile from `tools.http_client.auth_profiles` in the config and applies the appropriate `Authorization` header:
+**Authentication:** When `auth` is set, the tool looks up the named credential from `credentials` in the config and applies the appropriate `Authorization` header. The http_client automatically has access to all credentials with compatible types (oauth1, basic, simple):
 
-| Auth type | Config fields | Header format |
-|-----------|--------------|---------------|
+| Auth type | Credential fields | Header format |
+|-----------|---------------------|---------------|
 | `oauth1` | `consumer_key`, `consumer_secret`, `access_token`, `access_token_secret` | `OAuth oauth_consumer_key="...", ...` (HMAC-SHA1) |
 | `basic` | `username`, `password` | `Basic base64(username:password)` |
-| `bearer` | `token` | `Bearer {token}` |
+| `simple` | `key` | `Bearer {key}` |
 
 Config example:
 ```yaml
-tools:
-  http_client:
-    auth_profiles:
-      twitter:
-        type: oauth1
-        consumer_key: ${TWITTER_CONSUMER_KEY}
-        consumer_secret: ${TWITTER_CONSUMER_SECRET}
-        access_token: ${TWITTER_ACCESS_TOKEN}
-        access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
-      my_api:
-        type: bearer
-        token: ${MY_API_TOKEN}
+credentials:
+  twitter:
+    type: oauth1
+    consumer_key: ${TWITTER_CONSUMER_KEY}
+    consumer_secret: ${TWITTER_CONSUMER_SECRET}
+    access_token: ${TWITTER_ACCESS_TOKEN}
+    access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
+  my_api:
+    type: simple
+    key: ${MY_API_TOKEN}
 ```
 
 ---
@@ -396,7 +394,7 @@ Generate images using AI models.
 | `filename` | string | Yes | Output filename for the generated image. |
 | `reference_images` | array | No | List of storage paths to reference images for image-to-image editing. |
 
-Requires image generation configuration with an API key. Only registered when `image.provider.api_key` is set in the config.
+Requires image generation configuration. The `image.model` field uses the same `provider/model` format as agents (e.g. `openai/dall-e-3`). Only registered when the model's provider prefix matches a configured provider with a valid credential.
 
 ---
 

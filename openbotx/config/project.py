@@ -1,7 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from openbotx.config.schema import AgentConfig, ImageConfig, ToolsConfig
+from openbotx.config.schema import (
+    AgentConfig,
+    CredentialConfig,
+    ImageConfig,
+    ProviderConfig,
+    ToolsConfig,
+)
 from openbotx.helpers.path import PathResolver
 from openbotx.storage.base import StorageProvider
 
@@ -16,6 +22,8 @@ class ProjectContext:
 
     tools: ToolsConfig
     image: ImageConfig
+    credentials: dict[str, CredentialConfig] = field(default_factory=dict)
+    providers: dict[str, ProviderConfig] = field(default_factory=dict)
 
     storage: StorageProvider | None = None
 

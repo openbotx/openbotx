@@ -16,6 +16,7 @@ This document describes the system architecture, core components, and data flow.
   - [Message Bus](#message-bus)
   - [Agent](#agent)
   - [Channels](#channels)
+  - [Credentials](#credentials)
   - [Providers](#providers)
   - [Tools](#tools)
   - [Tasks](#tasks)
@@ -117,7 +118,9 @@ The server is a FastAPI application with a lifespan context manager that initial
 | `routes/skills.py`  | List, load, and update skills. PUT validates source is not builtin. |
 | `routes/tools.py`   | List registered tools with their definitions. |
 | `routes/channels.py`| Channel status, configuration, and start/stop control. Persists `enabled` state for auto-start on boot. |
-| `routes/providers.py`| Provider listing and configuration. |
+| `routes/providers.py`    | Provider listing and configuration. |
+| `routes/credentials.py`  | Credential CRUD (list, create, update, delete). |
+| `routes/forms.py`    | Dynamic form schema endpoint for the frontend DynamicForm component. |
 | `routes/scheduler.py`| Cron job management API. |
 | `routes/config.py`  | Read and update platform configuration. Supports YAML export, validation, and service restart. |
 | `routes/system.py`  | System info endpoint (`GET /system/info`). Returns OS, CPU, memory, disk, GPU, Python version, and OpenBotX version. |
@@ -127,13 +130,13 @@ The server is a FastAPI application with a lifespan context manager that initial
 
 | Method                  | Purpose                                                                              |
 | ----------------------- | ------------------------------------------------------------------------------------ |
-| `create_provider(model)` | Resolves the model to a provider config and creates a `LiteLLMProvider`.            |
+| `create_provider(model)` | Resolves the model to a provider config, then resolves the credential for the API key, and creates a `LiteLLMProvider`. |
 | `create_storage(url)`   | Creates `S3Storage` or `LocalStorage` based on the config.                           |
 | `create_cron_callback(bus)` | Returns a callback that publishes `InboundMessage` to the bus when a cron job fires. |
 | `create_orchestrator(...)` | Receives a shared `ProjectContext`. Merges provider-level `model_params` into each agent via dict merge (agent keys take precedence). Builds one `AgentLoop` per agent, creates `SubagentManager`s, and the `AgentClassifier`. Returns an `Orchestrator` that routes messages. |
 | `setup_logging(path)`   | Configures rotating file handler + console handler for the `openbotx` logger.        |
 
-The built web client (`openbotx/webclient/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html`. The build output lives inside the Python package and is included in the `.whl` distribution.
+The built web client (`openbotx/web_client/`) is served as a SPA at `/app/` with a catch-all fallback to `index.html`. The build output lives inside the Python package and is included in the `.whl` distribution.
 
 Files under the project's `public/` directory are served at `/public/{path}` without authentication. This allows media files (images, video, audio) to be embedded in HTML5 tags (`<img>`, `<video>`, `<audio>`) without needing auth headers.
 
@@ -269,10 +272,16 @@ Channels are the communication endpoints that connect users to the platform.
 | File           | Purpose                                                                                  |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | `base.py`      | `BaseChannel` abstract interface. Defines `start()`, `stop()`, `send()`, and `is_running`. |
-| `manager.py`   | `ChannelManager` initializes channels from config, runs an outbound dispatch loop, and routes messages. `start_channel()` recreates the channel from current config, enabling token changes without restart. Web messages go through `WebSocketManager`. External channels use their own implementations. |
+| `manager.py`   | `ChannelManager` receives `credentials` dict at construction. Initializes channels from config, resolving credentials through credential references. Runs an outbound dispatch loop and routes messages. `start_channel()` recreates the channel from current config and credentials, enabling credential changes without restart. Web messages go through `WebSocketManager`. External channels use their own implementations. |
 | `telegram.py`  | `TelegramChannel` integrates with Telegram via `python-telegram-bot`. Supports allowed user filtering, proxy configuration, and reply-to-message mode. |
 
 The web channel is implicit and does not have a `BaseChannel` implementation. The WebSocket endpoint handles web client communication directly. `ChannelManager._route_message` broadcasts web-bound outbound messages via `WebSocketManager`.
+
+### Credentials
+
+Credentials centralize all secrets in one place. Each credential has a `type` (e.g., `simple`, `oauth1`, `basic`, `login`, `aws`) and type-specific fields. Other configuration sections reference credentials by name via their `credential` field, rather than storing secrets directly.
+
+The `CredentialConfig` model serializes only the fields relevant to its `type`, keeping the stored configuration clean.
 
 ### Providers
 
@@ -286,7 +295,7 @@ The provider subsystem abstracts LLM access behind a uniform interface.
 | `litellm_provider.py`  | `LiteLLMProvider` wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, and prompt caching. |
 | `registry.py`          | `PROVIDERS` tuple of `ProviderSpec` objects. Defines metadata for each supported provider (custom, openrouter, anthropic, openai, deepseek, gemini, groq) with keyword matching and API key detection. |
 
-**Provider resolution:** The `Config.get_provider()` method matches a model name to a provider by first checking the LiteLLM-style prefix (e.g., `anthropic/claude-sonnet-4-20250514`), then falling back to keyword matching, and finally returning any provider with an API key configured.
+**Provider resolution:** The `Config.get_provider()` method matches a model name to a provider by first checking the LiteLLM-style prefix (e.g., `anthropic/claude-sonnet-4-20250514`), then falling back to keyword matching, and finally returning any provider whose referenced credential has an API key configured. `ServerFactory.create_provider()` resolves through provider -> credential -> concrete key to build a `LiteLLMProvider`.
 
 **Provider-level `model_params`:** Each `ProviderConfig` can define a default `model_params` dict (arbitrary key-value pairs like `max_tokens`, `temperature`, `top_p`, etc.). At startup, `ServerFactory.create_orchestrator` merges provider defaults into each agent's `model_params` using simple dict merge (`{**provider_params, **agent_params}`). Agent-level keys always take precedence.
 
@@ -308,9 +317,9 @@ Tools are the actions the agent can perform in the world.
 | `cron.py`          | `CronTool` creates, lists, and removes scheduled jobs. |
 | `memory_tool.py`   | `MemorySaveTool` persists content to MEMORY.md and HISTORY.md. `MemoryReadTool` reads them on demand. `MemorySearchTool` searches across memory files with context. |
 | `browser.py`       | `BrowserTool` provides browser automation via CDP using the vendored `openbotx/cdp/` library. A singleton `_ChromeInstance` manages the Chrome process. Each tool instance gets its own tab. Clicks use pure CDP: resolve element, scroll into view, get content quads, dispatch mouse events. |
-| `http_client.py`   | `HttpClientTool` is a full HTTP client with download/upload support, `PathResolver` integration, and named auth profiles (OAuth 1.0a, Basic, Bearer). |
+| `http_client.py`   | `HttpClientTool` is a full HTTP client with download/upload support, `PathResolver` integration, and authentication via credentials (OAuth 1.0a, Basic, Bearer). |
 | `rss.py`           | `RssReaderTool` reads RSS 2.0 and Atom feeds. Auto-detects format and strips HTML from summaries. |
-| `image.py`         | `ImageGenerationTool` generates images via configurable provider and model. |
+| `image.py`         | `ImageGenerationTool` generates images via LiteLLM. Provider resolved from model prefix (e.g. `openai/dall-e-3`). |
 
 **Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and all memory tools to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
 
@@ -391,25 +400,26 @@ Configuration is defined as Pydantic models and loaded from YAML.
 
 | File          | Purpose                                                                          |
 | ------------- | -------------------------------------------------------------------------------- |
-| `schema.py`   | Pydantic models for all configuration sections (`Config`, `AgentConfig`, `ProviderConfig`, `ToolsConfig`, etc.). |
+| `schema.py`   | Pydantic models for all configuration sections (`Config`, `AgentConfig`, `CredentialConfig`, `ProviderConfig`, `ToolsConfig`, etc.). |
 | `loader.py`   | `load_config()` reads YAML and expands `${ENV_VAR}` patterns. `save_config()` writes the config back to YAML. |
 
 Key configuration sections:
 
-| Section      | Controls                                                     |
-| ------------ | ------------------------------------------------------------ |
-| `bot`        | Name and description                                         |
-| `server`     | Host, port, and public URL                                   |
-| `agents`     | Named agent configs (model, workspace, description, instructions, tools, model_params, agent_params) |
-| `auth`       | Username, password, JWT secret                               |
-| `providers`  | API keys, base URLs, headers, options, and model_params per provider |
-| `channels`   | Telegram settings, progress/tool hint broadcasting           |
-| `tools`      | General settings (workspace restriction), exec settings (timeout), web search API key, HTTP client auth profiles |
-| `storage`    | Backend type (local/S3), paths, credentials                  |
-| `image`      | Image generation provider, model, API key                    |
-| `heartbeat`  | Enabled flag, check interval                                 |
-| `cron`       | Enabled flag                                                 |
-| `classifier` | Model override for the agent classifier                      |
+| Section           | Controls                                                     |
+| ----------------- | ------------------------------------------------------------ |
+| `bot`             | Name and description                                         |
+| `server`          | Host, port, public URL, and JWT secret credential reference  |
+| `agents`          | Named agent configs (model, workspace, description, instructions, tools, model_params, agent_params) |
+| `credentials`     | Centralized credentials (simple keys/tokens, OAuth, Basic, AWS, web client login) |
+| `providers`       | LLM provider configs (credential reference, request_headers, request_options, model_params) |
+| `web_client`      | Web UI authentication (credential reference for login)       |
+| `channels`        | Telegram settings (credential reference), progress/tool hint broadcasting |
+| `tools`           | General settings (workspace restriction), exec settings (timeout), web search credential reference |
+| `storage`         | Backend type (local/S3), paths, credential reference         |
+| `image`           | Image generation model in `provider/model` format            |
+| `heartbeat`       | Enabled flag, check interval                                 |
+| `cron`            | Enabled flag                                                 |
+| `classifier`      | Model override for the agent classifier                      |
 
 **AgentConfig** includes:
 
@@ -432,7 +442,7 @@ Utility modules shared across the codebase.
 | `text.py`          | `humanize()` converts tool names to human-readable format. `describe_tool_use()` generates descriptions of tool calls for WebSocket events. |
 | `oauth1.py`         | OAuth 1.0a signature generation (RFC 5849). `build_oauth1_header()` builds HMAC-SHA1 signed `Authorization` headers. Used by `HttpClientTool`. |
 | `ssrf.py`          | SSRF protection. `validate_url()` blocks requests to private/internal networks. `ssrf_event_hook()` validates redirects. Used by `HttpClientTool`, `WebFetchTool`, and `RssReaderTool`. |
-| `secrets.py`       | Sensitive value masking for config display. `is_sensitive_key()`, `mask_dict()`, `is_masked_or_empty()`. Used by config routes to hide API keys and passwords. |
+| `secrets.py`       | Sensitive value masking for config display. `is_sensitive_key()`, `mask_dict()`, `is_empty_or_blank()`. Used by config routes to hide API keys and passwords. |
 
 ### Storage
 
@@ -448,7 +458,7 @@ Pluggable storage backends for workspace files. The `StorageProvider` abstractio
 
 ### Web Client
 
-**Location:** `webclient/`
+**Location:** `web_client/`
 
 The web client is a single-page application built with:
 
@@ -470,7 +480,7 @@ Pages:
 | Skills     | Card grid of agent skills. Each card shows name, description, source tag, and "always active" tag when applicable. Clicking a card opens the full content as Markdown. Project skills can be edited inline. Builtin skills are read-only. |
 | Tools      | Card grid of registered tools. Clicking a card opens the parameter schema with types, required status, and descriptions. |
 | Scheduler  | Manage cron jobs. |
-| Settings   | Platform configuration with tabs: Info (OS, CPU, memory, disk, GPU, versions), Bot, Channels, Storage, Tools, Auth, and Advanced (YAML editor with validation). Providers and agents are managed via the Advanced tab. |
+| Settings   | Platform configuration driven by dynamic form schemas from `/api/forms`. Uses a `DynamicForm` component that replaces hardcoded forms. Tabs include: Info (OS, CPU, memory, disk, GPU, versions), Bot, Server, Web Client, Agents, Credentials, Providers, Channels, Storage, Tools, Image, and Advanced (YAML editor with validation). |
 | Login      | Authentication. |
 
 ---
@@ -518,7 +528,7 @@ openbotx/
 │   ├── transcription.py # Audio transcription via faster-whisper
 │   ├── text.py          # Text formatting utilities (humanize, describe_tool_use)
 │   └── secrets.py       # Sensitive value masking for config display
-├── providers/       # LLM provider abstraction
+├── providers/       # LLM model provider abstraction
 │   ├── base.py          # LLMProvider and LLMResponse
 │   ├── litellm_provider.py  # LiteLLM wrapper for multi-provider access
 │   └── registry.py      # ProviderSpec definitions and matching
@@ -565,7 +575,7 @@ The FastAPI lifespan context manager in `app.py` orchestrates the full startup s
 2. Create ServerFactory from config
 3. Ensure system workspace directory exists
 4. Setup logging (rotating file handler + console)
-5. Generate JWT secret if not configured
+5. Auto-create server.credential (simple, random key) if not configured; auto-create web_client credential (login, admin/admin) if not configured
 6. Initialize services:
    a. WebSocketManager + EventDispatcher (dispatcher wraps ws_manager)
    b. MessageBus
@@ -585,7 +595,7 @@ The FastAPI lifespan context manager in `app.py` orchestrates the full startup s
         5. Create AgentLoop with AgentConfig + ProjectContext (tool registration via build_registry())
       - If multiple agents: create AgentClassifier
       - Return Orchestrator wrapping all agents
-   j. ChannelManager (initializes Telegram if enabled)
+   j. ChannelManager (receives credentials dict, initializes Telegram if enabled by resolving token from credential reference)
    k. HeartbeatService
 7. Start background tasks:
    a. Orchestrator.run() -- consumes inbound queue, routes to agents
@@ -620,4 +630,6 @@ On shutdown, the reverse occurs: HeartbeatService stops, orchestrator stops (whi
 
 **YAML configuration with env var expansion.** The config loader supports `${ENV_VAR}` patterns in YAML values, allowing sensitive values (API keys) to be injected from the environment without being stored in configuration files.
 
-**ServerFactory pattern.** All dependency creation logic is encapsulated in the `ServerFactory` class, keeping the lifespan function clean and making the initialization sequence testable. The factory creates providers, storage, cron callbacks, and the full orchestrator graph from a single `Config` object.
+**Centralized credentials.** All credentials (API keys, OAuth tokens, passwords, AWS keys, bot tokens) are defined in a single `credentials` dictionary. Other configuration sections (providers, channels, tools, storage, web_client, server) reference credentials by name via their `credential` field. The server's JWT signing secret is also stored as a `simple` credential referenced by `server.credential`. This eliminates credential duplication and provides a single place to manage secrets.
+
+**ServerFactory pattern.** All dependency creation logic is encapsulated in the `ServerFactory` class, keeping the lifespan function clean and making the initialization sequence testable. The factory creates providers, storage, cron callbacks, and the full orchestrator graph from a single `Config` object. `create_provider()` resolves through provider -> credential -> concrete key.

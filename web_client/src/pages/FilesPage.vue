@@ -4,13 +4,13 @@ import { useToast } from 'primevue/usetoast'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import Dialog from 'primevue/dialog'
-import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import FileTree from '../components/files/FileTree.vue'
 import MarkdownEditor from '../components/files/MarkdownEditor.vue'
 import TextEditor from '../components/files/TextEditor.vue'
 import MediaPreview from '../components/files/MediaPreview.vue'
 import FileDownload from '../components/files/FileDownload.vue'
+import DynamicForm from '../components/common/DynamicForm.vue'
 import { useApi } from '../composables/useApi'
 
 const api = useApi()
@@ -23,9 +23,12 @@ const isMobile = ref(window.innerWidth <= 768)
 const showNewFileDialog = ref(false)
 const showNewFolderDialog = ref(false)
 const showDeleteDialog = ref(false)
-const newFileName = ref('')
-const newFolderName = ref('')
+const newFileForm = ref({ name: '' })
+const newFolderForm = ref({ name: '' })
 const createParentPath = ref('')
+
+const fileSchema = [{ name: 'name', type: 'text', label: 'File Name', required: true }]
+const folderSchema = [{ name: 'name', type: 'text', label: 'Folder Name', required: true }]
 const deleteTarget = ref(null)
 const uploadInput = ref(null)
 const uploading = ref(false)
@@ -105,13 +108,13 @@ function clearSelection() {
 
 function openCreateFile(parentPath) {
   createParentPath.value = parentPath
-  newFileName.value = ''
+  newFileForm.value = { name: '' }
   showNewFileDialog.value = true
 }
 
 function openCreateFolder(parentPath) {
   createParentPath.value = parentPath
-  newFolderName.value = ''
+  newFolderForm.value = { name: '' }
   showNewFolderDialog.value = true
 }
 
@@ -122,7 +125,7 @@ function openDeleteConfirm() {
 }
 
 async function confirmCreateFile() {
-  const name = newFileName.value.trim()
+  const name = newFileForm.value.name.trim()
   if (!name) return
   const path = createParentPath.value ? `${createParentPath.value}/${name}` : name
   try {
@@ -140,7 +143,7 @@ async function confirmCreateFile() {
 }
 
 async function confirmCreateFolder() {
-  const name = newFolderName.value.trim()
+  const name = newFolderForm.value.name.trim()
   if (!name) return
   const path = createParentPath.value ? `${createParentPath.value}/${name}` : name
   try {
@@ -350,26 +353,20 @@ async function confirmDelete() {
     </div>
 
     <Dialog v-model:visible="showNewFileDialog" header="New File" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
-      <div class="dialog-content">
-        <label>File name</label>
-        <InputText v-model="newFileName" class="w-full" placeholder="example.txt" autofocus @keyup.enter="confirmCreateFile" />
-        <small v-if="createParentPath" class="dialog-hint">In: {{ createParentPath }}/</small>
-      </div>
+      <DynamicForm :schema="fileSchema" v-model="newFileForm" />
+      <small v-if="createParentPath" class="dialog-hint">In: {{ createParentPath }}/</small>
       <template #footer>
         <Button label="Cancel" severity="secondary" text size="small" @click="showNewFileDialog = false" />
-        <Button label="Create" icon="pi pi-check" size="small" @click="confirmCreateFile" :disabled="!newFileName.trim()" />
+        <Button label="Create" icon="pi pi-check" size="small" @click="confirmCreateFile" :disabled="!newFileForm.name.trim()" />
       </template>
     </Dialog>
 
     <Dialog v-model:visible="showNewFolderDialog" header="New Folder" :modal="true" :style="{ width: '24rem' }" :breakpoints="{ '768px': '90vw' }">
-      <div class="dialog-content">
-        <label>Folder name</label>
-        <InputText v-model="newFolderName" class="w-full" placeholder="my-folder" autofocus @keyup.enter="confirmCreateFolder" />
-        <small v-if="createParentPath" class="dialog-hint">In: {{ createParentPath }}/</small>
-      </div>
+      <DynamicForm :schema="folderSchema" v-model="newFolderForm" />
+      <small v-if="createParentPath" class="dialog-hint">In: {{ createParentPath }}/</small>
       <template #footer>
         <Button label="Cancel" severity="secondary" text size="small" @click="showNewFolderDialog = false" />
-        <Button label="Create" icon="pi pi-check" size="small" @click="confirmCreateFolder" :disabled="!newFolderName.trim()" />
+        <Button label="Create" icon="pi pi-check" size="small" @click="confirmCreateFolder" :disabled="!newFolderForm.name.trim()" />
       </template>
     </Dialog>
 

@@ -13,7 +13,7 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: '../openbotx/webclient',
+    outDir: '../openbotx/web_client',
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
     rollupOptions: {

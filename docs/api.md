@@ -55,6 +55,7 @@ Response:
 |--------|----------|-------------|
 | GET | `/api/health` | Health check |
 | GET | `/api/version` | Server version |
+| GET | `/api/system/info` | System information (OS, CPU, memory, disk, GPU) |
 
 **GET /api/health**
 
@@ -73,6 +74,22 @@ Response:
 
 ```json
 {
+  "version": "string"
+}
+```
+
+**GET /api/system/info**
+
+Response:
+
+```json
+{
+  "os": { "system": "string", "release": "string", "version": "string", "machine": "string" },
+  "cpu": { "processor": "string", "cores": 0 },
+  "memory": { "total_gb": 0.0 },
+  "disk": { "total_gb": 0.0, "used_gb": 0.0, "free_gb": 0.0, "percent": 0.0 },
+  "gpu": [{ "name": "string" }],
+  "python": "string",
   "version": "string"
 }
 ```
@@ -393,7 +410,7 @@ Request body:
 ```json
 {
   "config": {
-    "token": "string",
+    "credential": "string",
     "allowed_users": ["string"],
     "...": "..."
   }
@@ -426,6 +443,64 @@ Response:
 
 ---
 
+### Credentials
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/credentials` | List all credentials (sensitive values masked) |
+| POST | `/api/credentials` | Create a new credential |
+| PUT | `/api/credentials/{name}` | Update a credential |
+| DELETE | `/api/credentials/{name}` | Delete a credential |
+
+**GET /api/credentials**
+
+Response:
+
+```json
+[
+  {
+    "name": "string",
+    "type": "string",
+    "...": "type-specific fields (sensitive values masked)"
+  }
+]
+```
+
+**POST /api/credentials**
+
+Request body:
+
+```json
+{
+  "name": "string",
+  "type": "string",
+  "...": "type-specific fields"
+}
+```
+
+**PUT /api/credentials/{name}**
+
+Request body:
+
+```json
+{
+  "type": "string",
+  "...": "type-specific fields"
+}
+```
+
+**DELETE /api/credentials/{name}**
+
+Response:
+
+```json
+{
+  "status": "deleted"
+}
+```
+
+---
+
 ### Providers
 
 | Method | Endpoint | Description |
@@ -442,10 +517,12 @@ Response:
   {
     "name": "string",
     "configured": "boolean",
-    "api_base": "string",
+    "credential": "string",
     "has_key": "boolean",
-    "headers": {},
-    "options": {}
+    "base_url": "string",
+    "request_headers": {},
+    "request_options": {},
+    "model_params": {}
   }
 ]
 ```
@@ -456,10 +533,98 @@ Request body:
 
 ```json
 {
-  "api_key": "string",
-  "api_base": "string",
-  "headers": {},
-  "options": {}
+  "credential": "string",
+  "base_url": "string",
+  "request_headers": {},
+  "request_options": {},
+  "model_params": {}
+}
+```
+
+---
+
+### Agents
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/agents` | List all configured agents |
+
+**GET /api/agents**
+
+Response:
+
+```json
+[
+  {
+    "name": "string",
+    "description": "string",
+    "model": "string"
+  }
+]
+```
+
+---
+
+### Tools
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tools` | List all registered tools |
+
+**GET /api/tools**
+
+Response:
+
+```json
+[
+  {
+    "name": "string",
+    "description": "string",
+    "parameters": {}
+  }
+]
+```
+
+---
+
+### Forms
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/forms` | Get dynamic form schemas for the frontend |
+
+**GET /api/forms**
+
+Returns form schema definitions used by the frontend's `DynamicForm` component to render configuration forms dynamically.
+
+Each field in the schema has `name`, `type`, `label`, and optional `required`, `placeholder`, `options` (for select), and `visible_when` (conditional visibility).
+
+Supported field types:
+
+| Type | Component | Description |
+|------|-----------|-------------|
+| `text` | InputText | Standard text input |
+| `email` | InputText | Email input |
+| `int` | InputNumber | Integer input |
+| `float` | InputNumber | Decimal input |
+| `bool` | ToggleSwitch | Boolean toggle |
+| `secret` | Password | Masked input with toggle |
+| `long-text` | Textarea | Multi-line text |
+| `select` | Select | Dropdown with static options |
+| `credential` | Select | Dropdown of available credentials |
+| `provider` | Select | Dropdown of available providers |
+| `datetime` | DatePicker | Date and time picker |
+| `date` | DatePicker | Date only picker |
+| `time` | DatePicker | Time only picker (24h) |
+| `color` | ColorPicker | Color selector |
+
+Response:
+
+```json
+{
+  "form_name": [
+    { "name": "field_name", "type": "text", "label": "Field Label", "required": true }
+  ]
 }
 ```
 
@@ -501,7 +666,8 @@ Provide exactly one scheduling strategy: `cron_expr`, `every_seconds`, or `at`.
 | GET | `/api/config` | Get full configuration (sensitive values masked) |
 | GET | `/api/config/yaml` | Get full configuration as YAML string (sensitive values masked) |
 | POST | `/api/config/validate` | Validate a YAML configuration string |
-| PUT | `/api/config/{section}` | Update a configuration section |
+| PATCH | `/api/config` | Update multiple configuration sections in a single call |
+| PUT | `/api/config/{section}` | Update a single configuration section |
 | POST | `/api/config/restart` | Restart all services |
 
 **GET /api/config/yaml**
@@ -546,9 +712,24 @@ Response (invalid):
 }
 ```
 
+**PATCH /api/config**
+
+Update multiple sections in a single call (one disk write).
+
+Request body:
+
+```json
+{
+  "sections": {
+    "bot": { "name": "MyBot" },
+    "server": { "port": 9000 }
+  }
+}
+```
+
 **PUT /api/config/{section}**
 
-Valid sections: `bot`, `server`, `agents`, `image`, `auth`, `tools`, `storage`, `cron`, `advanced`.
+Valid sections: `bot`, `server`, `agents`, `image`, `web_client`, `tools`, `storage`, `cron`, `credentials`, `providers`, `advanced`.
 
 Request body:
 
