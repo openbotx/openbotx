@@ -1,7 +1,7 @@
 MASKED_VALUE = "***"
 
 _SENSITIVE_SUFFIXES = ("_key", "_secret", "_token", "_password")
-_SENSITIVE_EXACT = frozenset({"token", "password", "secret", "api_key"})
+_SENSITIVE_EXACT = frozenset({"key", "token", "password", "secret", "api_key"})
 
 
 def is_sensitive_key(name: str) -> bool:

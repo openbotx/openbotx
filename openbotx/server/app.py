@@ -18,7 +18,7 @@ from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.bus.events import InboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.manager import ChannelManager
-from openbotx.config.loader import load_config
+from openbotx.config.loader import load_config, save_config
 from openbotx.config.project import ProjectContext
 from openbotx.config.schema import Config
 from openbotx.cron.service import CronService
@@ -33,7 +33,7 @@ from openbotx.version import __version__
 
 logger = logging.getLogger(__name__)
 
-WEBCLIENT_DIR = Path(__file__).resolve().parent.parent / "webclient"
+WEB_CLIENT_DIR = Path(__file__).resolve().parent.parent / "web_client"
 
 
 class ServerFactory:
@@ -44,22 +44,26 @@ class ServerFactory:
         self._project_path = config.project_path
 
     def create_provider(self, model: str) -> LiteLLMProvider:
-        provider_cfg = self._config.get_provider(model)
+        prov_cfg = self._config.get_provider(model)
+        if not prov_cfg:
+            return LiteLLMProvider()
+        cred = self._config.get_credential(prov_cfg.credential)
         return LiteLLMProvider(
-            api_key=provider_cfg.api_key if provider_cfg else "",
-            api_base=provider_cfg.api_base if provider_cfg else None,
-            extra_headers=provider_cfg.headers if provider_cfg else None,
+            api_key=cred.key if cred else "",
+            api_base=prov_cfg.base_url or None,
+            extra_headers=prov_cfg.request_headers or None,
         )
 
     def create_storage(self, public_url: str):
         if self._config.storage.type == "s3" and self._config.storage.s3_bucket:
             from openbotx.storage.s3 import S3Storage
 
+            cred = self._config.get_credential(self._config.storage.credential)
             return S3Storage(
                 bucket=self._config.storage.s3_bucket,
                 region=self._config.storage.s3_region,
-                access_key=self._config.storage.s3_access_key,
-                secret_key=self._config.storage.s3_secret_key,
+                access_key=cred.access_key if cred else "",
+                secret_key=cred.secret_key if cred else "",
             )
 
         from openbotx.storage.local import LocalStorage
@@ -95,11 +99,11 @@ class ServerFactory:
 
         for name, agent_cfg in self._config.agents.items():
             agent_cfg.name = name
-            provider_cfg = self._config.get_provider(agent_cfg.model)
+            prov_cfg = self._config.get_provider(agent_cfg.model)
             provider = self.create_provider(agent_cfg.model)
 
-            if provider_cfg and provider_cfg.model_params:
-                agent_cfg.model_params = {**provider_cfg.model_params, **agent_cfg.model_params}
+            if prov_cfg and prov_cfg.model_params:
+                agent_cfg.model_params = {**prov_cfg.model_params, **agent_cfg.model_params}
 
             agent_workspace = agent_cfg.resolve_workspace(self._project_path)
             agent_workspace.mkdir(parents=True, exist_ok=True)
@@ -183,10 +187,33 @@ async def lifespan(app: FastAPI):
 
     ServerFactory.setup_logging(project_path)
 
-    if not config.auth.secret_key:
-        config.auth.secret_key = uuid4().hex
+    from openbotx.config.schema import CredentialConfig
 
-    app.state.auth_secret = config.auth.secret_key
+    # resolve server credential for JWT signing — create default if missing
+    defaults_created = False
+    server_cred = config.get_credential(config.server.credential)
+    if not server_cred:
+        server_cred = CredentialConfig(type="simple", key=uuid4().hex)
+        config.credentials["server"] = server_cred
+        config.server.credential = "server"
+        defaults_created = True
+        logger.info("Created default server credential for JWT signing")
+
+    app.state.auth_secret = server_cred.key or uuid4().hex
+
+    # resolve web_client credential for login — create default if missing
+    wc_cred = config.get_credential(config.web_client.credential)
+    if not wc_cred:
+        wc_cred = CredentialConfig(type="login", username="admin", password="admin")
+        config.credentials["web_client"] = wc_cred
+        config.web_client.credential = "web_client"
+        defaults_created = True
+        logger.info("Created default web_client credential (admin/admin)")
+
+    if defaults_created:
+        save_config(config, config._config_path)
+
+    app.state.auth_config = wc_cred
 
     ws_manager = WebSocketManager()
     dispatcher = EventDispatcher()
@@ -212,6 +239,8 @@ async def lifespan(app: FastAPI):
         public_url=public_url,
         tools=config.tools,
         image=config.image,
+        credentials=config.credentials,
+        providers=config.providers,
         storage=storage,
     )
 
@@ -230,6 +259,7 @@ async def lifespan(app: FastAPI):
         bus,
         storage=storage,
         dispatcher=dispatcher,
+        credentials=config.credentials,
     )
 
     heartbeat = HeartbeatService(
@@ -319,7 +349,9 @@ def create_app() -> FastAPI:
         channels,
         chat,
         config,
+        credentials,
         files,
+        forms,
         providers,
         scheduler,
         skills,
@@ -337,9 +369,11 @@ def create_app() -> FastAPI:
     app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
     app.include_router(channels.router, prefix="/api/channels", tags=["channels"])
     app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
+    app.include_router(credentials.router, prefix="/api/credentials", tags=["credentials"])
     app.include_router(scheduler.router, prefix="/api/scheduler", tags=["scheduler"])
     app.include_router(config.router, prefix="/api/config", tags=["config"])
     app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
+    app.include_router(forms.router, prefix="/api/forms", tags=["forms"])
 
     app.add_api_websocket_route("/ws", websocket_endpoint)
 
@@ -359,18 +393,18 @@ def create_app() -> FastAPI:
     async def root_redirect():
         return RedirectResponse("/app/")
 
-    if WEBCLIENT_DIR.is_dir():
+    if WEB_CLIENT_DIR.is_dir():
 
         @app.get("/app/{path:path}")
         async def spa_fallback(path: str):
             try:
-                file_path = (WEBCLIENT_DIR / path).resolve()
-                file_path.relative_to(WEBCLIENT_DIR.resolve())
+                file_path = (WEB_CLIENT_DIR / path).resolve()
+                file_path.relative_to(WEB_CLIENT_DIR.resolve())
             except ValueError:
                 return JSONResponse({"error": "Access denied"}, status_code=403)
             if file_path.is_file():
                 return FileResponse(file_path)
-            return FileResponse(WEBCLIENT_DIR / "index.html")
+            return FileResponse(WEB_CLIENT_DIR / "index.html")
 
     return app
 

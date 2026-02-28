@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from openbotx.config.schema import AuthProfileConfig
+from openbotx.config.schema import CredentialConfig
 from openbotx.helpers.path import PathResolver
 from openbotx.helpers.ssrf import ssrf_event_hook, validate_url
 from openbotx.tools.base import Tool
@@ -84,7 +84,7 @@ class HttpClientTool(Tool):
     def __init__(
         self,
         resolver: PathResolver | None = None,
-        auth_profiles: dict[str, AuthProfileConfig] | None = None,
+        auth_profiles: dict[str, CredentialConfig] | None = None,
     ):
         self._resolver = resolver
         self._auth_profiles = auth_profiles or {}
@@ -127,8 +127,8 @@ class HttpClientTool(Tool):
                 f"{profile.username}:{profile.password}".encode()
             ).decode()
             headers["Authorization"] = f"Basic {credentials}"
-        elif profile.type == "bearer":
-            headers["Authorization"] = f"Bearer {profile.token}"
+        elif profile.type == "simple":
+            headers["Authorization"] = f"Bearer {profile.key}"
         else:
             raise ValueError(f"Unknown auth type: {profile.type}")
 

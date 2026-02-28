@@ -13,22 +13,22 @@ Example `.env` file:
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-AUTH_SECRET=my-secret-key
 ```
 
 Referencing them in `config.yml`:
 
 ```yaml
-providers:
+credentials:
   anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-
-channels:
+    type: simple
+    key: ${ANTHROPIC_API_KEY}
   telegram:
-    token: ${TELEGRAM_BOT_TOKEN}
-
-auth:
-  secret_key: ${AUTH_SECRET}
+    type: simple
+    key: ${TELEGRAM_BOT_TOKEN}
+  web_client:
+    type: login
+    username: admin
+    password: changeme
 ```
 
 ---
@@ -52,6 +52,7 @@ server:
   host: "0.0.0.0"                 # str  -- Bind address for the HTTP server.
   port: 8000                      # int  -- Port the server listens on.
   public_url: ""                  # str  -- Public URL for external access. Used for generating file URLs, opening the browser, and injected into the agent's system prompt so it knows its own base URL. Falls back to http://localhost:{port} if empty.
+  credential: ""                  # str  -- Name of a credential (type: simple) whose key is used as the JWT signing secret. If not configured, a default simple credential with a random key is auto-created at startup.
 
 # ---------------------------------------------------------------------------
 # Agents
@@ -81,37 +82,55 @@ classifier:
   model: ""                       # str  -- Model to use for classification. When empty, uses the default agent's model. A smaller/faster model is recommended since classification is a lightweight task.
 
 # ---------------------------------------------------------------------------
+# Credentials
+# ---------------------------------------------------------------------------
+# A dictionary of named credentials. Each key is a name you choose
+# (e.g. "anthropic", "web_client", "twitter", "s3"). The `type` field
+# determines which fields are relevant. Other sections reference these by
+# name via their `credential` field.
+#
+# Supported types: simple, oauth1, basic, login, aws.
+credentials:
+  anthropic:                      # Credential name (referenced by providers, channels, etc.).
+    type: "simple"                # str  -- Credential type.
+    key: ""                       # str  -- API key or token.
+  # web_client:
+  #   type: login
+  #   username: ""                # str  -- Username for the web UI login.
+  #   password: ""                # str  -- Password for the web UI login.
+  # twitter:
+  #   type: oauth1
+  #   consumer_key: ""
+  #   consumer_secret: ""
+  #   access_token: ""
+  #   access_token_secret: ""
+
+# ---------------------------------------------------------------------------
 # Image Generation
 # ---------------------------------------------------------------------------
 image:
-  model: ""                            # str  -- Model name for image generation (required if using image generation).
-  provider:                            # ProviderConfig -- Provider connection settings (same schema as providers.*).
-    name: ""                           # str  -- Image generation backend (e.g. "gemini", "openai").
-    api_key: ""                        # str  -- API key for the image provider.
-    api_base: null                     # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
-    headers: {}                        # dict[str, str] -- Custom HTTP headers sent with every API request.
-    options: {}                        # dict -- Additional provider-specific parameters merged into the request body.
+  model: ""                            # str  -- Model in "provider/model" format (e.g. "openai/dall-e-3"). Provider is resolved from the prefix, same as agents.
 
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
-auth:
-  username: ""                    # str  -- Username for the web UI login. Leave empty to disable authentication.
-  password: ""                    # str  -- Password for the web UI login. Leave empty to disable authentication.
-  secret_key: ""                  # str  -- Secret used for signing tokens. Auto-generated at startup if left empty.
+web_client:
+  credential: ""                  # str  -- Name of a credential (type: login) for web UI login. Leave empty to disable authentication; a default login credential (admin/admin) is auto-created at startup if not configured.
 
 # ---------------------------------------------------------------------------
 # Providers
 # ---------------------------------------------------------------------------
 # A dictionary of LLM provider configurations. Each key is the provider name.
 # Supported providers: custom, openrouter, anthropic, openai, deepseek, gemini, groq.
+# Credentials are not stored here -- each provider references a credential by name.
 providers:
   anthropic:                      # Provider name (must match prefix used in agent model field).
-    api_key: ""                   # str  -- API key for this provider.
-    api_base: null                # str | null -- Custom base URL. Set to null to use the provider's default endpoint.
-    headers: {}                   # dict[str, str] -- Custom HTTP headers sent with every API request.
-    options: {}                   # dict -- Additional provider-specific parameters merged into the request body.
+    credential: ""                # str  -- Name of the credential that holds the API key for this provider.
+    base_url: ""                  # str  -- Custom base URL. Leave empty to use the provider's default endpoint. Used for OpenAI-compatible APIs, self-hosted models, or proxies.
+    request_headers: {}           # dict[str, str] -- Custom HTTP headers sent with every API request.
+    request_options: {}           # dict -- Additional provider-specific parameters merged into the request body.
     model_params: {}              # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these. Empty by default.
+
 
 # ---------------------------------------------------------------------------
 # Channels
@@ -121,7 +140,7 @@ channels:
   send_tool_hints: false          # bool -- Send tool invocation hints to the client (useful for debugging).
   telegram:
     enabled: false                # bool -- Enable the Telegram bot integration.
-    token: ""                     # str  -- Telegram Bot API token (obtain from @BotFather).
+    credential: ""                # str  -- Name of a credential (type: simple) that holds the Telegram Bot API token.
     allowed_users: []             # list[str] -- Telegram usernames or user IDs allowed to interact. Empty list allows everyone.
     proxy: null                   # str | null -- SOCKS5 or HTTP proxy URL for Telegram API requests.
     reply_to_message: false       # bool -- Whether the bot replies in-thread to the original message.
@@ -135,20 +154,8 @@ tools:
   exec:
     timeout: 60                   # int  -- Maximum execution time in seconds for the exec tool.
   web_search:
-    api_key: ""                   # str  -- Brave Search API key for the web search tool.
+    credential: ""                # str  -- Name of a credential (type: simple) that holds the Brave Search API key.
     max_results: 5                # int  -- Maximum number of search results to return per query.
-  http_client:
-    auth_profiles:                # dict -- Named authentication profiles for http_client.
-      # Example:
-      # twitter:
-      #   type: oauth1
-      #   consumer_key: ${TWITTER_CONSUMER_KEY}
-      #   consumer_secret: ${TWITTER_CONSUMER_SECRET}
-      #   access_token: ${TWITTER_ACCESS_TOKEN}
-      #   access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
-      # my_api:
-      #   type: bearer
-      #   token: ${MY_API_TOKEN}
 
 # ---------------------------------------------------------------------------
 # Storage
@@ -158,8 +165,7 @@ storage:
   local_path: "./workspace"       # str  -- Directory path when using local storage.
   s3_bucket: ""                   # str  -- S3 bucket name (required when type is "s3").
   s3_region: ""                  # str  -- AWS region for the S3 bucket (required when type is "s3").
-  s3_access_key: ""              # str  -- AWS access key ID.
-  s3_secret_key: ""              # str  -- AWS secret access key.
+  credential: ""                 # str  -- Name of a credential (type: aws) that holds AWS credentials.
 
 # ---------------------------------------------------------------------------
 # Heartbeat
@@ -248,9 +254,14 @@ At startup, `ServerFactory.create_orchestrator` merges provider defaults with ag
 Example:
 
 ```yaml
+credentials:
+  anthropic:
+    type: simple
+    key: ${ANTHROPIC_API_KEY}
+
 providers:
   anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
+    credential: anthropic
     model_params:
       max_tokens: 16384
       temperature: 0.2
@@ -284,9 +295,18 @@ server:
   host: "0.0.0.0"
   port: 8000
 
+credentials:
+  anthropic:
+    type: simple
+    key: ${ANTHROPIC_API_KEY}
+  web_client:
+    type: login
+    username: "admin"
+    password: ${AUTH_PASSWORD}
+
 providers:
   anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
+    credential: anthropic
 
 agents:
   main:
@@ -295,9 +315,8 @@ agents:
       max_tokens: 4096
       temperature: 0.2
 
-auth:
-  username: "admin"
-  password: ${AUTH_PASSWORD}
+web_client:
+  credential: web_client
 ```
 
 ### 2. OpenRouter Setup
@@ -305,9 +324,14 @@ auth:
 Using OpenRouter to access models from multiple vendors through a single API key.
 
 ```yaml
+credentials:
+  openrouter:
+    type: simple
+    key: ${OPENROUTER_API_KEY}
+
 providers:
   openrouter:
-    api_key: ${OPENROUTER_API_KEY}
+    credential: openrouter
 
 agents:
   main:
@@ -322,13 +346,24 @@ agents:
 Define several agents, each with a different model, workspace, and specialization.
 
 ```yaml
+credentials:
+  anthropic:
+    type: simple
+    key: ${ANTHROPIC_API_KEY}
+  openai:
+    type: simple
+    key: ${OPENAI_API_KEY}
+  deepseek:
+    type: simple
+    key: ${DEEPSEEK_API_KEY}
+
 providers:
   anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
+    credential: anthropic
   openai:
-    api_key: ${OPENAI_API_KEY}
+    credential: openai
   deepseek:
-    api_key: ${DEEPSEEK_API_KEY}
+    credential: deepseek
 
 agents:
   main:
@@ -378,12 +413,17 @@ classifier:
 Enable the Telegram bot and restrict access to specific users.
 
 ```yaml
+credentials:
+  telegram:
+    type: simple
+    key: ${TELEGRAM_BOT_TOKEN}
+
 channels:
   send_progress: true
   send_tool_hints: false
   telegram:
     enabled: true
-    token: ${TELEGRAM_BOT_TOKEN}
+    credential: telegram
     allowed_users:
       - "alice"
       - "bob"
@@ -397,12 +437,17 @@ channels:
 Use Amazon S3 as the storage backend instead of the local filesystem.
 
 ```yaml
+credentials:
+  s3:
+    type: aws
+    access_key: ${AWS_ACCESS_KEY_ID}
+    secret_key: ${AWS_SECRET_ACCESS_KEY}
+
 storage:
   type: "s3"
   s3_bucket: "my-openbotx-storage"
   s3_region: "eu-west-1"
-  s3_access_key: ${AWS_ACCESS_KEY_ID}
-  s3_secret_key: ${AWS_SECRET_ACCESS_KEY}
+  credential: s3
 ```
 
 ### 6. Environment Variable References
@@ -418,11 +463,39 @@ server:
   host: ${SERVER_HOST}
   port: 8000
 
+credentials:
+  anthropic:
+    type: simple
+    key: ${ANTHROPIC_API_KEY}
+  gemini:
+    type: simple
+    key: ${GEMINI_API_KEY}
+  web_client:
+    type: login
+    username: ${AUTH_USERNAME}
+    password: ${AUTH_PASSWORD}
+  telegram:
+    type: simple
+    key: ${TELEGRAM_BOT_TOKEN}
+  brave:
+    type: simple
+    key: ${BRAVE_SEARCH_API_KEY}
+  twitter:
+    type: oauth1
+    consumer_key: ${TWITTER_CONSUMER_KEY}
+    consumer_secret: ${TWITTER_CONSUMER_SECRET}
+    access_token: ${TWITTER_ACCESS_TOKEN}
+    access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
+  s3:
+    type: aws
+    access_key: ${AWS_ACCESS_KEY_ID}
+    secret_key: ${AWS_SECRET_ACCESS_KEY}
+
 providers:
   anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
+    credential: anthropic
   gemini:
-    api_key: ${GEMINI_API_KEY}
+    credential: gemini
 
 agents:
   main:
@@ -430,39 +503,25 @@ agents:
     model: "anthropic/claude-sonnet-4-20250514"
 
 image:
-  model: "gemini-3-pro-image-preview"
-  provider:
-    name: "gemini"
-    api_key: ${GEMINI_API_KEY}
+  model: "gemini/gemini-3-pro-image-preview"
 
-auth:
-  username: ${AUTH_USERNAME}
-  password: ${AUTH_PASSWORD}
-  secret_key: ${AUTH_SECRET_KEY}
+web_client:
+  credential: web_client
 
 channels:
   telegram:
     enabled: true
-    token: ${TELEGRAM_BOT_TOKEN}
+    credential: telegram
 
 tools:
   web_search:
-    api_key: ${BRAVE_SEARCH_API_KEY}
-  http_client:
-    auth_profiles:
-      twitter:
-        type: oauth1
-        consumer_key: ${TWITTER_CONSUMER_KEY}
-        consumer_secret: ${TWITTER_CONSUMER_SECRET}
-        access_token: ${TWITTER_ACCESS_TOKEN}
-        access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
+    credential: brave
 
 storage:
   type: "s3"
   s3_bucket: ${S3_BUCKET}
   s3_region: ${S3_REGION}
-  s3_access_key: ${AWS_ACCESS_KEY_ID}
-  s3_secret_key: ${AWS_SECRET_ACCESS_KEY}
+  credential: s3
 ```
 
 Corresponding `.env` file:
@@ -478,7 +537,6 @@ GEMINI_API_KEY=AIza...
 
 AUTH_USERNAME=admin
 AUTH_PASSWORD=changeme
-AUTH_SECRET_KEY=a-long-random-string
 
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
@@ -507,15 +565,20 @@ AWS_SECRET_ACCESS_KEY=wJal...
 | `gemini`     | `gemini`         | Google Gemini models.                            |
 | `deepseek`   | `deepseek`       | DeepSeek models.                                 |
 | `groq`       | `groq`           | Groq inference engine for supported models.      |
-| `custom`     | `custom`         | Any OpenAI-compatible endpoint via `api_base`.   |
+| `custom`     | `custom`         | Any OpenAI-compatible endpoint via `base_url`.   |
 
-When using the `custom` provider, set `api_base` to the base URL of your endpoint:
+When using the `custom` provider, set `base_url` on the provider entry:
 
 ```yaml
+credentials:
+  custom:
+    type: simple
+    key: ${CUSTOM_API_KEY}
+
 providers:
   custom:
-    api_key: ${CUSTOM_API_KEY}
-    api_base: "https://my-llm-server.example.com/v1"
+    credential: custom
+    base_url: "https://my-llm-server.example.com/v1"
 ```
 
 ---
@@ -523,7 +586,7 @@ providers:
 ## Notes
 
 - **Defaults are applied automatically.** You only need to include the sections and fields you want to override. Any omitted field falls back to its default value.
-- **Secret key auto-generation.** If `auth.secret_key` is left empty, a random key is generated each time the server starts. Set it explicitly if you need stable tokens across restarts.
+- **Server credential auto-generation.** If `server.credential` is not configured, the server automatically creates a `simple` credential with a random key for JWT signing on each startup. Set it explicitly if you need stable tokens across restarts. Similarly, if `web_client.credential` is not configured, a default `login` credential with admin/admin credentials is auto-created.
 - **Workspace isolation.** When `tools.general.restrict_to_workspace` is `true`, file operations performed by each agent are confined to its configured `workspace` directory and the shared `public/` directory. The `PathResolver` enforces this by checking that all resolved paths fall within one of these allowed directories. Disable this only if you understand the security implications.
 - **Exec timeout.** The `tools.exec.timeout` setting controls the maximum execution time in seconds for the `exec` tool. Commands exceeding this limit are automatically killed.
 - **Workspace defaulting.** If an agent's `workspace` field is empty, null, or whitespace, it automatically defaults to `"./workspace"`. This ensures every agent always has a valid workspace.

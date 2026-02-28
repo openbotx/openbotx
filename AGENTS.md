@@ -13,10 +13,10 @@ source .venv/bin/activate
 make dev
 
 # Run frontend (dev mode, separate terminal)
-make webclient-dev
+make web-client-dev
 
-# Build frontend for production (output goes to openbotx/webclient/)
-make webclient-build
+# Build frontend for production (output goes to openbotx/web_client/)
+make web-client-build
 
 # Lint and format
 make lint
@@ -178,7 +178,7 @@ openbotx/
 ## Frontend Structure
 
 ```
-webclient/src/
+web_client/src/
 ├── pages/                  # Route-level views
 │   ├── ChatPage.vue        # Chat interface with session sidebar
 │   ├── TaskBoard.vue       # Kanban board (TODO/DOING/DONE/ERROR columns)
@@ -247,4 +247,4 @@ Each agent in `agents` has: `model`, `workspace`, `description`, `instructions`,
 - Skills are `SKILL.md` files with YAML frontmatter in `openbotx/skills/` (builtin) or `workspace/skills/` (project). Project skills override builtin ones with the same name.
 - Memory files (`MEMORY.md`, `HISTORY.md`) live in `workspace/memory/`. `MEMORY.md` is included in the system prompt. `HISTORY.md` is append-only archival.
 - All media goes to `public/media/YYYY/MM/DD/` via `media_path()` from `openbotx/helpers/path.py`.
-- The built web client is packaged inside `openbotx/webclient/` in the Python distribution. Served as SPA at `/app/` with catch-all fallback.
+- The built web client is packaged inside `openbotx/web_client/` in the Python distribution. Served as SPA at `/app/` with catch-all fallback.

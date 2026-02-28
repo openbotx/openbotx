@@ -6,7 +6,7 @@ from openbotx.bus.dispatcher import EventDispatcher
 from openbotx.bus.events import OutboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.channels.base import BaseChannel
-from openbotx.config.schema import ChannelsConfig
+from openbotx.config.schema import ChannelsConfig, CredentialConfig
 from openbotx.storage.base import StorageProvider
 
 logger = logging.getLogger(__name__)
@@ -21,11 +21,13 @@ class ChannelManager:
         bus: MessageBus,
         storage: StorageProvider,
         dispatcher: EventDispatcher,
+        credentials: dict[str, CredentialConfig] | None = None,
     ):
         self.config = config
         self.bus = bus
         self._storage = storage
         self._dispatcher = dispatcher
+        self._credentials = credentials or {}
         self._channels: dict[str, BaseChannel] = {}
         self._outbound_task: asyncio.Task | None = None
         self._send_progress = config.send_progress
@@ -33,12 +35,19 @@ class ChannelManager:
 
     def _create_channel(self, name: str) -> BaseChannel | None:
         """Create a channel instance from current config."""
-        if name == "telegram" and self.config.telegram.token:
+        if name == "telegram" and self.config.telegram.credential:
+            cred = self._credentials.get(self.config.telegram.credential)
+            if not cred:
+                logger.error(
+                    "credential '%s' not found for telegram",
+                    self.config.telegram.credential,
+                )
+                return None
             try:
                 from openbotx.channels.telegram import TelegramChannel
 
                 return TelegramChannel(
-                    token=self.config.telegram.token,
+                    token=cred.key,
                     storage=self._storage,
                     on_message=self.bus.publish_inbound,
                     allow_from=self.config.telegram.allowed_users,
@@ -50,7 +59,7 @@ class ChannelManager:
         return None
 
     def _init_channels(self) -> None:
-        if self.config.telegram.enabled and self.config.telegram.token:
+        if self.config.telegram.enabled and self.config.telegram.credential:
             channel = self._create_channel("telegram")
             if channel:
                 self._channels["telegram"] = channel
@@ -153,7 +162,7 @@ class ChannelManager:
         if is_tool_hint and not self._send_tool_hints:
             return
 
-        # Send to the registered channel handler (e.g. Telegram)
+        # send to the registered channel handler (e.g. Telegram)
         channel = self._channels.get(msg.channel)
         if channel and channel.is_running:
             try:
@@ -161,12 +170,12 @@ class ChannelManager:
             except Exception as e:
                 logger.error("Failed to send to %s: %s", msg.channel, e)
 
-        # Forwarded input messages only go to the channel handler,
+        # forwarded input messages only go to the channel handler,
         # the web UI already has the user's message locally
         if is_forwarded_input:
             return
 
-        # Always broadcast to WebSocket so the web UI mirrors all sessions
+        # always broadcast to WebSocket so the web UI mirrors all sessions
         await self._dispatcher.broadcast(
             "chat:message",
             {

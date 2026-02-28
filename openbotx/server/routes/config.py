@@ -51,6 +51,22 @@ async def validate_config(body: YamlBody):
         return {"valid": False, "error": str(e)}
 
 
+class ConfigBatch(BaseModel):
+    sections: dict[str, dict]
+
+
+@router.patch("")
+async def update_batch(body: ConfigBatch, request: Request):
+    """Update multiple config sections in a single call."""
+    from openbotx.config.loader import save_config
+
+    config = request.app.state.config
+    for section, data in body.sections.items():
+        _apply_section(config, section, data)
+    save_config(config, config._config_path)
+    return {"status": "ok"}
+
+
 @router.put("/{section}")
 async def update_section(section: str, body: ConfigSection, request: Request):
     from openbotx.config.loader import save_config
@@ -63,33 +79,44 @@ async def update_section(section: str, body: ConfigSection, request: Request):
             return await _save_advanced_yaml(yaml_str, config)
 
         for sect_name, sect_data in body.data.items():
-            if not hasattr(config, sect_name) or sect_name.startswith("_"):
-                continue
-            if sect_name == "agents" and isinstance(sect_data, dict):
-                _update_agents(config, sect_data)
-            elif sect_name == "providers" and isinstance(sect_data, dict):
-                _update_providers(config, sect_data)
-            elif isinstance(sect_data, dict):
-                current = getattr(config, sect_name, None)
-                if current is not None:
-                    for key, value in sect_data.items():
-                        if hasattr(current, key):
-                            setattr(current, key, value)
+            if isinstance(sect_data, dict):
+                _apply_section(config, sect_name, sect_data)
         save_config(config, config._config_path)
         return {"status": "ok"}
 
-    valid_sections = ["bot", "server", "agents", "image", "auth", "tools", "storage", "cron"]
+    valid_sections = [
+        "bot",
+        "server",
+        "agents",
+        "image",
+        "web_client",
+        "tools",
+        "storage",
+        "cron",
+        "providers",
+        "credentials",
+    ]
     if section not in valid_sections:
         return {"error": f"Invalid section: {section}"}
 
-    if section == "agents":
-        _update_agents(config, body.data)
-    else:
-        current = getattr(config, section)
-        _update_section(current, body.data)
-
+    _apply_section(config, section, body.data)
     save_config(config, config._config_path)
     return {"status": "ok"}
+
+
+def _apply_section(config, section: str, data: dict) -> None:
+    """Apply data to a single config section."""
+    if not hasattr(config, section) or section.startswith("_"):
+        return
+    if section == "agents":
+        _update_agents(config, data)
+    elif section == "providers":
+        _update_providers(config, data)
+    elif section == "credentials":
+        _update_credentials(config, data)
+    else:
+        current = getattr(config, section)
+        _update_section(current, data)
 
 
 async def _save_advanced_yaml(yaml_str: str, config):
@@ -114,6 +141,8 @@ async def _save_advanced_yaml(yaml_str: str, config):
             _update_agents(config, sect_data)
         elif sect_name == "providers" and isinstance(sect_data, dict):
             _update_providers(config, sect_data)
+        elif sect_name == "credentials" and isinstance(sect_data, dict):
+            _update_credentials(config, sect_data)
         elif isinstance(sect_data, dict):
             current = getattr(config, sect_name, None)
             if current is not None:
@@ -177,20 +206,37 @@ def _update_providers(config, data):
         if not isinstance(pdata, dict):
             continue
         existing = config.providers.get(name)
-        api_key = pdata.get("api_key", "")
-        if is_masked_or_empty(api_key):
-            api_key = existing.api_key if existing else ""
-        api_base = pdata.get("api_base") or (existing.api_base if existing else None)
-        headers = pdata.get("headers", existing.headers if existing else {})
-        options = pdata.get("options", existing.options if existing else {})
+        credential = pdata.get("credential", "")
+        if not credential and existing:
+            credential = existing.credential
+        request_headers = pdata.get("request_headers", existing.request_headers if existing else {})
+        request_options = pdata.get("request_options", existing.request_options if existing else {})
         model_params = pdata.get("model_params", existing.model_params if existing else {})
         config.providers[name] = ProviderConfig(
-            api_key=api_key,
-            api_base=api_base,
-            headers=headers,
-            options=options,
+            name=name,
+            credential=credential,
+            request_headers=request_headers,
+            request_options=request_options,
             model_params=model_params,
         )
+
+
+def _update_credentials(config, data):
+    from openbotx.config.schema import CredentialConfig
+
+    for name, pdata in data.items():
+        if not isinstance(pdata, dict):
+            continue
+        existing = config.credentials.get(name)
+        if existing:
+            for key, value in pdata.items():
+                if not hasattr(existing, key):
+                    continue
+                if is_sensitive_key(key) and is_masked_or_empty(value):
+                    continue
+                setattr(existing, key, value)
+        else:
+            config.credentials[name] = CredentialConfig(**pdata)
 
 
 @router.post("/restart")
@@ -219,6 +265,15 @@ async def restart_services(request: Request):
     from openbotx.server.app import ServerFactory
 
     factory = ServerFactory(config)
+
+    # re-resolve auth on restart
+    server_cred = config.get_credential(config.server.credential)
+    if server_cred:
+        app.state.auth_secret = server_cred.key
+    wc_cred = config.get_credential(config.web_client.credential)
+    if wc_cred:
+        app.state.auth_config = wc_cred
+
     workspace = config.workspace_path
     public_dir = config.project_path / "public"
     public_dir.mkdir(parents=True, exist_ok=True)
@@ -235,6 +290,8 @@ async def restart_services(request: Request):
         public_url=public_url,
         tools=config.tools,
         image=config.image,
+        credentials=config.credentials,
+        providers=config.providers,
         storage=storage,
     )
 
@@ -267,6 +324,7 @@ async def restart_services(request: Request):
         bus,
         storage=storage,
         dispatcher=dispatcher,
+        credentials=config.credentials,
     )
     app.state.channel_manager = channel_manager
     await channel_manager.start()

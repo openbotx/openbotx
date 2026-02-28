@@ -2,8 +2,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from openbotx.helpers.secrets import MASKED_VALUE, is_masked_or_empty
-
 router = APIRouter()
 
 
@@ -24,7 +22,7 @@ async def get_channel(name: str, request: Request):
         return {
             "name": "telegram",
             "enabled": config.channels.telegram.enabled,
-            "token": MASKED_VALUE if config.channels.telegram.token else "",
+            "credential": config.channels.telegram.credential,
             "allowed_users": config.channels.telegram.allowed_users,
         }
     return {"error": f"Unknown channel: {name}"}
@@ -39,10 +37,14 @@ async def update_channel(name: str, body: ChannelUpdate, request: Request):
         tg = config.channels.telegram
         if "enabled" in body.config:
             tg.enabled = body.config["enabled"]
-        if "token" in body.config and not is_masked_or_empty(body.config["token"]):
-            tg.token = body.config["token"]
+        if "credential" in body.config:
+            tg.credential = body.config["credential"]
         if "allowed_users" in body.config:
             tg.allowed_users = body.config["allowed_users"]
+        if "proxy" in body.config:
+            tg.proxy = body.config["proxy"] or None
+        if "reply_to_message" in body.config:
+            tg.reply_to_message = body.config["reply_to_message"]
         save_config(config, config._config_path)
         return {"status": "ok"}
     return {"error": f"Unknown channel: {name}"}

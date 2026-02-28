@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 
 class BotConfig(BaseModel):
@@ -12,6 +19,7 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     public_url: str = ""
+    credential: str = ""
 
 
 class AgentParams(BaseModel):
@@ -44,29 +52,61 @@ class AgentConfig(BaseModel):
         return p.resolve()
 
 
+_CREDENTIAL_FIELDS_BY_TYPE = {
+    "simple": {"type", "key"},
+    "oauth1": {"type", "consumer_key", "consumer_secret", "access_token", "access_token_secret"},
+    "basic": {"type", "username", "password"},
+    "login": {"type", "username", "password"},
+    "aws": {"type", "access_key", "secret_key"},
+}
+
+
+class CredentialConfig(BaseModel):
+    type: str = ""
+    # simple
+    key: str = ""
+    # oauth1
+    consumer_key: str = ""
+    consumer_secret: str = ""
+    access_token: str = ""
+    access_token_secret: str = ""
+    # basic / login
+    username: str = ""
+    password: str = ""
+    # aws
+    access_key: str = ""
+    secret_key: str = ""
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        auth_type = data.get("type", "") if isinstance(data, dict) else self.type
+        fields = _CREDENTIAL_FIELDS_BY_TYPE.get(auth_type)
+        if fields and isinstance(data, dict):
+            return {k: v for k, v in data.items() if k in fields}
+        return data
+
+
 class ProviderConfig(BaseModel):
     name: str = ""
-    api_key: str = ""
-    api_base: str | None = None
-    headers: dict[str, str] = Field(default_factory=dict)
-    options: dict = Field(default_factory=dict)
+    credential: str = ""
+    base_url: str = ""
+    request_headers: dict[str, str] = Field(default_factory=dict)
+    request_options: dict = Field(default_factory=dict)
     model_params: dict = Field(default_factory=dict)
 
 
 class ImageConfig(BaseModel):
     model: str = ""
-    provider: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
-class AuthConfig(BaseModel):
-    username: str = ""
-    password: str = ""
-    secret_key: str = ""
+class WebClientConfig(BaseModel):
+    credential: str = ""
 
 
 class TelegramConfig(BaseModel):
     enabled: bool = False
-    token: str = ""
+    credential: str = ""
     allowed_users: list[str] = Field(default_factory=list)
     proxy: str | None = None
     reply_to_message: bool = False
@@ -79,47 +119,12 @@ class ChannelsConfig(BaseModel):
 
 
 class WebSearchConfig(BaseModel):
-    api_key: str = ""
+    credential: str = ""
     max_results: int = 5
 
 
 class ExecToolConfig(BaseModel):
     timeout: int = 60
-
-
-_AUTH_FIELDS_BY_TYPE = {
-    "oauth1": {"type", "consumer_key", "consumer_secret", "access_token", "access_token_secret"},
-    "basic": {"type", "username", "password"},
-    "bearer": {"type", "token"},
-}
-
-
-class AuthProfileConfig(BaseModel):
-    type: str = ""  # "oauth1", "basic", "bearer"
-    # oauth1
-    consumer_key: str = ""
-    consumer_secret: str = ""
-    access_token: str = ""
-    access_token_secret: str = ""
-    # basic
-    username: str = ""
-    password: str = ""
-    # bearer
-    token: str = ""
-
-    @model_serializer(mode="wrap")
-    def _serialize(self, handler):
-        data = handler(self)
-        auth_type = data.get("type", "") if isinstance(data, dict) else self.type
-        fields = _AUTH_FIELDS_BY_TYPE.get(auth_type)
-        if fields and isinstance(data, dict):
-            return {k: v for k, v in data.items() if k in fields}
-        return data
-
-
-class HttpClientConfig(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-    auth_profiles: dict[str, AuthProfileConfig] = Field(default_factory=dict)
 
 
 class GeneralToolsConfig(BaseModel):
@@ -130,7 +135,6 @@ class ToolsConfig(BaseModel):
     general: GeneralToolsConfig = Field(default_factory=GeneralToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    http_client: HttpClientConfig = Field(default_factory=HttpClientConfig)
 
 
 class StorageConfig(BaseModel):
@@ -138,8 +142,7 @@ class StorageConfig(BaseModel):
     local_path: str = "./workspace"
     s3_bucket: str = ""
     s3_region: str = ""
-    s3_access_key: str = ""
-    s3_secret_key: str = ""
+    credential: str = ""
 
 
 class HeartbeatConfig(BaseModel):
@@ -161,15 +164,22 @@ class Config(BaseModel):
     bot: BotConfig = Field(default_factory=BotConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     agents: dict[str, AgentConfig] = Field(default_factory=lambda: {"main": AgentConfig()})
-    image: ImageConfig = Field(default_factory=ImageConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
+    credentials: dict[str, CredentialConfig] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    image: ImageConfig = Field(default_factory=ImageConfig)
+    web_client: WebClientConfig = Field(default_factory=WebClientConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     cron: CronConfig = Field(default_factory=CronConfig)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
+
+    @model_validator(mode="after")
+    def _populate_names(self):
+        for name, prov in self.providers.items():
+            prov.name = name
+        return self
 
     @property
     def main_agent(self) -> AgentConfig:
@@ -189,6 +199,9 @@ class Config(BaseModel):
             return self._config_path.parent.resolve()
         return Path.cwd().resolve()
 
+    def get_credential(self, name: str) -> CredentialConfig | None:
+        return self.credentials.get(name)
+
     def _resolve_provider(self, model: str | None = None) -> tuple[str, ProviderConfig] | None:
         from openbotx.providers.registry import PROVIDERS
 
@@ -199,7 +212,8 @@ class Config(BaseModel):
             for spec in PROVIDERS:
                 if prefix == spec.name.lower() and spec.name in self.providers:
                     cfg = self.providers[spec.name]
-                    if cfg.api_key:
+                    cred = self.get_credential(cfg.credential)
+                    if cred and cred.key:
                         return spec.name, cfg
 
         target_lower = target.lower()
@@ -208,11 +222,13 @@ class Config(BaseModel):
                 kw.lower() in target_lower for kw in spec.keywords
             ):
                 cfg = self.providers[spec.name]
-                if cfg.api_key:
+                cred = self.get_credential(cfg.credential)
+                if cred and cred.key:
                     return spec.name, cfg
 
         for name, cfg in self.providers.items():
-            if cfg.api_key:
+            cred = self.get_credential(cfg.credential)
+            if cred and cred.key:
                 return name, cfg
         return None
 
