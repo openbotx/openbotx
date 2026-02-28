@@ -8,6 +8,7 @@ from typing import Any
 from openbotx.cdp import protocol as cdp
 from openbotx.cdp.browser import ChromeLauncher
 from openbotx.cdp.connection import CDPConnection, CDPSession, connect_cdp
+from openbotx.cdp.exceptions import CDPConnectionClosed, CDPSessionClosed
 from openbotx.cdp.protocol.input_ import MouseButton
 from openbotx.tools.base import Tool
 
@@ -40,8 +41,10 @@ class _ChromeInstance:
         return cls._instance
 
     async def _ensure_running(self, headless: bool = False) -> None:
-        if self._connection is not None:
+        if self._connection is not None and not self._connection.closed:
             return
+        if self._connection is not None:
+            self._connection = None
 
         self._headless = headless
         chrome_path = self._find_chrome()
@@ -74,8 +77,11 @@ class _ChromeInstance:
     async def close_tab(self, target_id: cdp.target.TargetID) -> None:
         """Close a browser tab by its target ID."""
         async with self._lock:
-            if self._connection is not None:
-                await self._connection.execute(cdp.target.close_target(target_id))
+            if self._connection is not None and not self._connection.closed:
+                try:
+                    await self._connection.execute(cdp.target.close_target(target_id))
+                except (CDPConnectionClosed, CDPSessionClosed):
+                    pass
 
     async def cleanup(self) -> None:
         """Terminate the Chrome process."""
@@ -182,6 +188,8 @@ class BrowserTool(Tool):
         "required": ["action"],
     }
 
+    _ACTION_TIMEOUT = 30
+
     def __init__(self):
         self._session: CDPSession | None = None
         self._target_id: cdp.target.TargetID | None = None
@@ -196,6 +204,20 @@ class BrowserTool(Tool):
         headless = kwargs.get("headless", False)
         await self._ensure_tab(headless=headless)
 
+        try:
+            return await asyncio.wait_for(
+                self._dispatch(action, kwargs), timeout=self._ACTION_TIMEOUT
+            )
+        except (TimeoutError, CDPSessionClosed, CDPConnectionClosed):
+            logger.info("browser session lost or timed out, reopening tab")
+            self._session = None
+            self._target_id = None
+            await self._ensure_tab(headless=headless)
+            return await asyncio.wait_for(
+                self._dispatch(action, kwargs), timeout=self._ACTION_TIMEOUT
+            )
+
+    async def _dispatch(self, action: str, kwargs: dict[str, Any]) -> str:
         if action == "navigate":
             return await self._navigate(kwargs.get("url", ""))
         if action == "snapshot":
@@ -212,7 +234,6 @@ class BrowserTool(Tool):
             return await self._inspect()
         if action == "evaluate":
             return await self._evaluate(kwargs.get("script", ""))
-
         return f"Unknown action: {action}"
 
     async def _ensure_tab(self, headless: bool = False) -> None:
@@ -450,7 +471,10 @@ class BrowserTool(Tool):
         """Close this instance's tab. Safe to call multiple times."""
         if self._target_id is None:
             return
-        await _ChromeInstance.get().close_tab(self._target_id)
+        try:
+            await _ChromeInstance.get().close_tab(self._target_id)
+        except (CDPConnectionClosed, CDPSessionClosed):
+            pass
         self._session = None
         self._target_id = None
 

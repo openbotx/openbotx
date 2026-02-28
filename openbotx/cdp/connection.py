@@ -237,6 +237,19 @@ class CDPConnection(CDPBase, SingleTaskWorker):
         self._ws_context = None
         self._sessions: dict[str, CDPSession] = {}
 
+    def _handle_event(self, data):
+        event = cdp.util.parse_json_event(data)
+        if isinstance(event, cdp.target.DetachedFromTarget):
+            self.remove_session(event.session_id)
+        elif isinstance(event, cdp.target.TargetDestroyed):
+            self._close_sessions_for_target(event.target_id)
+        super()._handle_event(data)
+
+    def _close_sessions_for_target(self, target_id: cdp.target.TargetID) -> None:
+        to_remove = [sid for sid, s in self._sessions.items() if s._target_id == target_id]
+        for sid in to_remove:
+            self.remove_session(sid)
+
     @property
     def closed(self) -> bool:
         return self._ws.closed
