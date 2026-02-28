@@ -8,7 +8,7 @@
 
 <p align="center">
     <a href="https://pypi.org/project/openbotx/"><img src="https://img.shields.io/pypi/v/openbotx?color=brightgreen&style=flat-square" alt="PyPI version"></a>
-    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11--3.13-blue?style=flat-square" alt="Python 3.11-3.13"></a>
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square" alt="Python 3.11+"></a>
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -38,7 +38,7 @@ OpenBotX lets you create and manage AI agents from a web control panel. Chat, as
 
 ## Quick Start
 
-**Requirements:** Python 3.11-3.13 and [UV](https://github.com/astral-sh/uv).
+**Requirements:** Python 3.11+ and [UV](https://github.com/astral-sh/uv).
 
 ```bash
 # Install
