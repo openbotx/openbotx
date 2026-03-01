@@ -1,14 +1,11 @@
 ---
 name: image-generation
-description: Generate images from text descriptions using AI
+description: Generate images from text descriptions using AI. Use when the user asks to create, generate, draw, or design an image, illustration, icon, or any visual content.
 ---
 
 # Image Generation
 
 Generate images from text prompts using the `generate_image` tool.
-
-## When to Use
-Use this skill when the user asks to create, generate, or draw an image.
 
 ## How to Use
 

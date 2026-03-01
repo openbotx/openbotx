@@ -7,7 +7,7 @@ router = APIRouter()
 async def list_tools(request: Request):
     orchestrator = request.app.state.orchestrator
     definitions = orchestrator.get_tool_definitions()
-    return [
+    tools = [
         {
             "name": d["function"]["name"],
             "description": d["function"].get("description", ""),
@@ -15,3 +15,5 @@ async def list_tools(request: Request):
         }
         for d in definitions
     ]
+    tools.sort(key=lambda t: t["name"])
+    return tools

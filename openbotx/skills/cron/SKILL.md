@@ -1,6 +1,6 @@
 ---
 name: cron
-description: Schedule reminders and recurring tasks.
+description: Schedule reminders, recurring tasks, and one-time events. Use when the user asks to be reminded of something, schedule a periodic check, set an alarm, or automate a task at a specific time or interval.
 always: true
 ---
 

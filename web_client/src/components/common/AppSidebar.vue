@@ -16,6 +16,7 @@ const navItems = [
   { label: 'Files', icon: 'pi pi-folder', path: '/files' },
   { label: 'Skills', icon: 'pi pi-bolt', path: '/skills' },
   { label: 'Tools', icon: 'pi pi-wrench', path: '/tools' },
+  { label: 'Marketplace', icon: 'pi pi-shop', path: '/marketplace' },
   { label: 'Scheduler', icon: 'pi pi-clock', path: '/scheduler' },
   { label: 'Settings', icon: 'pi pi-cog', path: '/settings' },
 ]

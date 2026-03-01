@@ -345,10 +345,20 @@ No authentication required. Files under the project's `public/` directory are se
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/skills` | List all available skills |
-| GET | `/api/skills/{name}` | Get skill content by name |
+| GET | `/api/skills` | List all skills |
+| GET | `/api/skills/{name}` | Get a skill's raw content |
+| PUT | `/api/skills/{name}` | Update a skill's SKILL.md |
+| DELETE | `/api/skills/{name}` | Delete a skill directory |
+
+All endpoints support an optional `?agent=` query parameter to target a specific location. For nested skills, the name includes the publisher prefix (e.g., `/api/skills/anthropic/pdf`).
 
 **GET /api/skills**
+
+Supports an optional `agent` query parameter:
+
+- No parameter: returns all skills across all locations (project and each workspace shown independently)
+- `agent=` (empty): returns built-in + project skills only
+- `agent=<name>`: returns built-in + project + that agent's workspace skills
 
 Response:
 
@@ -358,7 +368,9 @@ Response:
     "name": "string",
     "description": "string",
     "always": "boolean",
-    "requires": "string[]"
+    "source": "builtin | project | workspace",
+    "publisher": "string",
+    "agent": "string"
   }
 ]
 ```
@@ -370,7 +382,83 @@ Response:
 ```json
 {
   "name": "string",
+  "content": "string",
+  "source": "builtin | project | workspace"
+}
+```
+
+**PUT /api/skills/{name}**
+
+Request body:
+
+```json
+{
   "content": "string"
+}
+```
+
+Built-in skills cannot be edited.
+
+**DELETE /api/skills/{name}**
+
+Built-in skills cannot be deleted. Empty parent directories are cleaned up automatically.
+
+---
+
+### Marketplace
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/marketplace/targets` | List install targets (project + agents) |
+| GET | `/api/marketplace/check/{source}/{name}` | Check if a skill is already installed |
+| POST | `/api/marketplace/install` | Install a skill from the marketplace |
+
+**GET /api/marketplace/targets**
+
+Returns available install locations.
+
+Response:
+
+```json
+[
+  { "label": "Project", "value": "" },
+  { "label": "Agent: main", "value": "main" }
+]
+```
+
+**GET /api/marketplace/check/{source}/{name}**
+
+Supports `?agent=` to check a specific location.
+
+Response:
+
+```json
+{
+  "installed": "boolean"
+}
+```
+
+**POST /api/marketplace/install**
+
+Downloads and installs a skill package from the marketplace catalog.
+
+Request body:
+
+```json
+{
+  "source": "string",
+  "name": "string",
+  "agent": "string (optional, default: project)"
+}
+```
+
+If the skill already exists at the target location, it is replaced.
+
+Response:
+
+```json
+{
+  "ok": true
 }
 ```
 

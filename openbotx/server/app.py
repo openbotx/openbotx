@@ -91,7 +91,7 @@ class ServerFactory:
         dispatcher: EventDispatcher,
         task_manager: TaskManager,
         session_manager: SessionManager,
-        skills_loader: SkillsLoader,
+        project_path: Path,
         cron_service: CronService,
     ) -> Orchestrator:
         agent_loops: dict[str, AgentLoop] = {}
@@ -107,6 +107,8 @@ class ServerFactory:
 
             agent_workspace = agent_cfg.resolve_workspace(self._project_path)
             agent_workspace.mkdir(parents=True, exist_ok=True)
+
+            agent_skills = SkillsLoader(project_path, agent_workspace)
 
             subagent_mgr = SubagentManager(
                 provider=provider,
@@ -124,7 +126,7 @@ class ServerFactory:
                 dispatcher=dispatcher,
                 task_manager=task_manager,
                 session_manager=session_manager,
-                skills_loader=skills_loader,
+                skills_loader=agent_skills,
                 subagent_manager=subagent_mgr,
                 cron_service=cron_service,
             )
@@ -222,7 +224,7 @@ async def lifespan(app: FastAPI):
     bus = MessageBus()
     session_manager = SessionManager(system_workspace)
     task_manager = TaskManager(system_workspace, dispatcher)
-    skills_loader = SkillsLoader(system_workspace)
+    skills_loader = SkillsLoader(project_path, system_workspace)
     cron_service = CronService(system_workspace, on_job_callback=factory.create_cron_callback(bus))
 
     public_dir = project_path / "public"
@@ -250,7 +252,7 @@ async def lifespan(app: FastAPI):
         dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,
-        skills_loader=skills_loader,
+        project_path=project_path,
         cron_service=cron_service,
     )
 
@@ -270,6 +272,7 @@ async def lifespan(app: FastAPI):
     )
 
     app.state.config = config
+    app.state.project_path = project_path
     app.state.storage = storage
     app.state.ws_manager = ws_manager
     app.state.dispatcher = dispatcher
@@ -352,6 +355,7 @@ def create_app() -> FastAPI:
         credentials,
         files,
         forms,
+        marketplace,
         providers,
         scheduler,
         skills,
@@ -374,6 +378,7 @@ def create_app() -> FastAPI:
     app.include_router(config.router, prefix="/api/config", tags=["config"])
     app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
     app.include_router(forms.router, prefix="/api/forms", tags=["forms"])
+    app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
 
     app.add_api_websocket_route("/ws", websocket_endpoint)
 

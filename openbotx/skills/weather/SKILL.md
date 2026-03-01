@@ -1,6 +1,6 @@
 ---
 name: weather
-description: Get current weather and forecasts (no API key required).
+description: Get current weather and forecasts for any location (no API key required). Use when the user asks about the weather, temperature, forecast, or climate conditions in a city or region.
 requires:
   bins:
     - curl

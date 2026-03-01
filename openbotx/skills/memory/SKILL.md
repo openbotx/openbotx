@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Two-layer memory system with search-based recall.
+description: Two-layer memory system with search-based recall. Use to save important facts, search past events, or recall user preferences and project context across conversations.
 always: true
 ---
 

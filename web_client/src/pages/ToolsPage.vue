@@ -3,13 +3,23 @@ import { ref, computed, onMounted } from 'vue'
 import Card from 'primevue/card'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import { useApi } from '../composables/useApi'
 
 const api = useApi()
 const tools = ref([])
+const search = ref('')
 const selectedTool = ref(null)
 const dialogVisible = ref(false)
 const loading = ref(true)
+
+const filteredTools = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return tools.value
+  return tools.value.filter(t =>
+    t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
+  )
+})
 
 onMounted(async () => {
   try {
@@ -46,12 +56,20 @@ const toolParams = computed(() => {
       <h2>Tools</h2>
     </div>
 
+    <div class="search-bar">
+      <span class="p-input-icon-left search-input-wrapper">
+        <i class="pi pi-search" />
+        <InputText v-model="search" placeholder="Search tools..." class="search-input" />
+      </span>
+      <span v-if="!loading" class="search-count">{{ filteredTools.length }} tools</span>
+    </div>
+
     <div v-if="loading" class="page-loading">
       <i class="pi pi-spin pi-spinner" style="font-size: 1.5rem"></i>
     </div>
 
-    <div v-else-if="tools.length" class="tools-grid">
-      <Card v-for="tool in tools" :key="tool.name" class="tool-card" @click="viewTool(tool)">
+    <div v-else-if="filteredTools.length" class="tools-grid">
+      <Card v-for="tool in filteredTools" :key="tool.name" class="tool-card" @click="viewTool(tool)">
         <template #title>
           <div class="tool-name">
             <i class="pi pi-wrench"></i>
@@ -66,7 +84,8 @@ const toolParams = computed(() => {
 
     <div v-else class="empty-state">
       <i class="pi pi-wrench" style="font-size: 2.5rem"></i>
-      <p>No tools registered</p>
+      <p v-if="search">No tools matching "{{ search }}"</p>
+      <p v-else>No tools registered</p>
     </div>
 
     <Dialog
@@ -120,6 +139,40 @@ const toolParams = computed(() => {
 .page-header h2 {
   margin: 0;
   font-size: 1.1rem;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.search-input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.search-input-wrapper i {
+  position: absolute;
+  left: 0.625rem;
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+  z-index: 1;
+}
+
+.search-input {
+  width: 100%;
+  padding-left: 2rem;
+}
+
+.search-count {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  white-space: nowrap;
 }
 
 .tools-grid {
