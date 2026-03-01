@@ -1,190 +1,260 @@
 ---
 name: skill-creator
-description: Create or update OpenBotX skills. Use when designing, structuring, or packaging skills with scripts, references, and assets.
+description: Create or update OpenBotX skills. Use when users want to create a new skill, modify an existing one, or need guidance on skill structure, frontmatter, bundled resources, or best practices. Also use when the user says "turn this into a skill" or wants to capture a workflow as a reusable skill.
 ---
 
 # Skill Creator
 
-This skill provides guidance for creating effective OpenBotX skills.
+Guide for creating effective OpenBotX skills.
 
 ## About Skills
 
-Skills are modular, self-contained packages that extend the agent's capabilities by providing
-specialized knowledge, workflows, and tools. Think of them as "onboarding guides" for specific
-domains or tasks -- they transform the agent from a general-purpose agent into a specialized agent
-equipped with procedural knowledge that no model can fully possess.
+Skills are modular, self-contained packages that extend the agent's capabilities with specialized knowledge, workflows, and tools. They transform the agent from a general-purpose assistant into a specialized one equipped with procedural knowledge no model fully possesses.
 
-### What Skills Provide
+**What skills provide:**
 
-1. Specialized workflows - Multi-step procedures for specific domains
-2. Tool integrations - Instructions for working with specific file formats or APIs
-3. Domain expertise - Company-specific knowledge, schemas, business logic
-4. Bundled resources - Scripts, references, and assets for complex and repetitive tasks
+1. Specialized workflows - multi-step procedures for specific domains
+2. Tool integrations - instructions for working with specific file formats or APIs
+3. Domain expertise - company-specific knowledge, schemas, business logic
+4. Bundled resources - scripts, references, and assets for complex and repetitive tasks
+
+## Skill Locations
+
+- **Builtin skills**: `openbotx/skills/<skill-name>/SKILL.md` — shipped with the project, read-only
+- **Project skills**: `<workspace>/skills/<skill-name>/SKILL.md` — user-created, editable
+- **Marketplace skills**: `<workspace>/skills/<source>/<skill-name>/SKILL.md` — installed from marketplace
+
+When creating a new skill, always place it under `<workspace>/skills/`.
+
+## Anatomy of a Skill
+
+```
+skill-name/
+├── SKILL.md           (required)
+│   ├── YAML frontmatter (required)
+│   └── Markdown body    (required)
+└── Bundled Resources    (optional)
+    ├── scripts/         - executable code (Python/Bash/etc.)
+    ├── references/      - documentation loaded into context as needed
+    └── assets/          - files used in output (templates, icons, fonts)
+```
+
+### SKILL.md Frontmatter
+
+The frontmatter is the primary mechanism for skill discovery and triggering.
+
+```yaml
+---
+name: skill-name                # required - identifier
+description: What it does...    # required - triggers skill selection
+always: true                    # optional - always loaded into context (default: false)
+requires:                       # optional - prerequisites
+  bins:                         # optional - required binaries on PATH
+    - some-binary
+  env:                          # optional - required environment variables
+    - SOME_API_KEY
+---
+```
+
+**Fields:**
+
+- `name` — skill identifier, shown in the skills list
+- `description` — the primary triggering mechanism. The agent reads this to decide when to use the skill. Include both what the skill does AND when to use it. All "when to use" info must go here, not in the body (the body is only loaded after triggering)
+- `always` — when `true`, the skill body is always loaded into the agent's context regardless of triggering. Use sparingly — only for skills that must always be active (e.g., memory, cron)
+- `requires.bins` — list of binary names that must exist on PATH (checked via `shutil.which`). If any is missing, the skill is marked unavailable
+- `requires.env` — list of environment variable names that must be set. If any is empty/unset, the skill is marked unavailable
+
+### SKILL.md Body
+
+Markdown instructions loaded only after the skill triggers. Use imperative form ("Extract the data", not "You should extract the data"). Keep under 500 lines.
+
+### Bundled Resources
+
+#### Scripts (`scripts/`)
+
+Executable code for tasks that require deterministic reliability or are repeatedly rewritten.
+
+- include when the same code would be rewritten repeatedly across invocations
+- scripts are token-efficient, deterministic, and can be executed without loading into context
+- **signal to bundle a script**: if you find yourself writing the same helper code every time the skill runs, extract it into a script
+
+#### References (`references/`)
+
+Documentation loaded as needed to inform the agent's reasoning.
+
+- keeps SKILL.md lean — move detailed schemas, API docs, and domain knowledge here
+- for large files (>300 lines), include a table of contents at the top
+- reference clearly from SKILL.md with guidance on when to read each file
+- avoid duplication: information should live in either SKILL.md or references, not both
+
+#### Assets (`assets/`)
+
+Files used in output, not intended to be loaded into context.
+
+- templates, images, icons, boilerplate code, fonts, sample documents
+- the agent uses these files directly in its output without reading them into context
+
+### What NOT to Include
+
+Only essential files. Do NOT create:
+
+- README.md, INSTALLATION_GUIDE.md, QUICK_REFERENCE.md, CHANGELOG.md
+- user-facing documentation, setup guides, or testing procedures
 
 ## Core Principles
 
 ### Concise is Key
 
-The context window is a public good. Skills share the context window with everything else the agent needs: system prompt, conversation history, other Skills' metadata, and the actual user request.
+The context window is shared. Skills compete for space with the system prompt, conversation history, other skills' metadata, and the user's request.
 
-**Default assumption: the agent is already very smart.** Only add context the agent doesn't already have. Challenge each piece of information: "Does the agent really need this explanation?" and "Does this paragraph justify its token cost?"
+**The agent is already very smart.** Only add context it doesn't already have. Challenge each piece: "Does the agent really need this?" and "Does this paragraph justify its token cost?"
 
 Prefer concise examples over verbose explanations.
 
+### Explain the Why
+
+Explain **why** things are important instead of heavy-handed constraints. The agent has good theory of mind — when given clear reasoning, it can go beyond rote instructions. If you find yourself writing ALWAYS or NEVER in all caps, reframe and explain the reasoning instead. That's more effective than rigid rules.
+
 ### Set Appropriate Degrees of Freedom
 
-Match the level of specificity to the task's fragility and variability:
+Match specificity to the task's fragility:
 
-**High freedom (text-based instructions)**: Use when multiple approaches are valid, decisions depend on context, or heuristics guide the approach.
+- **High freedom** (text instructions) — multiple approaches are valid, decisions depend on context
+- **Medium freedom** (pseudocode/scripts with parameters) — a preferred pattern exists, some variation is acceptable
+- **Low freedom** (specific scripts, few parameters) — operations are fragile, consistency is critical
 
-**Medium freedom (pseudocode or scripts with parameters)**: Use when a preferred pattern exists, some variation is acceptable, or configuration affects behavior.
+Think of the agent exploring a path: a narrow bridge with cliffs needs guardrails, an open field allows many routes.
 
-**Low freedom (specific scripts, few parameters)**: Use when operations are fragile and error-prone, consistency is critical, or a specific sequence must be followed.
+### Progressive Disclosure
 
-Think of the agent as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
+Skills use a three-level loading system:
 
-### Anatomy of a Skill
+1. **Metadata** (name + description) — always in context (~100 words)
+2. **SKILL.md body** — loaded when skill triggers (<500 lines)
+3. **Bundled resources** — loaded as needed by the agent (unlimited)
 
-Every skill consists of a required SKILL.md file and optional bundled resources:
+When SKILL.md approaches 500 lines, split content into reference files with clear pointers about when to read them.
+
+**Pattern: high-level guide with references**
+
+```markdown
+# PDF Processing
+
+## Quick start
+Extract text with pdfplumber:
+[concise example]
+
+## Advanced features
+- **Form filling**: See references/forms.md for complete guide
+- **API reference**: See references/api.md for all methods
+```
+
+The agent loads reference files only when needed.
+
+**Pattern: domain-specific organization**
 
 ```
-skill-name/
-  SKILL.md (required)
-    YAML frontmatter metadata (required)
-      name: (required)
-      description: (required)
-    Markdown instructions (required)
-  Bundled Resources (optional)
-    scripts/          - Executable code (Python/Bash/etc.)
-    references/       - Documentation intended to be loaded into context as needed
-    assets/           - Files used in output (templates, icons, fonts, etc.)
+bigquery-skill/
+├── SKILL.md (overview and navigation)
+└── references/
+    ├── finance.md (revenue, billing metrics)
+    ├── sales.md (opportunities, pipeline)
+    └── product.md (API usage, features)
 ```
 
-#### SKILL.md (required)
+When the user asks about sales, the agent only reads `sales.md`.
 
-Every SKILL.md consists of:
+**Pattern: conditional details**
 
-- **Frontmatter** (YAML): Contains `name` and `description` fields. These are the only fields that the agent reads to determine when the skill gets used, thus it is very important to be clear and comprehensive in describing what the skill is, and when it should be used.
-- **Body** (Markdown): Instructions and guidance for using the skill. Only loaded AFTER the skill triggers (if at all).
+```markdown
+# DOCX Processing
 
-#### Bundled Resources (optional)
+## Creating documents
+Use docx-js for new documents. See references/docx-js.md.
 
-##### Scripts (`scripts/`)
-
-Executable code (Python/Bash/etc.) for tasks that require deterministic reliability or are repeatedly rewritten.
-
-- **When to include**: When the same code is being rewritten repeatedly or deterministic reliability is needed
-- **Example**: `scripts/rotate_pdf.py` for PDF rotation tasks
-- **Benefits**: Token efficient, deterministic, may be executed without loading into context
-- **Note**: Scripts may still need to be read by the agent for patching or environment-specific adjustments
-
-##### References (`references/`)
-
-Documentation and reference material intended to be loaded as needed into context to inform the agent's process and thinking.
-
-- **When to include**: For documentation that the agent should reference while working
-- **Examples**: `references/finance.md` for financial schemas, `references/api_docs.md` for API specifications
-- **Use cases**: Database schemas, API documentation, domain knowledge, company policies, detailed workflow guides
-- **Benefits**: Keeps SKILL.md lean, loaded only when the agent determines it's needed
-- **Best practice**: If files are large (>10k words), include grep search patterns in SKILL.md
-- **Avoid duplication**: Information should live in either SKILL.md or references files, not both
-
-##### Assets (`assets/`)
-
-Files not intended to be loaded into context, but rather used within the output the agent produces.
-
-- **When to include**: When the skill needs files that will be used in the final output
-- **Examples**: `assets/logo.png` for brand assets, `assets/slides.pptx` for PowerPoint templates
-- **Use cases**: Templates, images, icons, boilerplate code, fonts, sample documents
-- **Benefits**: Separates output resources from documentation
-
-#### What to Not Include in a Skill
-
-A skill should only contain essential files that directly support its functionality. Do NOT create extraneous documentation or auxiliary files, including:
-
-- README.md
-- INSTALLATION_GUIDE.md
-- QUICK_REFERENCE.md
-- CHANGELOG.md
-
-The skill should only contain the information needed for an AI agent to do the job at hand.
-
-### Progressive Disclosure Design Principle
-
-Skills use a three-level loading system to manage context efficiently:
-
-1. **Metadata (name + description)** - Always in context (~100 words)
-2. **SKILL.md body** - When skill triggers (<5k words)
-3. **Bundled resources** - As needed by the agent (unlimited because scripts can be executed without reading into context window)
-
-Keep SKILL.md body to the essentials and under 500 lines to minimize context bloat. Split content into separate files when approaching this limit.
+## Editing documents
+For simple edits, modify the XML directly.
+**For tracked changes**: See references/redlining.md
+```
 
 ## Skill Creation Process
 
-Skill creation involves these steps:
+### Step 1: Capture Intent
 
-1. Understand the skill with concrete examples
-2. Plan reusable skill contents (scripts, references, assets)
-3. Initialize the skill directory
-4. Edit the skill (implement resources and write SKILL.md)
-5. Iterate based on real usage
+Understand the skill's purpose through concrete examples. If the current conversation already contains a workflow the user wants to capture, extract answers from the history first — the tools used, the sequence of steps, corrections made, input/output formats observed.
 
-### Skill Naming
+Key questions to resolve:
 
-- Use lowercase letters, digits, and hyphens only; normalize user-provided titles to hyphen-case (e.g., "Plan Mode" -> `plan-mode`).
-- Names must be under 64 characters (letters, digits, hyphens).
-- Prefer short, verb-led phrases that describe the action.
-- Name the skill folder exactly after the skill name.
+1. What should this skill enable the agent to do?
+2. When should this skill trigger? (what user phrases/contexts)
+3. What's the expected output format?
+4. Are there edge cases or constraints?
 
-### Step 1: Understanding the Skill with Concrete Examples
+Don't ask too many questions at once. Start with the most important and follow up as needed.
 
-Skip this step only when the skill's usage patterns are already clearly understood.
+### Step 2: Plan Reusable Contents
 
-To create an effective skill, clearly understand concrete examples of how the skill will be used. This understanding can come from either direct user examples or generated examples that are validated with user feedback.
+Analyze each concrete example:
 
-Conclude this step when there is a clear sense of the functionality the skill should support.
+1. How would you execute this from scratch?
+2. What scripts, references, or assets would help when repeating this?
 
-### Step 2: Planning the Reusable Skill Contents
+**Examples:**
 
-To turn concrete examples into an effective skill, analyze each example by:
+- Building a `pdf-editor` skill for "rotate this PDF" → a `scripts/rotate_pdf.py` avoids rewriting the same code each time
+- Building a `webapp-builder` skill for "build me a todo app" → an `assets/template/` with boilerplate project files
+- Building a `bigquery` skill for "how many users logged in today?" → a `references/schema.md` documenting table schemas
 
-1. Considering how to execute on the example from scratch
-2. Identifying what scripts, references, and assets would be helpful when executing these workflows repeatedly
+### Step 3: Create the Skill
 
-### Step 3: Initializing the Skill
-
-Create the skill directory structure:
+Create the skill directory under `<workspace>/skills/`:
 
 ```
-skill-name/
-  SKILL.md
-  scripts/      (optional)
-  references/   (optional)
-  assets/       (optional)
+<workspace>/skills/skill-name/
+├── SKILL.md
+├── scripts/      (if needed)
+├── references/   (if needed)
+└── assets/       (if needed)
 ```
 
-### Step 4: Edit the Skill
+Only create resource directories that are actually needed.
 
-When editing the skill, remember that it is being created for another instance of the agent to use. Include information that would be beneficial and non-obvious to the agent.
+### Step 4: Write the SKILL.md
 
 #### Frontmatter
 
-Write the YAML frontmatter with `name` and `description`:
+Write a clear `name` and comprehensive `description`:
 
-- `name`: The skill name
-- `description`: This is the primary triggering mechanism for your skill. Include both what the skill does and specific triggers/contexts for when to use it.
+- `description` is the primary triggering mechanism — include both what the skill does AND specific triggers/contexts
+- make descriptions slightly "broad" in scope to avoid under-triggering — include related phrases and contexts the user might use even if they don't explicitly name the skill
+- example: instead of "Process DOCX files", write "Create, edit, and analyze documents (.docx). Use when working with professional documents: creating new documents, modifying content, tracked changes, comments, formatting, or text extraction"
+
+Only add `always`, `requires.bins`, or `requires.env` when actually needed.
 
 #### Body
 
-Write instructions for using the skill and its bundled resources.
+Write instructions for using the skill and its bundled resources. Guidelines:
+
+- use imperative form ("Extract the data", not "The data should be extracted")
+- explain the reasoning behind important choices, not just the rules
+- prefer concise examples over verbose explanations
+- start with the most common use case, then cover variations
+- reference bundled resources with guidance on when to read them
+- keep under 500 lines — split to references if approaching this limit
 
 ### Step 5: Iterate
 
-After testing the skill, users may request improvements.
+After using the skill on real tasks:
 
-**Iteration workflow:**
-
-1. Use the skill on real tasks
-2. Notice struggles or inefficiencies
-3. Identify how SKILL.md or bundled resources should be updated
+1. Notice struggles or inefficiencies
+2. Identify what to update in SKILL.md or bundled resources
+3. Look for repeated work across invocations — if the agent keeps writing the same helper code, bundle it as a script
 4. Implement changes and test again
+
+### Skill Naming
+
+- lowercase letters, digits, and hyphens only
+- normalize user titles to hyphen-case (e.g., "Plan Mode" → `plan-mode`)
+- under 64 characters
+- prefer short, verb-led phrases that describe the action
+- name the folder exactly after the skill name

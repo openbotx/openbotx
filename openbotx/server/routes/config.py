@@ -300,8 +300,9 @@ async def restart_services(request: Request):
     task_manager = app.state.task_manager
     session_manager = app.state.session_manager
 
-    skills_loader = SkillsLoader(workspace)
+    skills_loader = SkillsLoader(config.project_path, workspace)
     app.state.skills_loader = skills_loader
+    app.state.project_path = config.project_path
 
     cron_service = CronService(workspace, on_job_callback=factory.create_cron_callback(bus))
     app.state.cron_service = cron_service
@@ -313,7 +314,7 @@ async def restart_services(request: Request):
         dispatcher=dispatcher,
         task_manager=task_manager,
         session_manager=session_manager,
-        skills_loader=skills_loader,
+        project_path=config.project_path,
         cron_service=cron_service,
     )
     app.state.orchestrator = orchestrator

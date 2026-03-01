@@ -101,6 +101,10 @@ No environment conflicts.
 
 This provides agility, operational control, and real-time iteration.
 
+## Skill marketplace 🛒
+
+OpenBotX includes a built-in marketplace where you can browse and install community skills directly from the web UI. Choose whether to install skills at the project level (shared by all agents) or to a specific agent's workspace. Already-installed skills are detected and can be replaced with a single click.
+
 ## Kanban-style board 📋
 
 OpenBotX includes a visual Kanban-style board where you can track in real time what each agent is doing.

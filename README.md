@@ -31,6 +31,7 @@ OpenBotX lets you create and manage AI agents from a web control panel. Chat, as
 - **Multi-agent** — multiple agents with independent models, tools, and workspaces
 - **Real-time task board** — Kanban view with live status across all agents
 - **Skills system** — extend agents with Markdown files, no coding needed
+- **Marketplace** — browse and install community skills directly from the web UI
 - **Built-in tools** — file ops, shell, web search, HTTP client, browser automation, RSS, scheduler, and more
 - **Multi-channel** — web and Telegram, same pipeline
 - **Any LLM provider** — Anthropic, OpenAI, Google, OpenRouter, or any OpenAI-compatible endpoint
