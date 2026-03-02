@@ -66,7 +66,10 @@ class MessageTool(Tool):
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata={"message_id": ctx.message_id if ctx else None},
+            metadata={
+                "message_id": ctx.message_id if ctx else None,
+                "content_blocks": [{"type": "text", "text": content}],
+            },
         )
 
         try:

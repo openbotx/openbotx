@@ -130,12 +130,17 @@ class AgentLoop:
             await self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.DONE)
             await self._dispatcher.broadcast("sessions:updated", {})
+            new_text = "Conversation cleared. How can I help you?"
             await self._bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content="Conversation cleared. How can I help you?",
-                    metadata={"task_id": task_id, "agent_name": effective_name},
+                    content=new_text,
+                    metadata={
+                        "task_id": task_id,
+                        "agent_name": effective_name,
+                        "content_blocks": [{"type": "text", "text": new_text}],
+                    },
                 )
             )
             return
@@ -147,7 +152,11 @@ class AgentLoop:
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=self._HELP_TEXT,
-                    metadata={"task_id": task_id, "agent_name": effective_name},
+                    metadata={
+                        "task_id": task_id,
+                        "agent_name": effective_name,
+                        "content_blocks": [{"type": "text", "text": self._HELP_TEXT}],
+                    },
                 )
             )
             return
@@ -212,12 +221,17 @@ class AgentLoop:
             )
             await self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.ERROR, error=str(e))
+            error_blocks = [{"type": "text", "text": response_text}]
             await self._bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=response_text,
-                    metadata={"task_id": task_id, "agent_name": effective_name},
+                    metadata={
+                        "task_id": task_id,
+                        "agent_name": effective_name,
+                        "content_blocks": error_blocks,
+                    },
                 )
             )
             return
@@ -239,7 +253,11 @@ class AgentLoop:
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=response_text,
-                metadata={"task_id": task_id, "agent_name": effective_name},
+                metadata={
+                    "task_id": task_id,
+                    "agent_name": effective_name,
+                    "content_blocks": content,
+                },
             )
         )
 

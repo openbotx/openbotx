@@ -1719,7 +1719,7 @@ class WebSocketManager:
 | `chat:stream_end` | `{ task_id, chat_id, agent_name }` | Signals the end of a streaming response (only when the response is content-only, not followed by tool calls) |
 | `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | After streaming completes, if the LLM included reasoning/thinking tokens |
 | `chat:tool_use` | `{ task_id, chat_id, tool, description, agent_name }` | When a tool is executed |
-| `chat:message` | `{ content, chat_id, task_id, agent_name }` | When the agent finalizes a response |
+| `chat:message` | `{ content, chat_id, task_id, agent_name }` | When the agent finalizes a response (`content` is a block array — the authoritative source) |
 | `chat:user_message` | `{ chat_id, content, media, channel }` | When a non-web user message is received (e.g., Telegram, cron). Allows the web UI to display messages from other channels in real time |
 | `chat:transcription` | `{ chat_id, content }` | When audio media is transcribed (the transcription text is prepended to the user message) |
 | `sessions:updated` | `{}` | After a session is saved or cleared (triggers sidebar reload) |
