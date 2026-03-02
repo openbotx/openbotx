@@ -34,6 +34,7 @@ class AgentConfig(BaseModel):
     description: str = ""
     instructions: str = ""
     tools: list[str] = Field(default_factory=list)
+    denied_tools: list[str] = Field(default_factory=list)
     model_params: dict = Field(default_factory=dict)
     agent_params: AgentParams = Field(default_factory=AgentParams)
 

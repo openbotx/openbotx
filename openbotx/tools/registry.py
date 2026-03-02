@@ -32,6 +32,7 @@ class ToolRegistry:
     """Registry for agent tools."""
 
     _HINT = "\n\n[Analyze the error above and try a different approach.]"
+    _MAX_RESULT_CHARS = 100_000
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
@@ -67,6 +68,12 @@ class ToolRegistry:
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + self._HINT
+            # truncate oversized results to prevent context overflow
+            if isinstance(result, str) and len(result) > self._MAX_RESULT_CHARS:
+                result = (
+                    result[: self._MAX_RESULT_CHARS]
+                    + f"\n\n[Output truncated: {len(result)} total chars, showing first {self._MAX_RESULT_CHARS}]"
+                )
             return result
         except Exception as e:
             logger.error("tool %s failed: %s", name, e, exc_info=True)
@@ -98,15 +105,19 @@ def build_registry(
     subagent_manager: SpawnManager | None = None,
     cron_service: CronService | None = None,
     memory_store: MemoryStore | None = None,
+    denied_tools: set[str] | None = None,
 ) -> RegistryResult:
     """Build a ToolRegistry with all tools configured from context objects."""
     whitelist = set(agent_cfg.tools) if agent_cfg.tools else None
+    denylist = set(agent_cfg.denied_tools) | (denied_tools or set())
     registry = ToolRegistry()
 
     resolver = project_ctx.create_resolver(agent_cfg)
     workspace = agent_cfg.resolve_workspace(project_ctx.project_path)
 
     def _register(tool: Tool) -> None:
+        if tool.name in denylist:
+            return
         if whitelist and tool.name not in whitelist:
             return
         registry.register(tool)

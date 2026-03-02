@@ -12,6 +12,8 @@ The registry:
 2. Generates OpenAI-compatible function definitions (sent to the LLM).
 3. Executes tool calls by name with arguments.
 4. Returns string results back to the agent loop.
+5. Applies a global **100,000 character** truncation limit on all tool results to prevent context overflow.
+6. Supports **denied_tools** filtering — `build_registry()` accepts a `denied_tools: set[str]` parameter that prevents specific tools from being registered. This is combined with the agent's `denied_tools` config field.
 
 ### Path Resolution
 
@@ -134,6 +136,15 @@ Execute a shell command.
 The command runs with a configurable timeout (`tools.exec.timeout`, default 60 seconds). When `tools.general.restrict_to_workspace` is enabled (detected via `PathResolver.is_restricted`), the working directory is locked to the workspace.
 
 **Output limit:** Output larger than **200 KB** is truncated using tail-based truncation — only the last 200 KB of output is kept, prefixed with a warning: `[Output truncated: showing last 200000 of N chars]`. This preserves the most recent output (where errors and results typically appear) while discarding older output.
+
+**Safety guards** — the exec tool blocks dangerous command patterns:
+- Destructive commands: `rm -rf`, `del /f`, `rmdir /s`, `format`, `mkfs`, `diskpart`, `dd if=`
+- System commands: `shutdown`, `reboot`, `poweroff`, fork bombs
+- Encoding/pipe bypass: `base64 -d`, `eval`, `curl|sh`, `wget|bash`, `python|sh`
+- Dangerous redirects: writes to `/etc/`, `/proc/`, `/sys/`
+- ANSI-C quoting with hex/octal escapes (`$'\x...'`)
+- Path traversal (`../`, `..\`)
+- Absolute paths outside the working directory (when workspace restriction is enabled)
 
 ---
 

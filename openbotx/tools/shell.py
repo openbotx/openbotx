@@ -39,6 +39,16 @@ class ExecTool(Tool):
         r">\s*/dev/sd",
         r"\b(shutdown|reboot|poweroff)\b",
         r":\(\)\s*\{.*\};\s*:",
+        # encoding/pipe tricks
+        r"\bbase64\b.*\s-[dD]\b",
+        r"\beval\b\s",
+        r"\bcurl\b.*\|\s*(?:sh|bash|zsh)\b",
+        r"\bwget\b.*\|\s*(?:sh|bash|zsh)\b",
+        r"\bpython[23]?\b.*\|\s*(?:sh|bash)\b",
+        # dangerous redirects
+        r">\s*/etc/",
+        r">\s*/proc/",
+        r">\s*/sys/",
     ]
 
     def __init__(
@@ -103,6 +113,10 @@ class ExecTool(Tool):
         for pattern in self._DENY_PATTERNS:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
+
+        # detect ANSI-C quoting with hex/octal escapes (bypass attempt)
+        if re.search(r"\$'[^']*\\x[0-9a-f]", lower):
+            return "Error: Command blocked by safety guard (encoded escape detected)"
 
         if self.restrict_to_workspace:
             if "..\\" in command or "../" in command:

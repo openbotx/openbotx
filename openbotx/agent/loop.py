@@ -191,6 +191,8 @@ class AgentLoop:
         system_prompt = self._context_builder.build_system_prompt(
             agent_name=effective_name,
             agent_instructions=self._agent_cfg.instructions,
+            channel=msg.channel,
+            tool_names=self._registry.tool_names,
         )
 
         # Build LLM context. The user message is already in session history,
@@ -250,30 +252,48 @@ class AgentLoop:
         agent_name: str = "",
         session: Any = None,
     ) -> str:
+        from openbotx.agent.compaction import compact_messages
+        from openbotx.agent.context_window import needs_compaction
+        from openbotx.agent.usage import UsageTracker
+        from openbotx.providers.errors import ContextOverflowError
+
         max_iterations = self._agent_cfg.agent_params.max_iterations
+        _recent_tool_sigs: list[str] = []
+        usage_tracker = UsageTracker()
 
         for iteration in range(max_iterations):
             self._task_manager.increment_iteration_count(task_id)
 
-            response = await self._provider.chat(
-                messages=messages,
-                tools=self._registry.get_definitions(),
-                model=self._agent_cfg.model,
-                model_params=self._agent_cfg.model_params,
-            )
+            # compact context if approaching model limit
+            if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
+                logger.info("context window near limit, compacting (task %s, iteration %d)", task_id, iteration)
+                messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
 
-            if response.reasoning_content:
-                await self._dispatcher.broadcast(
-                    "chat:thinking",
-                    {
-                        "task_id": task_id,
-                        "chat_id": chat_id,
-                        "content": response.reasoning_content,
-                        "agent_name": agent_name,
-                    },
+            try:
+                response = await self._consume_stream(
+                    messages, task_id, chat_id, agent_name, usage_tracker,
+                )
+            except ContextOverflowError:
+                logger.warning("context overflow, forcing compaction (task %s)", task_id)
+                messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                response = await self._consume_stream(
+                    messages, task_id, chat_id, agent_name, usage_tracker,
                 )
 
             if response.has_tool_calls:
+                # detect tool call loop (same calls repeated)
+                sig = "|".join(
+                    f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
+                    for tc in response.tool_calls
+                )
+                if sig in _recent_tool_sigs:
+                    logger.warning("tool call loop detected at iteration %d (task %s)", iteration, task_id)
+                    self._save_usage(task_id, usage_tracker)
+                    return response.content or "I seem to be repeating the same actions. Let me stop here."
+                _recent_tool_sigs.append(sig)
+                if len(_recent_tool_sigs) > 3:
+                    _recent_tool_sigs.pop(0)
+
                 tool_calls_data = [
                     {
                         "id": tc.id,
@@ -320,10 +340,101 @@ class AgentLoop:
 
                     ContextBuilder.add_tool_result(messages, tc.id, tc.name, result)
             else:
+                self._save_usage(task_id, usage_tracker)
                 return response.content or ""
 
+        self._save_usage(task_id, usage_tracker)
         logger.warning("agent loop hit max iterations (%d)", max_iterations)
         return "I've reached my processing limit. Please try again or simplify your request."
+
+    async def _consume_stream(
+        self,
+        messages: list[dict[str, Any]],
+        task_id: str,
+        chat_id: str,
+        agent_name: str,
+        usage_tracker: Any,
+    ) -> "LLMResponse":
+        """Consume a streaming response, broadcasting tokens in real time."""
+        from openbotx.providers.base import LLMResponse, ToolCallRequest
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[ToolCallRequest] = []
+        usage: dict[str, int] = {}
+
+        async for chunk in self._provider.chat_stream(
+            messages=messages,
+            tools=self._registry.get_definitions(),
+            model=self._agent_cfg.model,
+            model_params=self._agent_cfg.model_params,
+        ):
+            if chunk.type == "content" and chunk.content:
+                content_parts.append(chunk.content)
+                await self._dispatcher.broadcast(
+                    "chat:stream",
+                    {
+                        "task_id": task_id,
+                        "chat_id": chat_id,
+                        "content": chunk.content,
+                        "agent_name": agent_name,
+                    },
+                )
+
+            elif chunk.type == "reasoning" and chunk.content:
+                reasoning_parts.append(chunk.content)
+
+            elif chunk.type == "tool_call":
+                args = chunk.tool_call_arguments
+                if isinstance(args, str):
+                    import json_repair
+
+                    args = json_repair.loads(args) if args else {}
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=chunk.tool_call_id,
+                        name=chunk.tool_call_name,
+                        arguments=args,
+                    )
+                )
+
+            elif chunk.type == "usage" and chunk.usage:
+                usage = chunk.usage
+                usage_tracker.record(usage)
+
+        # broadcast thinking if we accumulated reasoning
+        reasoning_content = "".join(reasoning_parts) or None
+        if reasoning_content:
+            await self._dispatcher.broadcast(
+                "chat:thinking",
+                {
+                    "task_id": task_id,
+                    "chat_id": chat_id,
+                    "content": reasoning_content,
+                    "agent_name": agent_name,
+                },
+            )
+
+        # signal end of stream to frontend
+        if content_parts and not tool_calls:
+            await self._dispatcher.broadcast(
+                "chat:stream_end",
+                {"task_id": task_id, "chat_id": chat_id, "agent_name": agent_name},
+            )
+
+        return LLMResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason="tool_calls" if tool_calls else "stop",
+            usage=usage,
+            reasoning_content=reasoning_content,
+        )
+
+    def _save_usage(self, task_id: str, tracker: Any) -> None:
+        """Persist token usage on the task."""
+        task = self._task_manager.get_task(task_id)
+        if task and tracker.total_tokens > 0:
+            task.token_usage = tracker.to_dict()
 
     async def _check_consolidation(self, session: Any) -> None:
         total = len(session.messages)

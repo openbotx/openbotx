@@ -67,6 +67,7 @@ agents:
     description: ""               # str  -- Short description of this agent's purpose. Used by the AgentClassifier to route messages when multiple agents are configured.
     instructions: ""              # str  -- Agent-specific instructions appended to the system prompt as a dedicated section. Use for behavioral rules, domain expertise, or role-specific guidelines.
     tools: []                     # list[str] -- Whitelist of tool names available to this agent. When empty (default), all tools are registered. When set, only tools whose name appears in this list are available.
+    denied_tools: []              # list[str] -- Denylist of tool names to exclude from this agent. Applied on top of the whitelist. Useful for selectively blocking dangerous tools without listing all allowed ones.
     model_params: {}                # dict -- Arbitrary model parameters passed to the LLM provider. Common keys: max_tokens, temperature, top_p, etc. Empty by default.
     agent_params:
       max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
@@ -129,7 +130,7 @@ providers:
     base_url: ""                  # str  -- Custom base URL. Leave empty to use the provider's default endpoint. Used for OpenAI-compatible APIs, self-hosted models, or proxies.
     request_headers: {}           # dict[str, str] -- Custom HTTP headers sent with every API request.
     request_options: {}           # dict -- Additional provider-specific parameters merged into the request body.
-    model_params: {}              # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these. Empty by default.
+    model_params: {}              # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these. Empty by default. Supports "context_window" to override the built-in context limit for compaction (e.g. context_window: 64000).
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +213,13 @@ This means:
 
 When `restrict_to_workspace` is `false`, all filesystem paths are accessible without restriction.
 
-### Tool Whitelisting
+### Tool Whitelisting and Denylisting
 
-The `tools` field accepts a list of tool names. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
+The `tools` field accepts a list of tool names as a **whitelist**. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
+
+The `denied_tools` field accepts a list of tool names as a **denylist**. Tools in this list are excluded from the agent regardless of the whitelist. This is useful for selectively blocking dangerous tools without needing to enumerate all allowed ones.
+
+Both filters are combined in `build_registry()`: a tool is registered only if it passes the whitelist (if set) AND is not in the denylist. Subagents additionally have a hardcoded denylist (`spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`) that is combined with the agent's `denied_tools`.
 
 Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `memory_save`, `memory_read`, `memory_search`, `generate_image`.
 

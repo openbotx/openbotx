@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 MAX_SUBAGENT_ITERATIONS = 15
 
+# tools that subagents must not access
+_SUBAGENT_DENIED = {"spawn", "message", "memory_save", "memory_read", "memory_search", "cron"}
+
 
 class SubagentManager:
     def __init__(
@@ -75,6 +78,7 @@ class SubagentManager:
         result = build_registry(
             agent_cfg=self._agent_cfg,
             project_ctx=self._project_ctx,
+            denied_tools=_SUBAGENT_DENIED,
         )
         registry = result.registry
 
@@ -96,16 +100,33 @@ class SubagentManager:
         browser_tool = registry.get("browser")
 
         try:
+            from openbotx.agent.compaction import compact_messages
+            from openbotx.agent.context_window import needs_compaction
+            from openbotx.providers.errors import ContextOverflowError
+
             final_content = ""
             for _ in range(MAX_SUBAGENT_ITERATIONS):
                 self._task_manager.increment_iteration_count(task_id)
 
-                response = await self._provider.chat(
-                    messages=messages,
-                    tools=registry.get_definitions(),
-                    model=self._agent_cfg.model,
-                    model_params={"max_tokens": 4096, "temperature": 0.1},
-                )
+                # compact context if approaching model limit
+                if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
+                    messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+
+                try:
+                    response = await self._provider.chat(
+                        messages=messages,
+                        tools=registry.get_definitions(),
+                        model=self._agent_cfg.model,
+                        model_params={"max_tokens": 4096, "temperature": 0.1},
+                    )
+                except ContextOverflowError:
+                    messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                    response = await self._provider.chat(
+                        messages=messages,
+                        tools=registry.get_definitions(),
+                        model=self._agent_cfg.model,
+                        model_params={"max_tokens": 4096, "temperature": 0.1},
+                    )
 
                 if response.has_tool_calls:
                     assistant_msg: dict[str, Any] = {
@@ -133,9 +154,7 @@ class SubagentManager:
                                 "role": "tool",
                                 "tool_call_id": tc.id,
                                 "name": tc.name,
-                                "content": (
-                                    tool_result[:500] if len(tool_result) > 500 else tool_result
-                                ),
+                                "content": tool_result,
                             }
                         )
                 else:

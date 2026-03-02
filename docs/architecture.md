@@ -164,11 +164,14 @@ The agent subsystem is the intelligence layer of the platform.
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | `orchestrator.py` | `Orchestrator` consumes inbound messages from the bus. Routes them to the appropriate agent via `AgentClassifier`, or directly to the default agent when only one exists. |
 | `classifier.py`   | `AgentClassifier` is an LLM-based message classifier. Analyzes the user's message and recent history to select the best agent using a `route` tool call. Falls back to the first agent on error. Only instantiated when multiple agents are configured. |
-| `loop.py`         | `AgentLoop` is the main agentic loop. Receives an `AgentConfig` and a `ProjectContext`, builds context, calls the LLM, executes tool calls, and repeats until a plain text response or `max_iterations` (default 40) is reached. Streams `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events. For web/REST messages, the user message is already persisted at the HTTP layer (`message_saved` flag). For channel messages, the loop saves it before processing. Tool registration is delegated to `build_registry()`. |
-| `context.py`      | `ContextBuilder` assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL, and agent-specific instructions. Provides helpers for building OpenAI-compatible message arrays with multimodal support (text + images). |
+| `loop.py`         | `AgentLoop` is the main agentic loop. Receives an `AgentConfig` and a `ProjectContext`, builds context, streams LLM responses via `_consume_stream()`, executes tool calls, and repeats until a plain text response or `max_iterations` (default 40) is reached. Includes context window management (automatic compaction), loop detection (duplicate tool call prevention), and usage tracking. Streams `chat:stream`, `chat:stream_end`, `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events. |
+| `context.py`      | `ContextBuilder` assembles the system prompt from identity, runtime info (platform, Python version), channel guidance (web/telegram), response guidelines, available tool names, bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL, and agent-specific instructions. Provides helpers for building OpenAI-compatible message arrays with multimodal support (text + images). |
+| `context_window.py` | Context window management. `estimate_tokens()` uses chars/4 heuristic. `MODEL_CONTEXT_LIMITS` maps model patterns to context sizes. `needs_compaction()` checks if usage exceeds 85% of the model limit. |
+| `compaction.py`   | `compact_messages()` summarizes the oldest 40% of conversation via the LLM, preserving key identifiers and context. Handles dangling tool results and strips verbose tool output before summarization. |
+| `usage.py`        | `UsageTracker` accumulates prompt/completion/total token counts across multiple LLM calls within a task. Persisted on the `Task.token_usage` field on completion. |
 | `memory.py`       | `MemoryStore` reads and writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages. |
 | `skills.py`       | `SkillsLoader` discovers SKILL.md files from built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with `source` (`"builtin"` or `"project"`) and `location` (absolute path). Skills marked `always: true` are injected into every system prompt if their requirements are satisfied. |
-| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Subagents have no `message`, `spawn`, `cron`, or memory tools. They run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. On completion, results are announced back to the main agent via the inbound queue. |
+| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Uses `denied_tools=_SUBAGENT_DENIED` to block `message`, `spawn`, `cron`, and memory tools. Subagents run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. Includes context window management (compaction). On completion, results are announced back to the main agent via the inbound queue. |
 
 **Multi-agent orchestration:**
 
@@ -291,13 +294,17 @@ The provider subsystem abstracts LLM access behind a uniform interface.
 
 | File                   | Purpose                                                                             |
 | ---------------------- | ----------------------------------------------------------------------------------- |
-| `base.py`              | `LLMProvider` abstract class and `LLMResponse` data class (content, tool_calls, reasoning_content, has_tool_calls). |
-| `litellm_provider.py`  | `LiteLLMProvider` wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, and prompt caching. |
+| `base.py`              | `LLMProvider` abstract class, `LLMResponse` data class (content, tool_calls, reasoning_content, error_type, has_tool_calls), and `StreamChunk` data class for streaming responses. Default `chat_stream()` falls back to non-streaming `chat()`. |
+| `litellm_provider.py`  | `LiteLLMProvider` wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, prompt caching, tool call ID sanitization, and streaming. Uses shared `_build_kwargs()` for both `chat()` and `chat_stream()`. |
 | `registry.py`          | `PROVIDERS` tuple of `ProviderSpec` objects. Defines metadata for each supported provider (custom, openrouter, anthropic, openai, deepseek, gemini, groq) with keyword matching and API key detection. |
+| `errors.py`            | Error classification system. `LLMErrorType` enum, typed exception hierarchy (`ContextOverflowError`, `RateLimitError`, `BillingError`, `AuthError`, `TransientError`), and `classify_error()` for pattern-based error classification. |
+| `retry.py`             | `retry_with_backoff()` wraps LLM calls with exponential backoff retry (3 attempts, 1-30s delay). Only retries `RateLimitError` and `TransientError`; other errors propagate immediately. |
 
 **Provider resolution:** The `Config.get_provider()` method matches a model name to a provider by first checking the LiteLLM-style prefix (e.g., `anthropic/claude-sonnet-4-20250514`), then falling back to keyword matching, and finally returning any provider whose referenced credential has an API key configured. `ServerFactory.create_provider()` resolves through provider -> credential -> concrete key to build a `LiteLLMProvider`.
 
 **Provider-level `model_params`:** Each `ProviderConfig` can define a default `model_params` dict (arbitrary key-value pairs like `max_tokens`, `temperature`, `top_p`, etc.). At startup, `ServerFactory.create_orchestrator` merges provider defaults into each agent's `model_params` using simple dict merge (`{**provider_params, **agent_params}`). Agent-level keys always take precedence.
+
+**Error handling:** LLM errors are classified by pattern matching on the error message. Context overflow errors propagate as `ContextOverflowError` so the agent loop can compact and retry. Rate limit and transient errors are retried with exponential backoff. Terminal errors (billing, auth) propagate immediately. Unknown errors are returned as `LLMResponse` with `finish_reason="error"`.
 
 ### Tools
 
@@ -308,7 +315,7 @@ Tools are the actions the agent can perform in the world.
 | File               | Purpose                                                                  |
 | ------------------ | ------------------------------------------------------------------------ |
 | `base.py`          | Abstract `Tool` class with `name`, `description`, `parameters`, `execute()`, `validate_params()`, and `to_schema()`. |
-| `registry.py`      | `ToolRegistry` manages tool registration, lookup, and execution. Generates tool definition arrays for LLM calls. Appends error hints on failure to guide recovery. |
+| `registry.py`      | `ToolRegistry` manages tool registration, lookup, and execution. Generates tool definition arrays for LLM calls. Appends error hints on failure to guide recovery. Applies a 100K character truncation limit on all tool results. `build_registry()` supports `denied_tools` parameter for filtering. |
 | `filesystem.py`    | `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListDirTool` -- file operations using `PathResolver` for path resolution and directory restriction enforcement. |
 | `shell.py`         | `ExecTool` executes shell commands with configurable timeout and optional workspace restriction. |
 | `web.py`           | `WebSearchTool` (Brave Search API), `WebFetchTool` (HTTP fetch + content extraction). |
@@ -321,7 +328,7 @@ Tools are the actions the agent can perform in the world.
 | `rss.py`           | `RssReaderTool` reads RSS 2.0 and Atom feeds. Auto-detects format and strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` generates images via LiteLLM. Provider resolved from model prefix (e.g. `openai/dall-e-3`). |
 
-**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and all memory tools to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
+**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it passes `denied_tools=_SUBAGENT_DENIED` (a hardcoded set: `spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`) to `build_registry()`. This is combined with the agent's own `denied_tools` config field. The result is subagents have file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation — but cannot send messages, spawn further subagents, create scheduled jobs, or modify memory.
 
 ### Tasks
 
@@ -331,7 +338,7 @@ Tasks provide observability into what the agent is doing.
 
 | File          | Purpose                                                                             |
 | ------------- | ----------------------------------------------------------------------------------- |
-| `models.py`   | `Task` dataclass with fields for identity, state, timing, metrics, and relationships. `duration_ms` returns elapsed milliseconds from `started_at` to `completed_at` (or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory and is never persisted to JSONL. |
+| `models.py`   | `Task` dataclass with fields for identity, state, timing, metrics, relationships, and `token_usage` (cumulative prompt/completion/total tokens). `duration_ms` returns elapsed milliseconds from `started_at` to `completed_at` (or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory and is never persisted to JSONL. |
 | `manager.py`  | `TaskManager` creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events. Auto-sets `started_at` on `DOING` and `completed_at` on `DONE`/`ERROR`. Provides `increment_tool_count()` and `increment_iteration_count()` for in-memory metric tracking. |
 
 Task states follow a Kanban model:
