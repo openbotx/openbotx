@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 # model context limits in tokens
-MODEL_CONTEXT_LIMITS: dict[str, int | str] = {
+MODEL_CONTEXT_LIMITS: dict[str, int] = {
     # -------------------------
     # OPENAI — GPT series
     # -------------------------
@@ -57,11 +57,18 @@ MODEL_CONTEXT_LIMITS: dict[str, int | str] = {
     "grok-4": 256_000,
     "grok-3": 128_000,
     # -------------------------
-    # MOONSHOT AI — Kimi
+    # MOONSHOT AI — Kimi & Moonshot
     # -------------------------
+    "kimi-k2.5-instruct": 256_000,
     "kimi-k2.5": 256_000,
-    "kimi-k2": 128_000,
     "kimi-k2-instruct": 256_000,
+    "kimi-k2": 128_000,
+    "kimi-k1.5": 128_000,
+    "kimi-k1": 32_000,
+    "kimi-linear": 128_000,
+    "moonshot-v1-128k": 131_072,
+    "moonshot-v1-32k": 32_768,
+    "moonshot-v1-8k": 8_192,
     # -------------------------
     # QWEN series (Alibaba)
     # -------------------------
@@ -91,27 +98,9 @@ MODEL_CONTEXT_LIMITS: dict[str, int | str] = {
     "command-r+": 128_000,
     "command-r": 128_000,
     # -------------------------
-    # MOONSHOT AI — Kimi
-    # -------------------------
-    "kimi-k1": 32_000,
-    "kimi-k1.5": 128_000,
-    "kimi-k2": 128_000,
-    "kimi-k2-instruct": 256_000,
-    "kimi-k2.5": 256_000,
-    "kimi-k2.5-instruct": 256_000,
-    "kimi-linear": 128_000,
-    # -------------------------
-    # MOONSHOT AI — Moonshot
-    # -------------------------
-    "moonshot-v1-8k": 8_192,
-    "moonshot-v1-32k": 32_768,
-    "moonshot-v1-128k": 131_072,
-    # -------------------------
-    # OTHER OPEN-SOURCE / RECOGNIZED
+    # OTHER
     # -------------------------
     "glm-4.7-thinking": 200_000,
-    "kimi-linear": "varies",
-    "deepseek-v4": "varies",
 }
 
 DEFAULT_LIMIT = 100_000

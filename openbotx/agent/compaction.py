@@ -33,8 +33,7 @@ def _strip_for_summary(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if isinstance(content, str) and len(content) > MAX_TOOL_RESULT_IN_SUMMARY:
                 tool_name = clean.get("name", "tool")
                 clean["content"] = (
-                    content[:MAX_TOOL_RESULT_IN_SUMMARY]
-                    + f"\n[{tool_name} output truncated]"
+                    content[:MAX_TOOL_RESULT_IN_SUMMARY] + f"\n[{tool_name} output truncated]"
                 )
 
         # remove reasoning content
@@ -82,10 +81,17 @@ async def compact_messages(
         len(to_keep),
     )
 
-    compacted = system_msgs + [
-        {"role": "user", "content": f"[Previous conversation summary]:\n{summary}"},
-        {"role": "assistant", "content": "Understood. I have the context from our previous conversation. How can I help you next?"},
-    ] + to_keep
+    compacted = (
+        system_msgs
+        + [
+            {"role": "user", "content": f"[Previous conversation summary]:\n{summary}"},
+            {
+                "role": "assistant",
+                "content": "Understood. I have the context from our previous conversation. How can I help you next?",
+            },
+        ]
+        + to_keep
+    )
 
     return compacted
 

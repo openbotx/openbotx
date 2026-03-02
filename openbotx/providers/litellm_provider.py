@@ -275,12 +275,13 @@ class LiteLLMProvider(LLMProvider):
         model_params: dict[str, Any] | None = None,
     ):
         """Stream LLM response tokens."""
-        from collections.abc import AsyncGenerator
 
         from openbotx.providers.base import StreamChunk
         from openbotx.providers.retry import retry_with_backoff
 
-        original_model, kwargs = self._build_kwargs(messages, tools, model, model_params, stream=True)
+        original_model, kwargs = self._build_kwargs(
+            messages, tools, model, model_params, stream=True
+        )
 
         if not original_model:
             yield StreamChunk(type="content", content="No model configured.")

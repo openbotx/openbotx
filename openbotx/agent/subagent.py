@@ -110,7 +110,9 @@ class SubagentManager:
 
                 # compact context if approaching model limit
                 if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
-                    messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                    messages = await compact_messages(
+                        messages, self._provider, self._agent_cfg.model
+                    )
 
                 try:
                     response = await self._provider.chat(
@@ -120,7 +122,9 @@ class SubagentManager:
                         model_params={"max_tokens": 4096, "temperature": 0.1},
                     )
                 except ContextOverflowError:
-                    messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                    messages = await compact_messages(
+                        messages, self._provider, self._agent_cfg.model
+                    )
                     response = await self._provider.chat(
                         messages=messages,
                         tools=registry.get_definitions(),

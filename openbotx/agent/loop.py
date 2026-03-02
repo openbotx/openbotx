@@ -14,7 +14,7 @@ from openbotx.config.project import ProjectContext
 from openbotx.config.schema import AgentConfig
 from openbotx.cron.service import CronService
 from openbotx.helpers.text import describe_tool_use, humanize
-from openbotx.providers.base import LLMProvider
+from openbotx.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from openbotx.session.manager import SessionManager
 from openbotx.tasks.manager import TaskManager
 from openbotx.tasks.models import TaskState
@@ -266,18 +266,30 @@ class AgentLoop:
 
             # compact context if approaching model limit
             if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
-                logger.info("context window near limit, compacting (task %s, iteration %d)", task_id, iteration)
+                logger.info(
+                    "context window near limit, compacting (task %s, iteration %d)",
+                    task_id,
+                    iteration,
+                )
                 messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
 
             try:
                 response = await self._consume_stream(
-                    messages, task_id, chat_id, agent_name, usage_tracker,
+                    messages,
+                    task_id,
+                    chat_id,
+                    agent_name,
+                    usage_tracker,
                 )
             except ContextOverflowError:
                 logger.warning("context overflow, forcing compaction (task %s)", task_id)
                 messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
                 response = await self._consume_stream(
-                    messages, task_id, chat_id, agent_name, usage_tracker,
+                    messages,
+                    task_id,
+                    chat_id,
+                    agent_name,
+                    usage_tracker,
                 )
 
             if response.has_tool_calls:
@@ -287,9 +299,14 @@ class AgentLoop:
                     for tc in response.tool_calls
                 )
                 if sig in _recent_tool_sigs:
-                    logger.warning("tool call loop detected at iteration %d (task %s)", iteration, task_id)
+                    logger.warning(
+                        "tool call loop detected at iteration %d (task %s)", iteration, task_id
+                    )
                     self._save_usage(task_id, usage_tracker)
-                    return response.content or "I seem to be repeating the same actions. Let me stop here."
+                    return (
+                        response.content
+                        or "I seem to be repeating the same actions. Let me stop here."
+                    )
                 _recent_tool_sigs.append(sig)
                 if len(_recent_tool_sigs) > 3:
                     _recent_tool_sigs.pop(0)
@@ -354,9 +371,8 @@ class AgentLoop:
         chat_id: str,
         agent_name: str,
         usage_tracker: Any,
-    ) -> "LLMResponse":
+    ) -> LLMResponse:
         """Consume a streaming response, broadcasting tokens in real time."""
-        from openbotx.providers.base import LLMResponse, ToolCallRequest
 
         content_parts: list[str] = []
         reasoning_parts: list[str] = []

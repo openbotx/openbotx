@@ -105,11 +105,7 @@ class LLMProvider(ABC):
                 continue
             converted = []
             for part in content:
-                if (
-                    isinstance(part, dict)
-                    and part.get("type") == "image"
-                    and "url" in part
-                ):
+                if isinstance(part, dict) and part.get("type") == "image" and "url" in part:
                     converted.append(
                         {
                             "type": "image_url",

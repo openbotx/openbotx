@@ -1,10 +1,10 @@
 import logging
-from enum import Enum
+from enum import StrEnum
 
 logger = logging.getLogger(__name__)
 
 
-class LLMErrorType(str, Enum):
+class LLMErrorType(StrEnum):
     CONTEXT_OVERFLOW = "context_overflow"
     RATE_LIMIT = "rate_limit"
     BILLING = "billing"
