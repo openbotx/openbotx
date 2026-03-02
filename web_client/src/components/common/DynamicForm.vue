@@ -96,7 +96,7 @@ function refOptions(type) {
         @update:model-value="update(field.name, $event)"
         :feedback="false"
         toggleMask
-        :placeholder="field.placeholder || 'Leave empty to keep current'"
+        :placeholder="field.placeholder ?? 'Leave empty to keep current'"
         class="w-full"
         inputClass="w-full"
         :inputProps="{ autocomplete: 'off', 'data-1p-ignore': '' }"
