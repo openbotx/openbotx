@@ -135,6 +135,20 @@ class ContextBuilder:
         return "\n".join(parts)
 
     @staticmethod
+    def _content_to_text(content: Any) -> str:
+        """Extract plain text from a content field (string or blocks array)."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            return "\n\n".join(p for p in parts if p)
+        return str(content) if content else ""
+
+    @staticmethod
     def build_messages(
         system_prompt: str,
         history: list[dict[str, Any]],
@@ -145,7 +159,18 @@ class ContextBuilder:
             {"role": "system", "content": system_prompt},
         ]
 
-        messages.extend(history)
+        # normalize history for the LLM: convert content blocks arrays to
+        # plain text and strip UI-only fields (agent_name, timestamp, etc.)
+        for msg in history:
+            entry: dict[str, Any] = {"role": msg["role"]}
+            raw = msg.get("content", "")
+            entry["content"] = (
+                ContextBuilder._content_to_text(raw) if isinstance(raw, list) else raw
+            )
+            for k in ("tool_calls", "tool_call_id", "name"):
+                if k in msg:
+                    entry[k] = msg[k]
+            messages.append(entry)
 
         if media:
             content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_content}]

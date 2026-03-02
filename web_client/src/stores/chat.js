@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useApi } from '../composables/useApi'
 
 /**
@@ -43,21 +43,73 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref([])
   const sessions = ref([])
   let stored = localStorage.getItem('chat_session')
-  // Migrate bare UUIDs from older versions to full session keys
+  // migrate bare UUIDs from older versions to full session keys
   if (stored && !stored.includes(':')) {
     stored = `web:${stored}`
     localStorage.setItem('chat_session', stored)
   }
   const currentSessionId = ref(stored || `web:${crypto.randomUUID()}`)
   if (!stored) localStorage.setItem('chat_session', currentSessionId.value)
-  const streaming = ref(false)
-  const currentToolUse = ref(null)
+
+  const liveMessage = ref(null)
+  const toolRunning = ref(false)
+
+  // per-session live state cache — websocket events always update their
+  // session's entry regardless of which session the user is viewing.
+  // the refs above are a reactive "view" into the current session's cache.
+  const _liveCache = new Map()
+
+  function _chatId(data) {
+    return data?.chat_id || chatIdFromKey(currentSessionId.value)
+  }
+
+  function _isCurrent(chatId) {
+    return chatId === chatIdFromKey(currentSessionId.value)
+  }
+
+  function _ensureLive(data) {
+    const id = _chatId(data)
+    let state = _liveCache.get(id)
+    if (!state) {
+      state = { content: [], agent_name: data?.agent_name || '', toolRunning: false }
+      _liveCache.set(id, state)
+    } else if (data?.agent_name && !state.agent_name) {
+      state.agent_name = data.agent_name
+    }
+    return state
+  }
+
+  function _syncLive(chatId) {
+    if (!_isCurrent(chatId)) return
+    const state = _liveCache.get(chatId)
+    if (state) {
+      liveMessage.value = { role: 'assistant', content: state.content, agent_name: state.agent_name }
+      toolRunning.value = state.toolRunning
+    }
+  }
+
+  function _clearLive(chatId) {
+    _liveCache.delete(chatId)
+    if (_isCurrent(chatId)) {
+      liveMessage.value = null
+      toolRunning.value = false
+    }
+  }
+
+  function _lastTextBlock(state) {
+    const last = state.content[state.content.length - 1]
+    if (last?.type === 'text') return last
+    const block = { type: 'text', text: '' }
+    state.content.push(block)
+    return block
+  }
 
   async function sendMessage(text, media = []) {
     const userMsg = { role: 'user', content: text, media, timestamp: Date.now() }
     messages.value.push(userMsg)
-    streaming.value = true
-    currentToolUse.value = null
+    const chatId = chatIdFromKey(currentSessionId.value)
+    _ensureLive({ chat_id: chatId })
+    _syncLive(chatId)
 
     try {
       const res = await api.post('/chat', {
@@ -67,21 +119,17 @@ export const useChatStore = defineStore('chat', () => {
       })
       return res
     } catch (e) {
-      // Remove the optimistic message — backend never received it.
       const idx = messages.value.indexOf(userMsg)
       if (idx !== -1) messages.value.splice(idx, 1)
-      streaming.value = false
+      _clearLive(chatId)
       throw e
     }
   }
 
-  function _isCurrentSession(data) {
-    if (!data.chat_id) return true
-    return data.chat_id === chatIdFromKey(currentSessionId.value)
-  }
-
   function onUserMessage(data) {
-    if (!_isCurrentSession(data)) return
+    const chatId = _chatId(data)
+    _ensureLive(data)
+    if (!_isCurrent(chatId)) return
     messages.value.push({
       role: 'user',
       content: data.content,
@@ -89,14 +137,18 @@ export const useChatStore = defineStore('chat', () => {
       channel: data.channel,
       timestamp: Date.now(),
     })
-    streaming.value = true
+    _syncLive(chatId)
   }
 
   function onMessage(data) {
-    if (!_isCurrentSession(data)) return
-    streaming.value = false
-    currentToolUse.value = null
-    // Deduplicate — loadHistory may have already added this message
+    const chatId = _chatId(data)
+    const state = _liveCache.get(chatId)
+    const liveContent = state?.content || []
+    _clearLive(chatId)
+
+    if (!_isCurrent(chatId)) return
+
+    // deduplicate — loadHistory may have already added this message
     if (data.task_id) {
       const exists = messages.value.some(
         (m) => m.role === 'assistant' && m.task_id === data.task_id
@@ -105,7 +157,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push({
       role: 'assistant',
-      content: data.content,
+      content: liveContent.length ? liveContent : [{ type: 'text', text: data.content || '' }],
       task_id: data.task_id,
       agent_name: data.agent_name,
       timestamp: Date.now(),
@@ -113,13 +165,14 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function onThinking(data) {
-    if (!_isCurrentSession(data)) return
-    streaming.value = true
+    const chatId = _chatId(data)
+    _ensureLive(data)
+    _syncLive(chatId)
   }
 
   function onTranscription(data) {
-    if (!_isCurrentSession(data)) return
-    // Find the last user message and append the transcription
+    const chatId = _chatId(data)
+    if (!_isCurrent(chatId)) return
     for (let i = messages.value.length - 1; i >= 0; i--) {
       if (messages.value[i].role === 'user') {
         const msg = messages.value[i]
@@ -131,24 +184,36 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function onTyping(data) {
+    const chatId = _chatId(data)
+    const state = _ensureLive(data)
+    state.toolRunning = false
+    _syncLive(chatId)
+  }
+
+  function onStream(data) {
+    const chatId = _chatId(data)
+    const state = _ensureLive(data)
+    const block = _lastTextBlock(state)
+    block.text += data.content || ''
+    state.toolRunning = false
+    _syncLive(chatId)
+  }
+
+  function onStreamEnd(data) {
+    // content persists in live state — nothing to clear
+  }
+
   function onToolUse(data) {
-    if (!_isCurrentSession(data)) return
-    currentToolUse.value = {
-      tool: data.tool,
-      arguments: data.arguments,
-      result: data.result,
-    }
-    const last = messages.value[messages.value.length - 1]
-    if (last && last.role === 'assistant' && last.tool_uses) {
-      last.tool_uses.push(data)
-    } else if (!last || last.role !== 'assistant') {
-      messages.value.push({
-        role: 'assistant',
-        content: '',
-        tool_uses: [data],
-        timestamp: Date.now(),
-      })
-    }
+    const chatId = _chatId(data)
+    const state = _ensureLive(data)
+    state.content.push({
+      type: 'tool_use',
+      name: data.tool,
+      description: data.description,
+    })
+    state.toolRunning = true
+    _syncLive(chatId)
   }
 
   async function loadSessions() {
@@ -158,18 +223,13 @@ export const useChatStore = defineStore('chat', () => {
   let _loadToken = 0
 
   async function loadHistory(sessionKey) {
-    // Set session context BEFORE the async call so WebSocket events
-    // arriving during the fetch are filtered against the correct session.
     currentSessionId.value = sessionKey
     localStorage.setItem('chat_session', sessionKey)
 
-    // Cancellation token: if another loadHistory is called while this
-    // fetch is in-flight (e.g. onMounted + syncAfterReconnect on page
-    // refresh), the stale result is discarded to prevent duplication.
+    // cancellation token: if another loadHistory is called while this
+    // fetch is in-flight, the stale result is discarded.
     const token = ++_loadToken
-
     const data = await api.get(`/chat/sessions/${sessionKey}`)
-
     if (token !== _loadToken) return
 
     messages.value = (data.messages || []).map((m) => ({
@@ -177,30 +237,49 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
     }))
 
-    const toolUses = data.live_state?.tool_uses
-    if (toolUses?.length) {
-      messages.value.push({
-        role: 'assistant',
-        content: '',
-        tool_uses: toolUses,
-        timestamp: Date.now(),
-      })
-      streaming.value = true
-      currentToolUse.value = toolUses[toolUses.length - 1]
+    // restore live state: prefer the client-side cache (websocket events
+    // that accumulated while viewing another session) over the backend
+    // live_state (which only stores tool_uses, not streamed text).
+    // if the backend says nothing is in progress, clear any stale cache.
+    const chatId = chatIdFromKey(sessionKey)
+    const backendLive = data.live_state?.tool_uses?.length > 0
+
+    if (!backendLive) {
+      _liveCache.delete(chatId)
+      liveMessage.value = null
+      toolRunning.value = false
+    } else {
+      const cached = _liveCache.get(chatId)
+      if (cached) {
+        liveMessage.value = { role: 'assistant', content: cached.content, agent_name: cached.agent_name }
+        toolRunning.value = cached.toolRunning
+      } else {
+        liveMessage.value = {
+          role: 'assistant',
+          content: data.live_state.tool_uses.map((tu) => ({
+            type: 'tool_use',
+            name: tu.name,
+            description: tu.description,
+          })),
+          agent_name: data.live_state?.agent_name || '',
+        }
+        toolRunning.value = true
+      }
     }
   }
 
   async function switchSession(sessionKey) {
-    streaming.value = false
-    currentToolUse.value = null
     await loadHistory(sessionKey)
     await loadSessions()
   }
 
   async function clearSession(sessionKey) {
     await api.del(`/chat/sessions/${sessionKey}`)
+    _liveCache.delete(chatIdFromKey(sessionKey))
     if (sessionKey === currentSessionId.value) {
       messages.value = []
+      liveMessage.value = null
+      toolRunning.value = false
     }
     await loadSessions()
   }
@@ -214,20 +293,23 @@ export const useChatStore = defineStore('chat', () => {
     currentSessionId.value = key
     localStorage.setItem('chat_session', key)
     messages.value = []
-    streaming.value = false
-    currentToolUse.value = null
+    liveMessage.value = null
+    toolRunning.value = false
   }
 
   return {
     messages,
     sessions,
     currentSessionId,
-    streaming,
-    currentToolUse,
+    liveMessage,
+    toolRunning,
     sendMessage,
     onUserMessage,
     onMessage,
     onThinking,
+    onTyping,
+    onStream,
+    onStreamEnd,
     onToolUse,
     onTranscription,
     onSessionsUpdated,

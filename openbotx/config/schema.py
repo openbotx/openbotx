@@ -25,6 +25,8 @@ class ServerConfig(BaseModel):
 class AgentParams(BaseModel):
     max_iterations: int = 40
     memory_window: int = 100
+    max_history: int = 0  # 0 = no limit, > 0 = trim to N messages before compaction
+    max_concurrent: int = 1  # max parallel message processing across all lanes
 
 
 class AgentConfig(BaseModel):

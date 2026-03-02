@@ -139,6 +139,80 @@ class LiteLLMProvider(LLMProvider):
             sanitized.append(clean)
         return sanitized
 
+    @staticmethod
+    def _validate_transcript(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Ensure message ordering is valid for LLM APIs.
+
+        Merges consecutive same-role messages, drops orphaned tool results,
+        and guarantees tool messages follow an assistant message with tool_calls.
+        """
+        if not messages:
+            return messages
+
+        validated: list[dict[str, Any]] = []
+
+        for msg in messages:
+            role = msg.get("role")
+
+            # system messages pass through unchanged
+            if role == "system":
+                validated.append(msg)
+                continue
+
+            # tool messages must follow an assistant message with tool_calls
+            if role == "tool":
+                last_non_tool = None
+                for prev in reversed(validated):
+                    if prev.get("role") != "tool":
+                        last_non_tool = prev
+                        break
+                if (
+                    last_non_tool
+                    and last_non_tool.get("role") == "assistant"
+                    and last_non_tool.get("tool_calls")
+                ):
+                    validated.append(msg)
+                # orphaned tool result — drop it
+                continue
+
+            # merge consecutive user messages
+            if role == "user":
+                if validated and validated[-1].get("role") == "user":
+                    prev_content = validated[-1].get("content", "")
+                    cur_content = msg.get("content", "")
+                    if isinstance(prev_content, str) and isinstance(cur_content, str):
+                        validated[-1] = {
+                            **validated[-1],
+                            "content": f"{prev_content}\n\n{cur_content}",
+                        }
+                    else:
+                        validated.append(msg)
+                else:
+                    validated.append(msg)
+                continue
+
+            # merge consecutive assistant messages (only when neither has tool_calls)
+            if role == "assistant":
+                if (
+                    validated
+                    and validated[-1].get("role") == "assistant"
+                    and not validated[-1].get("tool_calls")
+                    and not msg.get("tool_calls")
+                ):
+                    prev_content = validated[-1].get("content", "") or ""
+                    cur_content = msg.get("content", "") or ""
+                    validated[-1] = {
+                        **validated[-1],
+                        "content": f"{prev_content}\n\n{cur_content}".strip(),
+                    }
+                else:
+                    validated.append(msg)
+                continue
+
+            validated.append(msg)
+
+        return validated
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -256,13 +330,28 @@ class LiteLLMProvider(LLMProvider):
         if "max_tokens" in params:
             params["max_tokens"] = max(1, params["max_tokens"])
 
+        # extract thinking level before spreading params into kwargs
+        thinking_level = params.pop("thinking", None)
+        # remove non-api params that would confuse litellm
+        params.pop("context_window", None)
+
         kwargs: dict[str, Any] = {
             "model": resolved,
-            "messages": self._sanitize_messages(
-                self._convert_image_blocks(self._sanitize_empty_content(messages))
+            "messages": self._validate_transcript(
+                self._sanitize_messages(
+                    self._convert_image_blocks(self._sanitize_empty_content(messages))
+                )
             ),
             **params,
         }
+
+        # apply thinking/reasoning budget
+        if thinking_level and str(thinking_level).lower() != "off":
+            thinking_budgets = {"low": 2048, "medium": 8192, "high": 32768}
+            budget = thinking_budgets.get(str(thinking_level).lower(), 8192)
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            # anthropic requires temperature=1 with extended thinking
+            kwargs["temperature"] = 1
 
         self._apply_model_overrides(resolved, kwargs)
 

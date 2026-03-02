@@ -93,12 +93,18 @@ class SubagentManager:
 
         workspace = self._agent_cfg.resolve_workspace(self._project_ctx.project_path)
 
+        tool_list = ", ".join(registry.tool_names) if registry.tool_names else "none"
         system_prompt = (
             "You are a subagent of OpenBotX. Complete the following task and "
             "report results. Be concise and efficient.\n"
             f"Workspace: {workspace} (internal files)\n"
             f"Public: {self._project_ctx.public_dir} (web-accessible files)\n"
-            "Always use absolute paths."
+            "Always use absolute paths.\n\n"
+            f"# Available Tools\n{tool_list}\n\n"
+            "# Guidelines\n"
+            "- Be concise. Report results directly.\n"
+            "- When errors occur, try a different approach.\n"
+            "- Do not ask for clarification; make reasonable assumptions."
         )
 
         messages: list[dict[str, Any]] = [
@@ -110,12 +116,16 @@ class SubagentManager:
 
         try:
             from openbotx.agent.compaction import compact_messages
-            from openbotx.agent.context_window import needs_compaction
+            from openbotx.agent.context_window import needs_compaction, trim_history
             from openbotx.providers.errors import ContextOverflowError
 
+            max_history = self._agent_cfg.agent_params.max_history
             final_content = ""
             for _ in range(MAX_SUBAGENT_ITERATIONS):
                 self._task_manager.increment_iteration_count(task_id)
+
+                # trim history if configured (cheaper than compaction)
+                messages = trim_history(messages, max_history)
 
                 # compact context if approaching model limit
                 if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):

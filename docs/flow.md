@@ -305,14 +305,18 @@ async def run(self):
             msg = await asyncio.wait_for(self._bus.consume_inbound(), timeout=1.0)
             agent_name = await self._route(msg)
             agent = self._agents[agent_name]
-            await agent.process_message(msg, agent_name=agent_name)
+            # dispatch to lane — same session serializes, different sessions run in parallel
+            self._queue.enqueue_nowait(
+                msg.session_key,
+                agent.process_message(msg, agent_name=agent_name),
+            )
         except TimeoutError:
             continue  # check stop_event again
         except Exception as e:
             logger.error("orchestrator error: %s", e)  # single message failure doesn't crash
 ```
 
-The 1-second timeout on `consume_inbound()` ensures the `_stop_event` is checked regularly, enabling graceful shutdown. Exceptions from individual message processing are caught and logged — a single bad message does not crash the orchestrator.
+The orchestrator dispatches messages via a `CommandQueue` with lanes keyed by `session_key`. Messages to the same session are serialized (FIFO within a lane), while messages to different sessions run in parallel up to `max_concurrent` (configurable via `agent_params.max_concurrent`, default 1). The 1-second timeout on `consume_inbound()` ensures the `_stop_event` is checked regularly, enabling graceful shutdown. Exceptions from individual message processing are caught and logged — a single bad message does not crash the orchestrator.
 
 **Message routing:** When multiple agents are configured, the `AgentClassifier` uses an LLM call to determine the best agent. It analyzes the user's message plus the last 20 messages of conversation history and calls a `route(agent_name, confidence)` tool. The classifier uses hardcoded `max_tokens=256` and `temperature=0.0` for deterministic, fast classification. Assistant messages in the history are prefixed with `[Agent: name]` so the classifier can see which agent handled previous turns and maintain conversation continuity (it keeps the same agent unless the topic clearly changes). If the classifier returns an unknown agent name, it falls back to the default (first) agent. For single-agent setups, messages go directly to the default agent with no classification overhead.
 
@@ -612,9 +616,10 @@ Skills are extra capabilities you can give to the agent. Each skill is a Markdow
 
 ### How They Are Organized
 
-Skills reside in two directories:
+Skills reside in three directories (in priority order, highest last):
 - **Built-in**: `openbotx/skills/` (shipped with the system)
-- **Workspace**: `workspace/skills/` (created by the user)
+- **Project**: `<project_path>/skills/` (shared across all agents in the project)
+- **Workspace**: `<workspace>/skills/` (agent-specific, created by the user)
 
 Each skill is a folder with a `SKILL.md` file inside:
 
@@ -664,11 +669,11 @@ The `bins` and `env` fields accept both a single string and a list.
 
 The `SkillsLoader` (`openbotx/agent/skills.py`) does the following:
 
-1. Scans skill directories (**built-in first**, then workspace)
-2. Workspace skills with the same name **override** built-in ones
+1. Scans skill directories in priority order (**built-in first**, then project, then workspace)
+2. Higher-priority skills with the same name **override** lower-priority ones
 3. For each skill, reads the `SKILL.md` and parses the frontmatter using a regex `^---\n...\n---\n`
 4. Checks if dependencies are satisfied (binaries installed, env vars present)
-5. Tags each skill with a `source` field: `"builtin"` for skills from `openbotx/skills/`, `"project"` for skills from `workspace/skills/`. This is exposed via the REST API and displayed in the web UI as a visual tag on each skill card
+5. Tags each skill with a `source` field: `"builtin"` for skills from `openbotx/skills/`, `"project"` for skills from `<project_path>/skills/`, `"workspace"` for skills from `<workspace>/skills/`. This is exposed via the REST API and displayed in the web UI as a visual tag on each skill card
 6. Skills with `always: true` are included in the prompt automatically — **but only if their requirements are satisfied**. An `always: true` skill with unsatisfied requirements (missing binary or env var) is silently excluded from the prompt, preventing broken instructions from being injected
 7. Skills with `always: false` appear in the available skills list for the LLM to use when needed
 8. Skills with unsatisfied dependencies appear as `status="unavailable"` in the skills summary and are not loaded when requested
@@ -804,6 +809,55 @@ Some LLM models support **extended thinking** — a feature where the model expo
 - This means reasoning is broadcast once for real-time display, stored in the session for history, but never re-injected into future LLM calls
 
 For models that don't support extended thinking, `reasoning_content` is simply `None` and no `chat:thinking` event is broadcast. The agent loop works identically in both cases.
+
+**Thinking budget control:** The thinking budget can be configured via `model_params.thinking` in the agent config:
+
+| Level    | Budget tokens | Description                                |
+| -------- | ------------- | ------------------------------------------ |
+| `"off"`  | —             | Default. No extended thinking.             |
+| `"low"`  | 2,048         | Light reasoning for simple tasks.          |
+| `"medium"` | 8,192       | Balanced reasoning for moderate tasks.     |
+| `"high"` | 32,768        | Deep reasoning for complex tasks.          |
+
+When thinking is enabled, `_build_kwargs()` passes `thinking: {type: "enabled", budget_tokens: N}` to LiteLLM, and forces `temperature=1` (required by Anthropic for extended thinking). For providers that don't support thinking, LiteLLM's `drop_params=True` setting silently drops the unsupported parameter.
+
+### Transcript Validation
+
+Before sending messages to the LLM API, `_build_kwargs()` calls `_validate_transcript()` to fix common message ordering issues that cause provider 400 errors:
+
+1. **Consecutive user messages** — merged into a single message with content joined by `\n\n`
+2. **Consecutive assistant messages** (without tool_calls) — merged similarly
+3. **Orphaned tool results** — tool messages not preceded by an assistant message with tool_calls are dropped
+4. **System messages** — always pass through unchanged
+
+This prevents errors like Anthropic's "messages must alternate between user and assistant" and handles edge cases from compaction, history trimming, or interrupted conversations.
+
+### History Limiting (Pre-Compaction)
+
+When `agent_params.max_history` is set to a value greater than 0, the agent loop trims the conversation to the last N messages before checking if compaction is needed. This is a cheap O(1) operation that avoids unnecessary LLM-based compaction calls.
+
+The trimming logic:
+1. Separates system messages from conversation messages
+2. If conversation length exceeds `max_history`, keeps only the last N messages
+3. Skips orphaned tool results at the start of the trimmed window
+
+This runs in both the main agent loop and the subagent loop.
+
+### Typing Indicators
+
+Before each LLM call, the agent loop broadcasts a `chat:typing` event via the dispatcher:
+
+```json
+{"chat_id": "...", "agent_name": "...", "task_id": "..."}
+```
+
+The frontend uses this to show a typing indicator while the agent is thinking. The indicator is cleared when the first `chat:stream` token arrives or when the final response is delivered.
+
+### Session Write Lock
+
+`SessionManager.save()` is async and acquires a per-session `asyncio.Lock` before writing. This prevents race conditions when two concurrent requests (e.g., a user message from web + a Telegram message to the same chat) attempt to write to the same session file simultaneously.
+
+Locks are created lazily and stored in `_locks: dict[str, asyncio.Lock]`. The lock is acquired/released automatically via `async with`.
 
 ### Iteration Limit
 
@@ -1210,25 +1264,35 @@ This prevents subagents from executing arbitrary shell commands, automating brow
 | Feature | Main Agent | Subagent |
 |---|---|---|
 | Max iterations | 40 (configurable) | **15** (hardcoded) |
-| Max tokens | Configurable (default 8192) | **4096** (hardcoded) |
-| Temperature | Configurable (default 0.1) | **0.1** (hardcoded) |
+| Max tokens | Configurable (default 4096) | **4096** (hardcoded) |
+| Temperature | Configurable (default 0.7) | **0.1** (hardcoded) |
 | System prompt | Full (SOUL + USER + memory + skills + agent instructions) | **Simplified** ("You are a subagent..." with workspace + public paths) |
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
-| Tools | All (17) | **11** (no message, spawn, cron, memory_save, memory_read, memory_search) |
+| Tools | All (17) | **9** (no spawn, message, memory_save, memory_read, memory_search, cron, exec, browser) |
 | Tool result truncation | 100K chars (global via ToolRegistry) | **100K chars** (same global ToolRegistry limit) |
 | Context management | Streaming + compaction + loop detection | **Non-streaming** + compaction (same context window management) |
 | Model | Configurable per agent | **Inherits from parent agent** |
 | PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |
 
-The subagent's system prompt is intentionally minimal:
+The subagent's system prompt is intentionally minimal to save tokens. It includes available tool names and concise guidelines:
 
 ```
 You are a subagent of OpenBotX. Complete the following task and report results. Be concise and efficient.
 Workspace: /path/to/workspace (internal files)
 Public: /path/to/public (web-accessible files)
 Always use absolute paths.
+
+# Available Tools
+read_file, write_file, edit_file, list_dir, web_search, web_fetch, http_client, rss_reader, generate_image
+
+# Guidelines
+- Be concise. Report results directly.
+- When errors occur, try a different approach.
+- Do not ask for clarification; make reasonable assumptions.
 ```
+
+This is much lighter than the main agent's system prompt (which includes bootstrap files, memory context, skills, channel guidance, etc.), saving significant tokens per subagent call.
 
 ### Completion
 
@@ -1359,7 +1423,7 @@ The `Session` dataclass holds:
 | Field | Type | Description |
 |---|---|---|
 | `key` | `str` | Unique identifier (e.g., `web:direct`, `telegram:123456`) |
-| `messages` | `list[dict]` | Full conversation history — each entry has `role`, `content`, `timestamp`, and optionally `tool_calls`, `tool_call_id`, `name` |
+| `messages` | `list[dict]` | Full conversation history — each entry has `role`, `content`, `timestamp`, and optionally `tool_calls`, `tool_call_id`, `name`. For assistant messages, `content` is an array of typed blocks (`text`, `tool_use`); for user messages, `content` is a plain string |
 | `created_at` | `datetime` | When the session was first created |
 | `updated_at` | `datetime` | Last modification timestamp |
 | `metadata` | `dict` | Arbitrary metadata dictionary |
@@ -1650,6 +1714,7 @@ class WebSocketManager:
 
 | Event | Payload | When Sent |
 |---|---|---|
+| `chat:typing` | `{ chat_id, agent_name, task_id }` | Before each LLM call, to show a typing indicator while the agent is thinking |
 | `chat:stream` | `{ task_id, chat_id, content, agent_name }` | Real-time token streaming — sent for each chunk of text the LLM generates. The frontend accumulates tokens and renders them progressively |
 | `chat:stream_end` | `{ task_id, chat_id, agent_name }` | Signals the end of a streaming response (only when the response is content-only, not followed by tool calls) |
 | `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | After streaming completes, if the LLM included reasoning/thinking tokens |

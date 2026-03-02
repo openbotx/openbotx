@@ -10,7 +10,6 @@ class LLMErrorType(StrEnum):
     BILLING = "billing"
     AUTH = "auth"
     TRANSIENT = "transient"
-    INVALID_REQUEST = "invalid_request"
     MODEL_NOT_FOUND = "model_not_found"
     UNKNOWN = "unknown"
 
@@ -110,14 +109,6 @@ _TRANSIENT_PATTERNS = [
     "broken pipe",
 ]
 
-_ERROR_TYPE_TO_CLASS: dict[LLMErrorType, type[LLMError]] = {
-    LLMErrorType.CONTEXT_OVERFLOW: ContextOverflowError,
-    LLMErrorType.RATE_LIMIT: RateLimitError,
-    LLMErrorType.BILLING: BillingError,
-    LLMErrorType.AUTH: AuthError,
-    LLMErrorType.TRANSIENT: TransientError,
-}
-
 
 def classify_error(error: Exception) -> LLMErrorType:
     """Classify an LLM exception into a known error type."""
@@ -131,11 +122,3 @@ def classify_error(error: Exception) -> LLMErrorType:
         return LLMErrorType.TRANSIENT
 
     return LLMErrorType.UNKNOWN
-
-
-def raise_classified(error: Exception) -> None:
-    """Classify and re-raise as a typed LLMError if applicable."""
-    error_type = classify_error(error)
-    cls = _ERROR_TYPE_TO_CLASS.get(error_type)
-    if cls:
-        raise cls(str(error)) from error

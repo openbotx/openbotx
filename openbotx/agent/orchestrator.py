@@ -3,6 +3,7 @@ import logging
 
 from openbotx.agent.classifier import AgentClassifier
 from openbotx.agent.loop import AgentLoop
+from openbotx.bus.command_queue import CommandQueue
 from openbotx.bus.events import InboundMessage
 from openbotx.bus.queue import MessageBus
 from openbotx.session.manager import SessionManager
@@ -11,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    """Consumes messages from the bus and routes them to the appropriate agent."""
+    """Consumes messages from the bus and dispatches them via a lane-based command queue.
+
+    Messages to the same session are serialized (same lane), while messages
+    to different sessions run in parallel up to the configured concurrency limit.
+    """
 
     def __init__(
         self,
@@ -20,6 +25,7 @@ class Orchestrator:
         classifier: AgentClassifier | None,
         default_agent: str,
         session_manager: SessionManager,
+        max_concurrent: int = 1,
     ):
         self._bus = bus
         self._agents = agents
@@ -27,16 +33,25 @@ class Orchestrator:
         self._default_agent = default_agent
         self._session_manager = session_manager
         self._stop_event = asyncio.Event()
+        self._queue = CommandQueue(max_total=max_concurrent)
 
     async def run(self) -> None:
         agent_names = ", ".join(self._agents.keys())
-        logger.info("orchestrator started (agents: %s)", agent_names)
+        logger.info(
+            "orchestrator started (agents: %s, max_concurrent: %d)",
+            agent_names,
+            self._queue._semaphore._value,
+        )
         while not self._stop_event.is_set():
             try:
                 msg = await asyncio.wait_for(self._bus.consume_inbound(), timeout=1.0)
                 agent_name = await self._route(msg)
                 agent = self._agents[agent_name]
-                await agent.process_message(msg, agent_name=agent_name)
+                # dispatch to lane — same session serializes, different sessions run in parallel
+                self._queue.enqueue_nowait(
+                    msg.session_key,
+                    agent.process_message(msg, agent_name=agent_name),
+                )
             except TimeoutError:
                 continue
             except asyncio.CancelledError:
@@ -44,8 +59,11 @@ class Orchestrator:
             except Exception as e:
                 logger.error("orchestrator error: %s", e, exc_info=True)
 
+        await self._queue.drain()
+
     async def stop(self) -> None:
         self._stop_event.set()
+        await self._queue.drain()
         for agent in self._agents.values():
             await agent.stop()
 

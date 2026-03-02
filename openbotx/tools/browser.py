@@ -265,7 +265,7 @@ class BrowserTool(Tool):
 
     async def _resolve_element(self, selector: str) -> cdp.runtime.RemoteObjectId | None:
         """Resolve a CSS selector to a CDP RemoteObjectId."""
-        # Use JSON encoding for safe JS string interpolation (handles all special chars)
+        # use JSON encoding for safe JS string interpolation (handles all special chars)
         escaped = json.dumps(selector)
         result = await self._session.execute(
             cdp.runtime.evaluate(expression=f"document.querySelector({escaped})")
@@ -332,13 +332,13 @@ class BrowserTool(Tool):
         if not selector:
             return "Error: selector is required for type"
 
-        # Click element to focus it via CDP
+        # click element to focus it via CDP
         click_result = await self._click(selector)
         if "not found" in click_result.lower() or "could not" in click_result.lower():
             return click_result
         await asyncio.sleep(0.1)
 
-        # Type each character using CDP keyboard events
+        # type each character using CDP keyboard events
         for char in text:
             await self._session.execute(
                 cdp.input_.dispatch_key_event("keyDown", text=char, key=char)

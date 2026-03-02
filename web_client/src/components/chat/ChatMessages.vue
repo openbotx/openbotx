@@ -4,8 +4,8 @@ import { marked } from 'marked'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
-  streaming: { type: Boolean, default: false },
-  currentToolUse: { type: Object, default: null },
+  liveMessage: { type: Object, default: null },
+  toolRunning: { type: Boolean, default: false },
 })
 
 const container = ref(null)
@@ -35,8 +35,24 @@ function mediaUrl(path) {
   return `/api/files/download/${path}`
 }
 
+function isLastToolUse(content, index) {
+  for (let i = content.length - 1; i >= 0; i--) {
+    if (content[i].type === 'tool_use') return i === index
+  }
+  return false
+}
+
 watch(
-  () => props.messages.length,
+  [
+    () => props.messages.length,
+    () => props.liveMessage?.content?.length,
+    () => {
+      const content = props.liveMessage?.content
+      if (!content?.length) return 0
+      const last = content[content.length - 1]
+      return last?.type === 'text' ? last.text?.length : 0
+    },
+  ],
   async () => {
     await nextTick()
     if (container.value) {
@@ -48,6 +64,7 @@ watch(
 
 <template>
   <div ref="container" class="chat-messages">
+    <!-- Persisted messages -->
     <div
       v-for="(msg, i) in messages"
       :key="i"
@@ -67,33 +84,57 @@ watch(
             <audio v-else-if="isAudio(path)" :src="mediaUrl(path)" controls class="media-audio" />
           </template>
         </div>
-        <div v-if="msg.content" class="message-content" v-html="renderMarkdown(msg.content)"></div>
-        <div v-if="msg.tool_uses" class="tool-uses">
-          <div v-for="(tu, j) in msg.tool_uses" :key="j" class="tool-use-item">
-            <i class="pi pi-cog tool-icon"></i>
-            <span class="tool-name">{{ tu.tool }}</span>
-            <span v-if="tu.description" class="tool-desc">{{ tu.description }}</span>
+
+        <!-- Content blocks array (assistant messages) -->
+        <template v-if="Array.isArray(msg.content)">
+          <template v-for="(block, k) in msg.content" :key="k">
+            <div v-if="block.type === 'text' && block.text" class="message-content" v-html="renderMarkdown(block.text)"></div>
+            <div v-else-if="block.type === 'tool_use'" class="tool-use-item">
+              <i class="pi pi-cog tool-icon"></i>
+              <span class="tool-name">{{ block.name }}</span>
+              <span v-if="block.description" class="tool-desc">{{ block.description }}</span>
+            </div>
+          </template>
+        </template>
+
+        <!-- String content (user messages) -->
+        <template v-else>
+          <div v-if="msg.content" class="message-content" v-html="renderMarkdown(msg.content)"></div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Live message -->
+    <div v-if="liveMessage" class="message assistant">
+      <div class="message-avatar"><i class="pi pi-sparkles"></i></div>
+      <div class="message-body">
+        <div v-if="liveMessage.agent_name" class="agent-label">
+          <i class="pi pi-user"></i> {{ liveMessage.agent_name }} Agent
+        </div>
+        <template v-for="(block, k) in liveMessage.content" :key="k">
+          <div v-if="block.type === 'text' && block.text" class="message-content" v-html="renderMarkdown(block.text)"></div>
+          <div v-else-if="block.type === 'tool_use'" class="tool-use-item">
+            <i
+              :class="[
+                'pi',
+                toolRunning && isLastToolUse(liveMessage.content, k)
+                  ? 'pi-spin pi-spinner'
+                  : 'pi-cog',
+                'tool-icon',
+              ]"
+            ></i>
+            <span class="tool-name">{{ block.name }}</span>
+            <span v-if="block.description" class="tool-desc">{{ block.description }}</span>
           </div>
+        </template>
+        <div class="typing-indicator">
+          <span></span><span></span><span></span>
+          <small class="typing-label">Processing…</small>
         </div>
       </div>
     </div>
 
-    <div v-if="streaming && currentToolUse" class="message assistant">
-      <div class="message-avatar"><i class="pi pi-sparkles"></i></div>
-      <div class="tool-indicator">
-        <i class="pi pi-spin pi-spinner"></i>
-        <span>Running {{ currentToolUse.tool }} Tool...</span>
-      </div>
-    </div>
-
-    <div v-if="streaming && !currentToolUse" class="message assistant">
-      <div class="message-avatar"><i class="pi pi-sparkles"></i></div>
-      <div class="typing-indicator">
-        <span></span><span></span><span></span>
-      </div>
-    </div>
-
-    <div v-if="messages.length === 0 && !streaming" class="empty-state">
+    <div v-if="messages.length === 0 && !liveMessage" class="empty-state">
       <i class="pi pi-comments" style="font-size: 3rem; color: var(--p-text-muted-color)"></i>
       <p>Send a message to start a conversation</p>
     </div>
@@ -214,14 +255,8 @@ watch(
   height: 36px;
 }
 
-.message-content + .tool-uses {
+.message-content + .tool-use-item {
   margin-top: 0.5rem;
-}
-
-.tool-uses {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
 }
 
 .tool-use-item {
@@ -231,6 +266,10 @@ watch(
   align-items: center;
   gap: 0.35rem;
   min-width: 0;
+}
+
+.tool-use-item + .message-content {
+  margin-top: 0.5rem;
 }
 
 .tool-icon {
@@ -253,34 +292,30 @@ watch(
   min-width: 0;
 }
 
-.tool-indicator {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--p-primary-color);
-  padding: 0.5rem 0;
-  overflow-wrap: break-word;
-  min-width: 0;
-}
-
 .typing-indicator {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0.75rem 0;
+  margin-top: 0.4rem;
+  padding: 0.25rem 0;
 }
 
 .typing-indicator span {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--p-text-muted-color);
+  background: var(--p-primary-color);
   animation: typing 1.4s ease-in-out infinite;
 }
 
 .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
 .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+.typing-label {
+  margin-left: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
 
 @keyframes typing {
   0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }

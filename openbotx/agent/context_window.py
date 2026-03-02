@@ -103,7 +103,7 @@ MODEL_CONTEXT_LIMITS: dict[str, int] = {
     "glm-4.7-thinking": 200_000,
 }
 
-DEFAULT_LIMIT = 100_000
+DEFAULT_LIMIT = 100_000  # 100K tokens is the default context window for most models
 SAFETY_MARGIN = 0.85  # compact when usage exceeds 85% of limit
 
 
@@ -151,6 +151,31 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
 
     # chars/4 is a conservative estimate, add 20% buffer
     return int((total_chars / 4) * 1.2)
+
+
+def trim_history(messages: list[dict[str, Any]], max_history: int) -> list[dict[str, Any]]:
+    """Trim conversation to the last N non-system messages.
+
+    Cheaper than compaction — drops old messages without an LLM call.
+    Skips orphaned tool results at the start of the trimmed window.
+    Returns the original list unchanged when max_history <= 0 or
+    the conversation is already within the limit.
+    """
+    if max_history <= 0:
+        return messages
+
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    conversation = [m for m in messages if m.get("role") != "system"]
+
+    if len(conversation) <= max_history:
+        return messages
+
+    conversation = conversation[-max_history:]
+    # skip orphaned tool results at the start
+    while conversation and conversation[0].get("role") == "tool":
+        conversation.pop(0)
+
+    return system_msgs + conversation
 
 
 def needs_compaction(
