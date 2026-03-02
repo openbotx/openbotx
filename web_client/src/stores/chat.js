@@ -142,11 +142,15 @@ export const useChatStore = defineStore('chat', () => {
 
   function onMessage(data) {
     const chatId = _chatId(data)
-    const state = _liveCache.get(chatId)
-    const liveContent = state?.content || []
-    _clearLive(chatId)
+
+    // clear live state for this session regardless of which session is active
+    _liveCache.delete(chatId)
 
     if (!_isCurrent(chatId)) return
+
+    // clear reactive refs only for the current session
+    liveMessage.value = null
+    toolRunning.value = false
 
     // deduplicate — loadHistory may have already added this message
     if (data.task_id) {
@@ -155,9 +159,14 @@ export const useChatStore = defineStore('chat', () => {
       )
       if (exists) return
     }
+
+    // server content_blocks are the authoritative source — always prefer
+    // them over client-accumulated streaming chunks
+    const content = data.content_blocks || [{ type: 'text', text: data.content || '' }]
+
     messages.value.push({
       role: 'assistant',
-      content: liveContent.length ? liveContent : [{ type: 'text', text: data.content || '' }],
+      content,
       task_id: data.task_id,
       agent_name: data.agent_name,
       timestamp: Date.now(),

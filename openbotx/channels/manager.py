@@ -180,6 +180,7 @@ class ChannelManager:
             "chat:message",
             {
                 "content": msg.content,
+                "content_blocks": msg.metadata.get("content_blocks"),
                 "chat_id": msg.chat_id,
                 "task_id": msg.metadata.get("task_id"),
                 "agent_name": msg.metadata.get("agent_name"),
