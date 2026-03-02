@@ -1000,6 +1000,7 @@ LLM API errors are classified into typed categories by `openbotx/providers/error
 - **Empty content**: Messages with empty content are replaced with `"(empty)"` to avoid provider 400 errors. Assistant messages with tool calls but empty content get `None` instead
 - **Sanitization**: Only allowed keys (`role`, `content`, `tool_calls`, `tool_call_id`, `name`) are sent to the LLM — extra fields are stripped
 - **Image format conversion**: Internal image blocks (`type: "image"`) are converted to the OpenAI-compatible `type: "image_url"` format before sending
+- **Error message sanitization**: API keys and tokens are redacted from error messages before they are returned to the user. Patterns like `sk-...`, `key-...`, `Bearer ...`, and `api_key=...` are replaced with `[REDACTED]` to prevent credential leakage
 
 ---
 
@@ -1080,18 +1081,28 @@ By default, file tools (`read_file`, `write_file`, `edit_file`, `list_dir`), the
 The `exec` tool (`openbotx/tools/shell.py`) has multiple layers of protection:
 
 **Blocked commands** — Regex patterns that prevent execution:
-- `rm -rf`, `del /f`, `rmdir /s` (destructive deletion)
+- `rm -rf`, `del /f`, `rmdir /s`, `shred`, `srm`, `wipe`, `truncate -s 0`, `find -delete`, `find -exec rm` (destructive file ops)
 - `format`, `mkfs`, `diskpart` (disk formatting)
-- `dd if=`, `> /dev/sd` (direct device writing)
-- `shutdown`, `reboot`, `poweroff` (machine shutdown)
+- `dd if=`, writes to `/dev/` (sd, nvme, loop, mem, kmem) (direct device writing)
+- `shutdown`, `reboot`, `poweroff`, `halt`, `init 0/6` (machine shutdown)
 - Fork bombs (`:(){ ... };:`)
+
+**Subshell and command substitution prevention**:
+- `$(...)` — blocks command substitution
+- Backtick execution — blocks backtick-based command substitution
+- `<(...)`, `>(...)` — blocks process substitution
 
 **Encoding and pipe bypass prevention**:
 - `base64 -d` — blocks base64 decode (used to smuggle commands)
 - `eval` — blocks eval execution
 - `curl | sh`, `wget | bash`, `python | sh` — blocks download-and-execute patterns
-- `> /etc/`, `> /proc/`, `> /sys/` — blocks writes to system directories
-- ANSI-C quoting with hex/octal escapes (`$'\x...'`) — blocks encoded command bypass attempts
+- ANSI-C quoting with hex, octal, or unicode escapes (`$'\x...'`, `$'\012...'`, `$'\u...'`)
+
+**Environment injection prevention**:
+- `LD_PRELOAD=`, `LD_LIBRARY_PATH=`, `DYLD_INSERT_LIBRARIES=` — blocks library injection
+- `PROMPT_COMMAND=`, `PS4=` — blocks command injection via environment variables
+
+**Dangerous redirects**: writes to `/etc/`, `/proc/`, `/sys/`, `/dev/`
 
 **Path traversal protection** — Blocks commands containing `../` or `..\`
 
@@ -1183,17 +1194,16 @@ Subagents have **restricted tool access** enforced by the `denied_tools` system.
 
 | Allowed | Blocked (via `denied_tools`) |
 |---|---|
-| `read_file`, `write_file`, `edit_file`, `list_dir` | `message` (send messages to user) |
-| `exec` (shell) | `spawn` (create other subagents) |
-| `web_search`, `web_fetch` | `cron` (schedule tasks) |
-| `http_client`, `rss_reader` | `memory_save`, `memory_read`, `memory_search` |
-| `browser`, `generate_image` | |
+| `read_file`, `write_file`, `edit_file`, `list_dir` | `exec` (shell command execution) |
+| `web_search`, `web_fetch` | `browser` (browser automation) |
+| `http_client`, `rss_reader` | `message` (send messages to user) |
+| `generate_image` | `spawn` (create other subagents) |
+| | `cron` (schedule tasks) |
+| | `memory_save`, `memory_read`, `memory_search` |
 
 The `denied_tools` parameter is passed to `build_registry()`, which skips registration of any tool in the deny set. This is combined with the agent's own `denied_tools` config field, allowing per-agent customization.
 
-This prevents subagents from multiplying uncontrollably, sending unexpected messages, or accessing memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
-
-**Browser tab isolation** — Each subagent creates its own browser tab via `BrowserTool`. The tab is always closed in a `finally` block when the subagent finishes (whether it succeeds, fails, or throws an exception). This guarantees tabs are never leaked, even under error conditions. See section 14 for the multi-tab architecture.
+This prevents subagents from executing arbitrary shell commands, automating browsers, multiplying uncontrollably, sending unexpected messages, or accessing memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
 
 ### Differences from Main Agent
 

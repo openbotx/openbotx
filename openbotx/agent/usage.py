@@ -8,9 +8,9 @@ class UsageTracker:
 
     def record(self, usage: dict[str, int]) -> None:
         """Add usage from a single LLM call."""
-        self._prompt_tokens += usage.get("prompt_tokens", 0)
-        self._completion_tokens += usage.get("completion_tokens", 0)
-        self._total_tokens += usage.get("total_tokens", 0)
+        self._prompt_tokens += max(0, usage.get("prompt_tokens", 0))
+        self._completion_tokens += max(0, usage.get("completion_tokens", 0))
+        self._total_tokens += max(0, usage.get("total_tokens", 0))
 
     @property
     def total_tokens(self) -> int:

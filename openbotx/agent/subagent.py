@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 MAX_SUBAGENT_ITERATIONS = 15
 
 # tools that subagents must not access
-_SUBAGENT_DENIED = {"spawn", "message", "memory_save", "memory_read", "memory_search", "cron"}
+_SUBAGENT_DENIED = {
+    "spawn",
+    "message",
+    "memory_save",
+    "memory_read",
+    "memory_search",
+    "cron",
+    "exec",
+    "browser",
+}
 
 
 class SubagentManager:

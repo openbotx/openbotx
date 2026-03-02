@@ -171,7 +171,7 @@ The agent subsystem is the intelligence layer of the platform.
 | `usage.py`        | `UsageTracker` accumulates prompt/completion/total token counts across multiple LLM calls within a task. Persisted on the `Task.token_usage` field on completion. |
 | `memory.py`       | `MemoryStore` reads and writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages. |
 | `skills.py`       | `SkillsLoader` discovers SKILL.md files from built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with `source` (`"builtin"` or `"project"`) and `location` (absolute path). Skills marked `always: true` are injected into every system prompt if their requirements are satisfied. |
-| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Uses `denied_tools=_SUBAGENT_DENIED` to block `message`, `spawn`, `cron`, and memory tools. Subagents run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. Includes context window management (compaction). On completion, results are announced back to the main agent via the inbound queue. |
+| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Uses `denied_tools=_SUBAGENT_DENIED` to block `message`, `spawn`, `cron`, `exec`, `browser`, and memory tools. Subagents run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. Includes context window management (compaction). On completion, results are announced back to the main agent via the inbound queue. |
 
 **Multi-agent orchestration:**
 
@@ -328,7 +328,7 @@ Tools are the actions the agent can perform in the world.
 | `rss.py`           | `RssReaderTool` reads RSS 2.0 and Atom feeds. Auto-detects format and strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` generates images via LiteLLM. Provider resolved from model prefix (e.g. `openai/dall-e-3`). |
 
-**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it passes `denied_tools=_SUBAGENT_DENIED` (a hardcoded set: `spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`) to `build_registry()`. This is combined with the agent's own `denied_tools` config field. The result is subagents have file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation — but cannot send messages, spawn further subagents, create scheduled jobs, or modify memory.
+**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it passes `denied_tools=_SUBAGENT_DENIED` (a hardcoded set: `spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`, `exec`, `browser`) to `build_registry()`. This is combined with the agent's own `denied_tools` config field. The result is subagents have file operations, web tools, HTTP client, RSS reader, and image generation — but cannot execute shell commands, automate browsers, send messages, spawn further subagents, create scheduled jobs, or modify memory.
 
 ### Tasks
 

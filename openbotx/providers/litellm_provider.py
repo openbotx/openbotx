@@ -169,11 +169,27 @@ class LiteLLMProvider(LLMProvider):
             # context overflow must propagate so the agent loop can compact
             if error_type == LLMErrorType.CONTEXT_OVERFLOW:
                 raise ContextOverflowError(str(e)) from e
+            safe_msg = self._sanitize_error_message(e)
             return LLMResponse(
-                content=f"Error calling LLM: {e}",
+                content=f"Error calling LLM: {safe_msg}",
                 finish_reason="error",
                 error_type=error_type.value,
             )
+
+    @staticmethod
+    def _sanitize_error_message(error: Exception) -> str:
+        """Remove API keys and tokens from error messages."""
+        msg = str(error)
+        msg = re.sub(r"sk-[a-zA-Z0-9]{10,}", "[REDACTED]", msg)
+        msg = re.sub(r"key-[a-zA-Z0-9]{10,}", "[REDACTED]", msg)
+        msg = re.sub(r"Bearer\s+[a-zA-Z0-9_\-\.]{10,}", "Bearer [REDACTED]", msg)
+        msg = re.sub(
+            r"(api[_-]?key|token|secret|authorization)\s*[=:]\s*['\"]?[^\s,;'\"]{10,}",
+            r"\1=[REDACTED]",
+            msg,
+            flags=re.IGNORECASE,
+        )
+        return msg
 
     @staticmethod
     def _sanitize_tool_call_id(tc_id: str | None) -> str:
@@ -301,7 +317,8 @@ class LiteLLMProvider(LLMProvider):
             # context overflow must propagate so the agent loop can compact
             if error_type == LLMErrorType.CONTEXT_OVERFLOW:
                 raise ContextOverflowError(str(e)) from e
-            yield StreamChunk(type="content", content=f"Error calling LLM: {e}")
+            safe_msg = self._sanitize_error_message(e)
+            yield StreamChunk(type="content", content=f"Error calling LLM: {safe_msg}")
             yield StreamChunk(type="done")
             return
 

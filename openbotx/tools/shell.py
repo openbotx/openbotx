@@ -30,14 +30,19 @@ class ExecTool(Tool):
     _MAX_OUTPUT = 200_000  # 200KB
 
     _DENY_PATTERNS = [
+        # destructive file operations
         r"\brm\s+-[rf]{1,2}\b",
         r"\bdel\s+/[fq]\b",
         r"\brmdir\s+/s\b",
+        r"\b(shred|srm|wipe)\b",
+        r"\btruncate\s+-s\s*0\b",
+        r"\bfind\b.*\s(-delete|-exec\s+rm)\b",
+        # disk/system destruction
         r"(?:^|[;&|]\s*)format\b",
         r"\b(mkfs|diskpart)\b",
         r"\bdd\s+if=",
-        r">\s*/dev/sd",
-        r"\b(shutdown|reboot|poweroff)\b",
+        r">\s*/dev/(sd|nvme|loop|mem|kmem)",
+        r"\b(shutdown|reboot|poweroff|halt|init\s+[06])\b",
         r":\(\)\s*\{.*\};\s*:",
         # encoding/pipe tricks
         r"\bbase64\b.*\s-[dD]\b",
@@ -45,10 +50,20 @@ class ExecTool(Tool):
         r"\bcurl\b.*\|\s*(?:sh|bash|zsh)\b",
         r"\bwget\b.*\|\s*(?:sh|bash|zsh)\b",
         r"\bpython[23]?\b.*\|\s*(?:sh|bash)\b",
+        # subshell/command substitution
+        r"\$\([^)]+\)",
+        r"`[^`]+`",
+        # process substitution
+        r"<\(",
+        r">\(",
+        # environment injection
+        r"\b(ld_preload|ld_library_path|dyld_insert_libraries)\s*=",
+        r"\b(prompt_command|ps4)\s*=",
         # dangerous redirects
         r">\s*/etc/",
         r">\s*/proc/",
         r">\s*/sys/",
+        r">\s*/dev/",
     ]
 
     def __init__(
@@ -114,8 +129,8 @@ class ExecTool(Tool):
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
-        # detect ANSI-C quoting with hex/octal escapes (bypass attempt)
-        if re.search(r"\$'[^']*\\x[0-9a-f]", lower):
+        # detect ANSI-C quoting with hex, octal, or unicode escapes (bypass attempt)
+        if re.search(r"\$'[^']*\\(x[0-9a-f]|[0-7]{2,3}|u[0-9a-f])", lower):
             return "Error: Command blocked by safety guard (encoded escape detected)"
 
         if self.restrict_to_workspace:
