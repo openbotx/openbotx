@@ -37,5 +37,5 @@ def validate_url(url: str) -> None:
 
 
 async def ssrf_event_hook(request: httpx.Request) -> None:
-    """httpx event hook that validates every request URL (including redirects)."""
+    """Httpx event hook that validates every request URL (including redirects)."""
     validate_url(str(request.url))

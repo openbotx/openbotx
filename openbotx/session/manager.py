@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -25,7 +26,7 @@ class Session:
     last_consolidated: int = 0
     live_state: dict[str, Any] = field(default_factory=dict)
 
-    def add_message(self, role: str, content: str, **kwargs: Any) -> None:
+    def add_message(self, role: str, content: Any, **kwargs: Any) -> None:
         msg = {
             "role": role,
             "content": content,
@@ -59,6 +60,13 @@ class SessionManager:
         self.sessions_dir = workspace / "sessions"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self._cache: dict[str, Session] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, key: str) -> asyncio.Lock:
+        """Get or create a per-session write lock."""
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     def _get_session_path(self, key: str) -> Path:
         safe_key = _safe_filename(key.replace(":", "_"))
@@ -111,7 +119,13 @@ class SessionManager:
             logger.warning("Failed to load session %s: %s", key, e)
             return None
 
-    def save(self, session: Session) -> None:
+    async def save(self, session: Session) -> None:
+        """Write session to disk with per-session locking."""
+        async with self._get_lock(session.key):
+            self._write(session)
+
+    def _write(self, session: Session) -> None:
+        """Write session JSONL file (no lock, internal use only)."""
         path = self._get_session_path(session.key)
 
         with open(path, "w", encoding="utf-8") as f:

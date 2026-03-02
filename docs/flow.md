@@ -305,14 +305,18 @@ async def run(self):
             msg = await asyncio.wait_for(self._bus.consume_inbound(), timeout=1.0)
             agent_name = await self._route(msg)
             agent = self._agents[agent_name]
-            await agent.process_message(msg, agent_name=agent_name)
+            # dispatch to lane — same session serializes, different sessions run in parallel
+            self._queue.enqueue_nowait(
+                msg.session_key,
+                agent.process_message(msg, agent_name=agent_name),
+            )
         except TimeoutError:
             continue  # check stop_event again
         except Exception as e:
             logger.error("orchestrator error: %s", e)  # single message failure doesn't crash
 ```
 
-The 1-second timeout on `consume_inbound()` ensures the `_stop_event` is checked regularly, enabling graceful shutdown. Exceptions from individual message processing are caught and logged — a single bad message does not crash the orchestrator.
+The orchestrator dispatches messages via a `CommandQueue` with lanes keyed by `session_key`. Messages to the same session are serialized (FIFO within a lane), while messages to different sessions run in parallel up to `max_concurrent` (configurable via `agent_params.max_concurrent`, default 1). The 1-second timeout on `consume_inbound()` ensures the `_stop_event` is checked regularly, enabling graceful shutdown. Exceptions from individual message processing are caught and logged — a single bad message does not crash the orchestrator.
 
 **Message routing:** When multiple agents are configured, the `AgentClassifier` uses an LLM call to determine the best agent. It analyzes the user's message plus the last 20 messages of conversation history and calls a `route(agent_name, confidence)` tool. The classifier uses hardcoded `max_tokens=256` and `temperature=0.0` for deterministic, fast classification. Assistant messages in the history are prefixed with `[Agent: name]` so the classifier can see which agent handled previous turns and maintain conversation continuity (it keeps the same agent unless the topic clearly changes). If the classifier returns an unknown agent name, it falls back to the default (first) agent. For single-agent setups, messages go directly to the default agent with no classification overhead.
 
@@ -393,9 +397,13 @@ The `ContextBuilder` (`openbotx/agent/context.py`) is responsible for assembling
 graph TD
     A[Base identity] --> A1[Agent name]
     A1 --> B[Current date and time]
-    B --> B1[Public URL]
+    B --> B0[Runtime info - platform, Python version]
+    B0 --> B00[Channel guidance - web/telegram]
+    B00 --> B1[Public URL]
     B1 --> B2[Project Structure - workspace and public paths]
-    B2 --> C[AGENTS.md]
+    B2 --> B3[Response guidelines]
+    B3 --> B4[Available tools list]
+    B4 --> C[AGENTS.md]
     C --> D[SOUL.md]
     D --> E[USER.md]
     E --> F[TOOLS.md]
@@ -424,7 +432,22 @@ If the agent has a name (multi-agent setup), this is followed by:
 "Current date and time: 2025-01-15 14:30:00."
 ```
 
-### 8.2a. Public URL and Project Structure
+### 8.2a. Runtime and Channel Context
+
+The system prompt includes runtime information so the agent can adapt commands to the current environment:
+
+```
+# Runtime
+Platform: Darwin 24.6.0
+Python: 3.12.0
+```
+
+Channel-specific guidance is added based on where the message originated:
+
+- **Web**: "Use Markdown formatting freely including images, code blocks, and tables."
+- **Telegram**: "Keep messages under 4096 characters. Use Markdown (bold, italic, code). Split long responses using the message tool."
+
+### 8.2b. Public URL and Project Structure
 
 If a public URL is configured, it is included:
 
@@ -448,6 +471,26 @@ Public: /home/user/myproject/public
 ```
 
 This explicitly provides the agent with the absolute paths for its workspace and the public directory, guiding it to use the correct directories for different file types.
+
+### 8.2c. Response Guidelines and Available Tools
+
+Response guidelines instruct the agent on communication style:
+
+```
+# Guidelines
+- Be concise and actionable.
+- When using tools, briefly explain what you are doing.
+- If a task requires multiple steps, outline your plan before executing.
+- When an error occurs, analyze the cause and try a different approach.
+- Use Markdown formatting for structured responses.
+```
+
+The list of available tool names is included so the agent has a quick overview of its capabilities without needing the full schemas:
+
+```
+# Available Tools
+read_file, write_file, edit_file, list_dir, exec, web_search, web_fetch, ...
+```
 
 ### 8.3. Bootstrap Files (.md)
 
@@ -573,9 +616,10 @@ Skills are extra capabilities you can give to the agent. Each skill is a Markdow
 
 ### How They Are Organized
 
-Skills reside in two directories:
+Skills reside in three directories (in priority order, highest last):
 - **Built-in**: `openbotx/skills/` (shipped with the system)
-- **Workspace**: `workspace/skills/` (created by the user)
+- **Project**: `<project_path>/skills/` (shared across all agents in the project)
+- **Workspace**: `<workspace>/skills/` (agent-specific, created by the user)
 
 Each skill is a folder with a `SKILL.md` file inside:
 
@@ -625,11 +669,11 @@ The `bins` and `env` fields accept both a single string and a list.
 
 The `SkillsLoader` (`openbotx/agent/skills.py`) does the following:
 
-1. Scans skill directories (**built-in first**, then workspace)
-2. Workspace skills with the same name **override** built-in ones
+1. Scans skill directories in priority order (**built-in first**, then project, then workspace)
+2. Higher-priority skills with the same name **override** lower-priority ones
 3. For each skill, reads the `SKILL.md` and parses the frontmatter using a regex `^---\n...\n---\n`
 4. Checks if dependencies are satisfied (binaries installed, env vars present)
-5. Tags each skill with a `source` field: `"builtin"` for skills from `openbotx/skills/`, `"project"` for skills from `workspace/skills/`. This is exposed via the REST API and displayed in the web UI as a visual tag on each skill card
+5. Tags each skill with a `source` field: `"builtin"` for skills from `openbotx/skills/`, `"project"` for skills from `<project_path>/skills/`, `"workspace"` for skills from `<workspace>/skills/`. This is exposed via the REST API and displayed in the web UI as a visual tag on each skill card
 6. Skills with `always: true` are included in the prompt automatically — **but only if their requirements are satisfied**. An `always: true` skill with unsatisfied requirements (missing binary or env var) is silently excluded from the prompt, preventing broken instructions from being injected
 7. Skills with `always: false` appear in the available skills list for the LLM to use when needed
 8. Skills with unsatisfied dependencies appear as `status="unavailable"` in the skills summary and are not loaded when requested
@@ -710,24 +754,34 @@ The Agent Loop (`_run_agent_loop()` in `openbotx/agent/loop.py`) is the heart of
 
 ```mermaid
 graph TD
-    A[Send messages + tool definitions to LLM] --> B{LLM responded with...}
-    B -->|Plain text| C[Return as final response - END]
-    B -->|Tool calls| D[For each tool call:]
+    A[Check context window size] --> A1{Near model limit?}
+    A1 -->|Yes| A2[Compact messages via LLM summarization]
+    A1 -->|No| B1
+    A2 --> B1[Stream response from LLM]
+    B1 --> B{LLM responded with...}
+    B -->|Plain text| C[Save usage → Return as final response - END]
+    B -->|Tool calls| C1{Same tool calls as last 3 iterations?}
+    C1 -->|Yes| C2[Loop detected → Save usage → Return - END]
+    C1 -->|No| D[For each tool call:]
     D --> E[ToolRegistry finds the tool]
     E --> F[Validate parameters]
     F --> G[Execute tool]
-    G --> H["Add result to messages (role: tool)"]
+    G --> G1["Truncate result if > 100K chars"]
+    G1 --> H["Add result to messages (role: tool)"]
     H --> I{More tool calls?}
     I -->|Yes| D
     I -->|No| J{Hit iteration limit?}
     J -->|No| A
-    J -->|Yes| K[Return limit reached message]
+    J -->|Yes| K[Save usage → Return limit reached message]
+    B1 -->|Context overflow error| A2
 ```
 
 ### Real-time Broadcasting
 
 During processing, the agent broadcasts events via the `EventDispatcher` so the frontend can show progress. All `chat:*` events include `agent_name` for multi-agent identification:
 
+- **`chat:stream`** — tokens streamed in real-time as the LLM generates them. Includes `task_id`, `chat_id`, `content` (the token chunk), and `agent_name`. The frontend accumulates these tokens and renders progressively
+- **`chat:stream_end`** — signals the end of a streaming response (only emitted for content-only responses, not when tool calls follow). Includes `task_id`, `chat_id`, `agent_name`
 - **`chat:tool_use`** — when a tool is executed. Includes `tool` (human-readable name like `Read File`, `Web Search`) and `description` (human-readable summary of the tool call with arguments)
 - **`chat:thinking`** — when the LLM returns reasoning content (see below)
 - **`chat:user_message`** — when a non-web message arrives (e.g., from Telegram or cron). Includes `channel`, `content`, and `media`. This allows the web UI to display messages from other channels in real time
@@ -744,22 +798,10 @@ Some LLM models support **extended thinking** — a feature where the model expo
 
 **How it flows through the system:**
 
-1. The agent loop sends a request to the LLM via `provider.chat()`
-2. LiteLLM returns the response with an optional `reasoning_content` field on the message object
-3. `LiteLLMProvider` extracts it: `getattr(message, "reasoning_content", None)` and includes it in the `LLMResponse` dataclass
-4. The agent loop checks if `reasoning_content` exists. If it does, it broadcasts a `chat:thinking` WebSocket event:
-
-```python
-if response.reasoning_content and self._dispatcher:
-    await self._dispatcher.broadcast("chat:thinking", {
-        "task_id": task_id,
-        "chat_id": chat_id,
-        "content": response.reasoning_content,
-        "agent_name": agent_name,
-    })
-```
-
-5. The frontend receives this event and can display the model's thought process (e.g., in a collapsible "thinking" section above the response)
+1. The agent loop calls `_consume_stream()`, which iterates over `provider.chat_stream()`
+2. During streaming, reasoning tokens are accumulated via `StreamChunk(type="reasoning")`
+3. After the stream completes, the accumulated reasoning content is broadcast as a `chat:thinking` WebSocket event
+4. The frontend receives this event and can display the model's thought process (e.g., in a collapsible "thinking" section above the response)
 
 **What happens with the reasoning content after broadcast:**
 - It is saved into the conversation messages via `ContextBuilder.add_assistant_message()` (as the `reasoning_content` field)
@@ -767,6 +809,55 @@ if response.reasoning_content and self._dispatcher:
 - This means reasoning is broadcast once for real-time display, stored in the session for history, but never re-injected into future LLM calls
 
 For models that don't support extended thinking, `reasoning_content` is simply `None` and no `chat:thinking` event is broadcast. The agent loop works identically in both cases.
+
+**Thinking budget control:** The thinking budget can be configured via `model_params.thinking` in the agent config:
+
+| Level    | Budget tokens | Description                                |
+| -------- | ------------- | ------------------------------------------ |
+| `"off"`  | —             | Default. No extended thinking.             |
+| `"low"`  | 2,048         | Light reasoning for simple tasks.          |
+| `"medium"` | 8,192       | Balanced reasoning for moderate tasks.     |
+| `"high"` | 32,768        | Deep reasoning for complex tasks.          |
+
+When thinking is enabled, `_build_kwargs()` passes `thinking: {type: "enabled", budget_tokens: N}` to LiteLLM, and forces `temperature=1` (required by Anthropic for extended thinking). For providers that don't support thinking, LiteLLM's `drop_params=True` setting silently drops the unsupported parameter.
+
+### Transcript Validation
+
+Before sending messages to the LLM API, `_build_kwargs()` calls `_validate_transcript()` to fix common message ordering issues that cause provider 400 errors:
+
+1. **Consecutive user messages** — merged into a single message with content joined by `\n\n`
+2. **Consecutive assistant messages** (without tool_calls) — merged similarly
+3. **Orphaned tool results** — tool messages not preceded by an assistant message with tool_calls are dropped
+4. **System messages** — always pass through unchanged
+
+This prevents errors like Anthropic's "messages must alternate between user and assistant" and handles edge cases from compaction, history trimming, or interrupted conversations.
+
+### History Limiting (Pre-Compaction)
+
+When `agent_params.max_history` is set to a value greater than 0, the agent loop trims the conversation to the last N messages before checking if compaction is needed. This is a cheap O(1) operation that avoids unnecessary LLM-based compaction calls.
+
+The trimming logic:
+1. Separates system messages from conversation messages
+2. If conversation length exceeds `max_history`, keeps only the last N messages
+3. Skips orphaned tool results at the start of the trimmed window
+
+This runs in both the main agent loop and the subagent loop.
+
+### Typing Indicators
+
+Before each LLM call, the agent loop broadcasts a `chat:typing` event via the dispatcher:
+
+```json
+{"chat_id": "...", "agent_name": "...", "task_id": "..."}
+```
+
+The frontend uses this to show a typing indicator while the agent is thinking. The indicator is cleared when the first `chat:stream` token arrives or when the final response is delivered.
+
+### Session Write Lock
+
+`SessionManager.save()` is async and acquires a per-session `asyncio.Lock` before writing. This prevents race conditions when two concurrent requests (e.g., a user message from web + a Telegram message to the same chat) attempt to write to the same session file simultaneously.
+
+Locks are created lazily and stored in `_locks: dict[str, asyncio.Lock]`. The lock is acquired/released automatically via `async with`.
 
 ### Iteration Limit
 
@@ -778,14 +869,71 @@ The loop has a maximum iteration limit (default: **40**, configurable via `agent
 
 ### Output Limits
 
-Each tool manages its own output limits internally. There is no global truncation applied by the agent loop or `ContextBuilder` — tool results are passed through as-is. This design ensures each tool controls the size and format of its results appropriately:
+Tool output is managed at two levels:
+
+**Per-tool limits** — each tool manages its own output size internally:
 
 - **read_file** — 50 KB per read, with line-based pagination (offset/limit parameters)
 - **exec** — 200 KB, tail-based truncation (keeps the last 200 KB, where errors and results typically appear)
 - **http_client** — 50 KB response body truncation
 - **web_fetch** — 50 KB content extraction limit
 
-Other tools (file operations, web search, memory, etc.) return naturally small results and don't need truncation.
+**Global truncation** — the `ToolRegistry` applies a **100,000 character** (`_MAX_RESULT_CHARS`) limit on all tool results. If any tool returns a result exceeding this, it is truncated with a `[Output truncated: N total chars, showing first 100000]` marker. This prevents any single tool result from consuming excessive context window space.
+
+### Token Streaming
+
+The agent loop uses **streaming** by default via `_consume_stream()`, which calls `provider.chat_stream()`. This provides real-time token delivery to the frontend:
+
+1. `chat_stream()` sends the request to LiteLLM with `stream=True`
+2. As the LLM generates tokens, they arrive as `StreamChunk` objects with different types:
+   - `type="content"` — text tokens, broadcast immediately via `chat:stream` event
+   - `type="reasoning"` — reasoning/thinking tokens, accumulated and broadcast as `chat:thinking` after the stream ends
+   - `type="tool_call"` — tool call deltas, accumulated and assembled into `ToolCallRequest` objects
+   - `type="usage"` — token usage stats (prompt, completion, total)
+   - `type="done"` — marks the end of the stream
+3. After the stream completes, `_consume_stream()` returns an assembled `LLMResponse` with the full content, tool calls, reasoning, and usage
+4. If the response has content but no tool calls, a `chat:stream_end` event is broadcast to signal the frontend to finalize the message
+
+The base `LLMProvider` class provides a fallback `chat_stream()` that delegates to the non-streaming `chat()` method, so providers that don't support streaming still work transparently.
+
+### Context Window Management
+
+Long conversations with many tool calls can exceed the LLM's context window. The agent loop handles this automatically via the context management system (`openbotx/agent/context_window.py` and `openbotx/agent/compaction.py`).
+
+**Token estimation** — `estimate_tokens(messages)` uses a chars/4 heuristic with a 20% buffer. It counts text content, tool call arguments, and reasoning content across all messages.
+
+**Model limits** — `MODEL_CONTEXT_LIMITS` maps model name patterns to their context window sizes (e.g., Claude → 200K, GPT-4o → 128K, Gemini → 1M). Unknown models default to 100K. This limit can be overridden per provider or per agent by setting `context_window` in `model_params` (e.g., `model_params: { context_window: 64000 }`).
+
+**Compaction trigger** — before each LLM call, `needs_compaction(messages, model, model_params)` checks if the estimated token count exceeds **85%** of the model's limit (`SAFETY_MARGIN = 0.85`).
+
+**Compaction process** (`compact_messages()`):
+
+1. Separates system messages from conversation messages
+2. Takes the oldest **40%** of conversation messages for summarization
+3. Ensures the remaining messages don't start with a dangling tool result (moves orphaned tool results to the summarization set)
+4. Strips tool results to 200 chars and removes reasoning content before summarizing
+5. Calls the LLM with a summarization prompt: "Summarize the conversation so far. Preserve: key decisions, file paths, variable names, IDs, URLs, errors encountered, and current task context."
+6. Returns `[system] + [summary as user message] + [assistant acknowledgment] + [recent messages]`
+
+**Error recovery** — if the LLM returns a context overflow error despite the proactive check, the loop catches `ContextOverflowError`, forces compaction, and retries the request.
+
+### Loop Detection
+
+The agent loop tracks the last 3 tool call signatures (tool name + sorted JSON arguments). If the LLM emits the exact same set of tool calls as a previous iteration, a loop is detected and the agent stops:
+
+```
+"I seem to be repeating the same actions. Let me stop here."
+```
+
+This prevents the agent from wasting all 40 iterations repeating the same failing action.
+
+### Usage Tracking
+
+Each agent loop run tracks cumulative token usage via `UsageTracker` (`openbotx/agent/usage.py`):
+
+- Records `prompt_tokens`, `completion_tokens`, and `total_tokens` from each LLM call
+- On completion (or early exit), persists the totals on the task object as `token_usage`
+- The data is available via the tasks API for monitoring and cost tracking
 
 ### Practical Example
 
@@ -876,11 +1024,37 @@ The `ephemeral` type means the cache is temporary — the provider decides how l
 
 This transformation is applied automatically and transparently — the rest of the codebase works with regular strings and lists, unaware of caching.
 
+### Error Classification and Retry
+
+LLM API errors are classified into typed categories by `openbotx/providers/errors.py` based on pattern matching on the error message:
+
+| Error Type | Examples | Strategy |
+|---|---|---|
+| `CONTEXT_OVERFLOW` | "context_length_exceeded", "too many tokens" | Propagated as `ContextOverflowError` → agent loop compacts and retries |
+| `RATE_LIMIT` | "rate limit", "429", "too many requests" | Retried with exponential backoff (up to 3 attempts) |
+| `TRANSIENT` | "timeout", "502", "503", "connection reset" | Retried with exponential backoff (up to 3 attempts) |
+| `BILLING` | "insufficient_quota", "exceeded your current quota" | Propagated immediately (terminal — user must fix) |
+| `AUTH` | "unauthorized", "401", "invalid api key" | Propagated immediately (terminal — user must fix) |
+| `MODEL_NOT_FOUND` | "model not found", "does not exist" | Returned as error response to the user |
+| `UNKNOWN` | Anything not matching above patterns | Returned as error response to the user |
+
+**Retry with exponential backoff** (`openbotx/providers/retry.py`):
+
+- `retry_with_backoff(fn, max_retries=3, base_delay=1.0, max_delay=30.0)` wraps LLM calls
+- Only retries `RateLimitError` and `TransientError` (or unclassified errors matching those patterns)
+- Delay doubles each attempt: 1s → 2s → 4s (capped at 30s)
+- Non-retryable errors (`ContextOverflowError`, `BillingError`, `AuthError`) propagate immediately
+- After all retries are exhausted, the error is returned as an `LLMResponse` with `finish_reason="error"`
+
+**Tool call ID sanitization** — some providers generate tool call IDs with characters that other providers reject in subsequent messages. `_sanitize_tool_call_id()` strips non-alphanumeric characters (keeping only `[a-zA-Z0-9_-]`) and generates a fallback UUID-based ID if the original is empty.
+
 ### LLM Error Recovery
 
 - **Malformed JSON**: When the LLM returns tool call arguments with invalid JSON, the system uses `json_repair.loads()` to attempt automatic correction
-- **Empty content**: Messages with empty content are replaced with `"(empty)"` to avoid provider 400 errors
+- **Empty content**: Messages with empty content are replaced with `"(empty)"` to avoid provider 400 errors. Assistant messages with tool calls but empty content get `None` instead
 - **Sanitization**: Only allowed keys (`role`, `content`, `tool_calls`, `tool_call_id`, `name`) are sent to the LLM — extra fields are stripped
+- **Image format conversion**: Internal image blocks (`type: "image"`) are converted to the OpenAI-compatible `type: "image_url"` format before sending
+- **Error message sanitization**: API keys and tokens are redacted from error messages before they are returned to the user. Patterns like `sk-...`, `key-...`, `Bearer ...`, and `api_key=...` are replaced with `[REDACTED]` to prevent credential leakage
 
 ---
 
@@ -961,11 +1135,28 @@ By default, file tools (`read_file`, `write_file`, `edit_file`, `list_dir`), the
 The `exec` tool (`openbotx/tools/shell.py`) has multiple layers of protection:
 
 **Blocked commands** — Regex patterns that prevent execution:
-- `rm -rf`, `del /f`, `rmdir /s` (destructive deletion)
+- `rm -rf`, `del /f`, `rmdir /s`, `shred`, `srm`, `wipe`, `truncate -s 0`, `find -delete`, `find -exec rm` (destructive file ops)
 - `format`, `mkfs`, `diskpart` (disk formatting)
-- `dd if=`, `> /dev/sd` (direct device writing)
-- `shutdown`, `reboot`, `poweroff` (machine shutdown)
+- `dd if=`, writes to `/dev/` (sd, nvme, loop, mem, kmem) (direct device writing)
+- `shutdown`, `reboot`, `poweroff`, `halt`, `init 0/6` (machine shutdown)
 - Fork bombs (`:(){ ... };:`)
+
+**Subshell and command substitution prevention**:
+- `$(...)` — blocks command substitution
+- Backtick execution — blocks backtick-based command substitution
+- `<(...)`, `>(...)` — blocks process substitution
+
+**Encoding and pipe bypass prevention**:
+- `base64 -d` — blocks base64 decode (used to smuggle commands)
+- `eval` — blocks eval execution
+- `curl | sh`, `wget | bash`, `python | sh` — blocks download-and-execute patterns
+- ANSI-C quoting with hex, octal, or unicode escapes (`$'\x...'`, `$'\012...'`, `$'\u...'`)
+
+**Environment injection prevention**:
+- `LD_PRELOAD=`, `LD_LIBRARY_PATH=`, `DYLD_INSERT_LIBRARIES=` — blocks library injection
+- `PROMPT_COMMAND=`, `PS4=` — blocks command injection via environment variables
+
+**Dangerous redirects**: writes to `/etc/`, `/proc/`, `/sys/`, `/dev/`
 
 **Path traversal protection** — Blocks commands containing `../` or `..\`
 
@@ -1051,45 +1242,57 @@ When the subagent finishes (seconds or minutes later):
 
 The agent "remembers" because of the **session history** — not because of any explicit callback or state machine. The LLM reads the conversation flow and infers the relationship between the spawn and its completion.
 
-### Subagent Restrictions
+### Subagent Tool Policy
 
-Subagents have **limited access** to tools:
+Subagents have **restricted tool access** enforced by the `denied_tools` system. The `_SUBAGENT_DENIED` set in `openbotx/agent/subagent.py` blocks dangerous tools:
 
-| Allowed | Blocked |
+| Allowed | Blocked (via `denied_tools`) |
 |---|---|
-| `read_file`, `write_file`, `edit_file`, `list_dir` | `message` (send messages to user) |
-| `exec` (shell) | `spawn` (create other subagents) |
-| `web_search`, `web_fetch` | `cron` (schedule tasks) |
-| `http_client`, `rss_reader` | `memory_save`, `memory_read`, `memory_search` |
-| `browser`, `generate_image` | |
+| `read_file`, `write_file`, `edit_file`, `list_dir` | `exec` (shell command execution) |
+| `web_search`, `web_fetch` | `browser` (browser automation) |
+| `http_client`, `rss_reader` | `message` (send messages to user) |
+| `generate_image` | `spawn` (create other subagents) |
+| | `cron` (schedule tasks) |
+| | `memory_save`, `memory_read`, `memory_search` |
 
-This prevents subagents from multiplying uncontrollably, sending unexpected messages, or accessing memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
+The `denied_tools` parameter is passed to `build_registry()`, which skips registration of any tool in the deny set. This is combined with the agent's own `denied_tools` config field, allowing per-agent customization.
 
-**Browser tab isolation** — Each subagent creates its own browser tab via `BrowserTool`. The tab is always closed in a `finally` block when the subagent finishes (whether it succeeds, fails, or throws an exception). This guarantees tabs are never leaked, even under error conditions. See section 14 for the multi-tab architecture.
+This prevents subagents from executing arbitrary shell commands, automating browsers, multiplying uncontrollably, sending unexpected messages, or accessing memory. Subagents share the same `PathResolver` as the parent agent, so they have identical directory access restrictions.
 
 ### Differences from Main Agent
 
 | Feature | Main Agent | Subagent |
 |---|---|---|
 | Max iterations | 40 (configurable) | **15** (hardcoded) |
-| Max tokens | Configurable (default 8192) | **4096** (hardcoded) |
-| Temperature | Configurable (default 0.1) | **0.1** (hardcoded) |
+| Max tokens | Configurable (default 4096) | **4096** (hardcoded) |
+| Temperature | Configurable (default 0.7) | **0.1** (hardcoded) |
 | System prompt | Full (SOUL + USER + memory + skills + agent instructions) | **Simplified** ("You are a subagent..." with workspace + public paths) |
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
-| Tools | All (17) | **11** (no message, spawn, cron, memory_save, memory_read, memory_search) |
-| Tool result truncation | Per-tool (each tool manages its own output limits) | **500 chars** (inline truncation after tool execution) |
+| Tools | All (17) | **9** (no spawn, message, memory_save, memory_read, memory_search, cron, exec, browser) |
+| Tool result truncation | 100K chars (global via ToolRegistry) | **100K chars** (same global ToolRegistry limit) |
+| Context management | Streaming + compaction + loop detection | **Non-streaming** + compaction (same context window management) |
 | Model | Configurable per agent | **Inherits from parent agent** |
 | PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |
 
-The subagent's system prompt is intentionally minimal:
+The subagent's system prompt is intentionally minimal to save tokens. It includes available tool names and concise guidelines:
 
 ```
 You are a subagent of OpenBotX. Complete the following task and report results. Be concise and efficient.
 Workspace: /path/to/workspace (internal files)
 Public: /path/to/public (web-accessible files)
 Always use absolute paths.
+
+# Available Tools
+read_file, write_file, edit_file, list_dir, web_search, web_fetch, http_client, rss_reader, generate_image
+
+# Guidelines
+- Be concise. Report results directly.
+- When errors occur, try a different approach.
+- Do not ask for clarification; make reasonable assumptions.
 ```
+
+This is much lighter than the main agent's system prompt (which includes bootstrap files, memory context, skills, channel guidance, etc.), saving significant tokens per subagent call.
 
 ### Completion
 
@@ -1220,7 +1423,7 @@ The `Session` dataclass holds:
 | Field | Type | Description |
 |---|---|---|
 | `key` | `str` | Unique identifier (e.g., `web:direct`, `telegram:123456`) |
-| `messages` | `list[dict]` | Full conversation history — each entry has `role`, `content`, `timestamp`, and optionally `tool_calls`, `tool_call_id`, `name` |
+| `messages` | `list[dict]` | Full conversation history — each entry has `role`, `content`, `timestamp`, and optionally `tool_calls`, `tool_call_id`, `name`. For assistant messages, `content` is an array of typed blocks (`text`, `tool_use`); for user messages, `content` is a plain string |
 | `created_at` | `datetime` | When the session was first created |
 | `updated_at` | `datetime` | Last modification timestamp |
 | `metadata` | `dict` | Arbitrary metadata dictionary |
@@ -1440,6 +1643,7 @@ Each task stores the following fields:
 | `completed_at` | ISO 8601 timestamp — set automatically when state transitions to DONE or ERROR |
 | `tool_count` | Number of tool calls executed during the task |
 | `iteration_count` | Number of LLM call iterations performed |
+| `token_usage` | Cumulative token usage for the task: `{ prompt_tokens, completion_tokens, total_tokens }`. Populated by `UsageTracker` when the agent loop completes. Empty dict if no LLM calls were made |
 | `duration_ms` | Computed property: milliseconds from `started_at` to `completed_at` (or now if still running) |
 | `live_state` | Transient runtime state (e.g., `tool_uses` list). Populated during agent execution and included in API responses when non-empty, but **never persisted** to JSONL. Cleared when the task completes. Allows the frontend to restore active tool status on page refresh |
 
@@ -1510,14 +1714,17 @@ class WebSocketManager:
 
 | Event | Payload | When Sent |
 |---|---|---|
-| `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | During the Agent Loop, if the LLM sends reasoning |
+| `chat:typing` | `{ chat_id, agent_name, task_id }` | Before each LLM call, to show a typing indicator while the agent is thinking |
+| `chat:stream` | `{ task_id, chat_id, content, agent_name }` | Real-time token streaming — sent for each chunk of text the LLM generates. The frontend accumulates tokens and renders them progressively |
+| `chat:stream_end` | `{ task_id, chat_id, agent_name }` | Signals the end of a streaming response (only when the response is content-only, not followed by tool calls) |
+| `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | After streaming completes, if the LLM included reasoning/thinking tokens |
 | `chat:tool_use` | `{ task_id, chat_id, tool, description, agent_name }` | When a tool is executed |
 | `chat:message` | `{ content, chat_id, task_id, agent_name }` | When the agent finalizes a response |
 | `chat:user_message` | `{ chat_id, content, media, channel }` | When a non-web user message is received (e.g., Telegram, cron). Allows the web UI to display messages from other channels in real time |
 | `chat:transcription` | `{ chat_id, content }` | When audio media is transcribed (the transcription text is prepended to the user message) |
 | `sessions:updated` | `{}` | After a session is saved or cleared (triggers sidebar reload) |
-| `task:created` | Task object | When a task is created |
-| `task:updated` | Task object | When a task's state changes |
+| `task:created` | Task object (includes `token_usage` when available) | When a task is created |
+| `task:updated` | Task object (includes `token_usage` when available) | When a task's state changes |
 | `channel:status` | `{ name, running }` | When a channel connects or disconnects |
 
 ### Session-Aware Message Filtering

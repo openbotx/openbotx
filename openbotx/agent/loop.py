@@ -14,10 +14,11 @@ from openbotx.config.project import ProjectContext
 from openbotx.config.schema import AgentConfig
 from openbotx.cron.service import CronService
 from openbotx.helpers.text import describe_tool_use, humanize
-from openbotx.providers.base import LLMProvider
+from openbotx.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from openbotx.session.manager import SessionManager
 from openbotx.tasks.manager import TaskManager
 from openbotx.tasks.models import TaskState
+from openbotx.tools.context import RequestContext
 from openbotx.tools.memory_tool import MemorySaveTool
 from openbotx.tools.registry import ToolRegistry, build_registry
 
@@ -70,9 +71,6 @@ class AgentLoop:
             memory_store=self._memory,
         )
         self._registry = result.registry
-        self._message_tool = result.message_tool
-        self._spawn_tool = result.spawn_tool
-        self._cron_tool = result.cron_tool
 
     @property
     def name(self) -> str:
@@ -108,7 +106,7 @@ class AgentLoop:
         if task.agent_name != effective_name:
             task.agent_name = effective_name
 
-        task.live_state = {"tool_uses": []}
+        task.live_state = {"tool_uses": [], "agent_name": effective_name}
         await self._task_manager.update_state(task_id, TaskState.DOING)
 
         if msg.channel != "web":
@@ -129,7 +127,7 @@ class AgentLoop:
 
         if content.lower() == "/new":
             session.clear()
-            self._session_manager.save(session)
+            await self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.DONE)
             await self._dispatcher.broadcast("sessions:updated", {})
             await self._bus.publish_outbound(
@@ -154,17 +152,13 @@ class AgentLoop:
             )
             return
 
-        if self._message_tool:
-            self._message_tool.set_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-            self._message_tool.start_turn()
-
-        if self._spawn_tool:
-            self._spawn_tool.set_context(
-                msg.channel, msg.chat_id, parent_task_id=task_id, agent_name=effective_name
-            )
-
-        if self._cron_tool:
-            self._cron_tool.set_context(msg.channel, msg.chat_id)
+        ctx = RequestContext(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            task_id=task_id,
+            agent_name=effective_name,
+            message_id=msg.metadata.get("message_id"),
+        )
 
         extra_content = ""
         media_urls = None
@@ -179,21 +173,23 @@ class AgentLoop:
                 {"chat_id": msg.chat_id, "content": extra_content},
             )
 
-        # Save user message if not already persisted at the HTTP layer.
+        # save user message if not already persisted at the HTTP layer.
         if not msg.metadata.get("message_saved"):
             user_kwargs = {}
             if msg.media:
                 user_kwargs["media"] = msg.media
             session.add_message("user", content, **user_kwargs)
-            self._session_manager.save(session)
+            await self._session_manager.save(session)
             await self._dispatcher.broadcast("sessions:updated", {})
 
         system_prompt = self._context_builder.build_system_prompt(
             agent_name=effective_name,
             agent_instructions=self._agent_cfg.instructions,
+            channel=msg.channel,
+            tool_names=self._registry.tool_names,
         )
 
-        # Build LLM context. The user message is already in session history,
+        # build LLM context. The user message is already in session history,
         # so exclude it — build_messages appends the current turn separately.
         history = session.get_history()
         if history and history[-1]["role"] == "user":
@@ -201,16 +197,20 @@ class AgentLoop:
         messages = ContextBuilder.build_messages(system_prompt, history, content, media=media_urls)
 
         try:
-            response_text = await self._run_agent_loop(
-                messages, task_id, msg.chat_id, effective_name, session
+            response_text, response_blocks = await self._run_agent_loop(
+                messages, task_id, msg.chat_id, effective_name, session, ctx
             )
         except Exception as e:
             session.live_state = {}
             task.live_state = {}
             logger.error("agent loop error for task %s: %s", task_id, e, exc_info=True)
             response_text = f"I encountered an error: {e}"
-            session.add_message("assistant", response_text, agent_name=effective_name)
-            self._session_manager.save(session)
+            session.add_message(
+                "assistant",
+                [{"type": "text", "text": response_text}],
+                agent_name=effective_name,
+            )
+            await self._session_manager.save(session)
             await self._task_manager.update_state(task_id, TaskState.ERROR, error=str(e))
             await self._bus.publish_outbound(
                 OutboundMessage(
@@ -224,8 +224,13 @@ class AgentLoop:
 
         session.live_state = {}
         task.live_state = {}
-        session.add_message("assistant", response_text, agent_name=effective_name)
-        self._session_manager.save(session)
+
+        # store content as typed blocks array
+        content = response_blocks if response_blocks else [{"type": "text", "text": response_text}]
+
+        session.add_message("assistant", content, agent_name=effective_name)
+
+        await self._session_manager.save(session)
 
         await self._dispatcher.broadcast("sessions:updated", {})
 
@@ -249,31 +254,85 @@ class AgentLoop:
         chat_id: str = "",
         agent_name: str = "",
         session: Any = None,
-    ) -> str:
+        ctx: RequestContext | None = None,
+    ) -> tuple[str, list[dict[str, str]]]:
+        from openbotx.agent.compaction import compact_messages
+        from openbotx.agent.context_window import needs_compaction, trim_history
+        from openbotx.agent.usage import UsageTracker
+        from openbotx.providers.errors import ContextOverflowError
+
         max_iterations = self._agent_cfg.agent_params.max_iterations
+        max_history = self._agent_cfg.agent_params.max_history
+        _recent_tool_sigs: list[str] = []
+        usage_tracker = UsageTracker()
+        blocks: list[dict[str, str]] = []
 
         for iteration in range(max_iterations):
             self._task_manager.increment_iteration_count(task_id)
 
-            response = await self._provider.chat(
-                messages=messages,
-                tools=self._registry.get_definitions(),
-                model=self._agent_cfg.model,
-                model_params=self._agent_cfg.model_params,
+            # trim history if configured (cheaper than compaction)
+            messages = trim_history(messages, max_history)
+
+            # compact context if approaching model limit
+            if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
+                logger.info(
+                    "context window near limit, compacting (task %s, iteration %d)",
+                    task_id,
+                    iteration,
+                )
+                messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+
+            # signal typing to the frontend
+            await self._dispatcher.broadcast(
+                "chat:typing",
+                {"chat_id": chat_id, "agent_name": agent_name, "task_id": task_id},
             )
 
-            if response.reasoning_content:
-                await self._dispatcher.broadcast(
-                    "chat:thinking",
-                    {
-                        "task_id": task_id,
-                        "chat_id": chat_id,
-                        "content": response.reasoning_content,
-                        "agent_name": agent_name,
-                    },
+            try:
+                response = await self._consume_stream(
+                    messages,
+                    task_id,
+                    chat_id,
+                    agent_name,
+                    usage_tracker,
+                )
+            except ContextOverflowError:
+                logger.warning("context overflow, forcing compaction (task %s)", task_id)
+                messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                response = await self._consume_stream(
+                    messages,
+                    task_id,
+                    chat_id,
+                    agent_name,
+                    usage_tracker,
                 )
 
+            # accumulate text block from this iteration
+            if response.content:
+                blocks.append({"type": "text", "text": response.content})
+
             if response.has_tool_calls:
+                # detect tool call loop (same calls repeated)
+                sig = "|".join(
+                    f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
+                    for tc in response.tool_calls
+                )
+                if sig in _recent_tool_sigs:
+                    logger.warning(
+                        "tool call loop detected at iteration %d (task %s)",
+                        iteration,
+                        task_id,
+                    )
+                    self._save_usage(task_id, usage_tracker)
+                    text = (
+                        response.content
+                        or "I seem to be repeating the same actions. Let me stop here."
+                    )
+                    return text, blocks
+                _recent_tool_sigs.append(sig)
+                if len(_recent_tool_sigs) > 3:
+                    _recent_tool_sigs.pop(0)
+
                 tool_calls_data = [
                     {
                         "id": tc.id,
@@ -294,7 +353,7 @@ class AgentLoop:
                 )
 
                 for tc in response.tool_calls:
-                    result = await self._registry.execute(tc.name, tc.arguments)
+                    result = await self._registry.execute(tc.name, tc.arguments, context=ctx)
                     self._task_manager.increment_tool_count(task_id)
 
                     display_name = humanize(tc.name)
@@ -311,7 +370,14 @@ class AgentLoop:
                         },
                     )
 
-                    tool_entry = {"tool": display_name, "description": description}
+                    tool_entry = {"name": display_name, "description": description}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "name": display_name,
+                            "description": description,
+                        }
+                    )
                     if session is not None:
                         session.live_state.setdefault("tool_uses", []).append(tool_entry)
                     task = self._task_manager.get_task(task_id)
@@ -320,10 +386,103 @@ class AgentLoop:
 
                     ContextBuilder.add_tool_result(messages, tc.id, tc.name, result)
             else:
-                return response.content or ""
+                self._save_usage(task_id, usage_tracker)
+                return response.content or "", blocks
 
+        self._save_usage(task_id, usage_tracker)
         logger.warning("agent loop hit max iterations (%d)", max_iterations)
-        return "I've reached my processing limit. Please try again or simplify your request."
+        return (
+            "I've reached my processing limit. Please try again or simplify your request.",
+            blocks,
+        )
+
+    async def _consume_stream(
+        self,
+        messages: list[dict[str, Any]],
+        task_id: str,
+        chat_id: str,
+        agent_name: str,
+        usage_tracker: Any,
+    ) -> LLMResponse:
+        """Consume a streaming response, broadcasting tokens in real time."""
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[ToolCallRequest] = []
+        usage: dict[str, int] = {}
+
+        async for chunk in self._provider.chat_stream(
+            messages=messages,
+            tools=self._registry.get_definitions(),
+            model=self._agent_cfg.model,
+            model_params=self._agent_cfg.model_params,
+        ):
+            if chunk.type == "content" and chunk.content:
+                content_parts.append(chunk.content)
+                await self._dispatcher.broadcast(
+                    "chat:stream",
+                    {
+                        "task_id": task_id,
+                        "chat_id": chat_id,
+                        "content": chunk.content,
+                        "agent_name": agent_name,
+                    },
+                )
+
+            elif chunk.type == "reasoning" and chunk.content:
+                reasoning_parts.append(chunk.content)
+
+            elif chunk.type == "tool_call":
+                args = chunk.tool_call_arguments
+                if isinstance(args, str):
+                    import json_repair
+
+                    args = json_repair.loads(args) if args else {}
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=chunk.tool_call_id,
+                        name=chunk.tool_call_name,
+                        arguments=args,
+                    )
+                )
+
+            elif chunk.type == "usage" and chunk.usage:
+                usage = chunk.usage
+                usage_tracker.record(usage)
+
+        # broadcast thinking if we accumulated reasoning
+        reasoning_content = "".join(reasoning_parts) or None
+        if reasoning_content:
+            await self._dispatcher.broadcast(
+                "chat:thinking",
+                {
+                    "task_id": task_id,
+                    "chat_id": chat_id,
+                    "content": reasoning_content,
+                    "agent_name": agent_name,
+                },
+            )
+
+        # signal end of stream to frontend
+        if content_parts and not tool_calls:
+            await self._dispatcher.broadcast(
+                "chat:stream_end",
+                {"task_id": task_id, "chat_id": chat_id, "agent_name": agent_name},
+            )
+
+        return LLMResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason="tool_calls" if tool_calls else "stop",
+            usage=usage,
+            reasoning_content=reasoning_content,
+        )
+
+    def _save_usage(self, task_id: str, tracker: Any) -> None:
+        """Persist token usage on the task."""
+        task = self._task_manager.get_task(task_id)
+        if task and tracker.total_tokens > 0:
+            task.token_usage = tracker.to_dict()
 
     async def _check_consolidation(self, session: Any) -> None:
         total = len(session.messages)
@@ -394,7 +553,7 @@ class AgentLoop:
 
             if memory_save_called:
                 self._memory.mark_consolidated(session, total)
-                self._session_manager.save(session)
+                await self._session_manager.save(session)
                 logger.info("memory consolidation completed for session %s", session.key)
             else:
                 logger.info("memory consolidation skipped (no save) for session %s", session.key)

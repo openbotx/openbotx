@@ -108,7 +108,7 @@ class HttpClientTool(Tool):
 
             from openbotx.helpers.oauth1 import build_oauth1_header
 
-            # Include form-encoded body params in OAuth signature per RFC 5849
+            # include form-encoded body params in OAuth signature per RFC 5849
             body_params = None
             if body and content_type == "form":
                 body_params = parse_qsl(body, keep_blank_values=True)

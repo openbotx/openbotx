@@ -9,6 +9,7 @@ from openbotx.config.schema import AgentConfig
 from openbotx.cron.service import CronService
 from openbotx.tools.base import Tool
 from openbotx.tools.browser import BrowserTool
+from openbotx.tools.context import RequestContext
 from openbotx.tools.cron import CronTool
 from openbotx.tools.filesystem import (
     EditFileTool,
@@ -32,6 +33,7 @@ class ToolRegistry:
     """Registry for agent tools."""
 
     _HINT = "\n\n[Analyze the error above and try a different approach.]"
+    _MAX_RESULT_CHARS = 100_000
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
@@ -51,7 +53,9 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         return [tool.to_schema() for tool in self._tools.values()]
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
+    async def execute(
+        self, name: str, params: dict[str, Any], context: RequestContext | None = None
+    ) -> str:
         tool = self._tools.get(name)
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
@@ -64,9 +68,18 @@ class ToolRegistry:
                     + "; ".join(errors)
                     + self._HINT
                 )
-            result = await tool.execute(**params)
+            kwargs = {**params}
+            if context is not None:
+                kwargs["_context"] = context
+            result = await tool.execute(**kwargs)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + self._HINT
+            # truncate oversized results to prevent context overflow
+            if isinstance(result, str) and len(result) > self._MAX_RESULT_CHARS:
+                result = (
+                    result[: self._MAX_RESULT_CHARS]
+                    + f"\n\n[Output truncated: {len(result)} total chars, showing first {self._MAX_RESULT_CHARS}]"
+                )
             return result
         except Exception as e:
             logger.error("tool %s failed: %s", name, e, exc_info=True)
@@ -86,9 +99,6 @@ class ToolRegistry:
 @dataclass
 class RegistryResult:
     registry: ToolRegistry
-    message_tool: MessageTool | None = None
-    spawn_tool: SpawnTool | None = None
-    cron_tool: CronTool | None = None
 
 
 def build_registry(
@@ -98,15 +108,19 @@ def build_registry(
     subagent_manager: SpawnManager | None = None,
     cron_service: CronService | None = None,
     memory_store: MemoryStore | None = None,
+    denied_tools: set[str] | None = None,
 ) -> RegistryResult:
     """Build a ToolRegistry with all tools configured from context objects."""
     whitelist = set(agent_cfg.tools) if agent_cfg.tools else None
+    denylist = set(agent_cfg.denied_tools) | (denied_tools or set())
     registry = ToolRegistry()
 
     resolver = project_ctx.create_resolver(agent_cfg)
     workspace = agent_cfg.resolve_workspace(project_ctx.project_path)
 
     def _register(tool: Tool) -> None:
+        if tool.name in denylist:
+            return
         if whitelist and tool.name not in whitelist:
             return
         registry.register(tool)
@@ -143,20 +157,14 @@ def build_registry(
     _register(RssReaderTool())
     _register(BrowserTool())
 
-    message_tool = None
     if bus is not None:
-        message_tool = MessageTool(send_callback=bus.publish_outbound)
-        _register(message_tool)
+        _register(MessageTool(send_callback=bus.publish_outbound))
 
-    spawn_tool = None
     if subagent_manager is not None:
-        spawn_tool = SpawnTool(manager=subagent_manager)
-        _register(spawn_tool)
+        _register(SpawnTool(manager=subagent_manager))
 
-    cron_tool = None
     if cron_service is not None:
-        cron_tool = CronTool(cron_service=cron_service)
-        _register(cron_tool)
+        _register(CronTool(cron_service=cron_service))
 
     if memory_store is not None:
         _register(MemorySaveTool(memory_store=memory_store))
@@ -179,9 +187,4 @@ def build_registry(
                 )
             )
 
-    return RegistryResult(
-        registry=registry,
-        message_tool=message_tool,
-        spawn_tool=spawn_tool,
-        cron_tool=cron_tool,
-    )
+    return RegistryResult(registry=registry)

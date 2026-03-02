@@ -101,8 +101,8 @@ function toggleSessions() {
       </div>
       <ChatMessages
         :messages="chatStore.messages"
-        :streaming="chatStore.streaming"
-        :current-tool-use="chatStore.currentToolUse"
+        :live-message="chatStore.liveMessage"
+        :tool-running="chatStore.toolRunning"
       />
       <ChatInput @send="handleSend" />
     </div>

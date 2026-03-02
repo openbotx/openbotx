@@ -1,4 +1,4 @@
-# Supported field types:
+# supported field types:
 #   text, email, int, float, bool, secret, long-text,
 #   select, credential, provider,
 #   datetime, date, time, color

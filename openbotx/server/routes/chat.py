@@ -30,13 +30,13 @@ async def send_message(req: ChatRequest, request: Request):
         channel, chat_id = "web", key
 
     task = await task_manager.create_task(
-        title=req.message[:80],
+        title=req.message[:50],
         description=req.message,
         channel=channel,
         chat_id=chat_id,
     )
 
-    # Persist the user message immediately so the session exists on disk
+    # persist the user message immediately so the session exists on disk
     # before the async agent loop picks it up. This ensures a page refresh
     # always shows the session and the user's message.
     session_key = f"{channel}:{chat_id}"
@@ -45,7 +45,7 @@ async def send_message(req: ChatRequest, request: Request):
     if req.media:
         media_kwargs["media"] = req.media
     session.add_message("user", req.message, **media_kwargs)
-    session_manager.save(session)
+    await session_manager.save(session)
 
     await dispatcher.broadcast("sessions:updated", {})
 
@@ -58,7 +58,7 @@ async def send_message(req: ChatRequest, request: Request):
         metadata={"task_id": task.id, "message_saved": True},
     )
 
-    # Forward the user message to the target channel (e.g. Telegram)
+    # forward the user message to the target channel (e.g. Telegram)
     # so the recipient sees what was asked from the web UI
     if channel != "web":
         await bus.publish_outbound(

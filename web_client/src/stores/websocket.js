@@ -74,6 +74,15 @@ export const useWebSocketStore = defineStore('websocket', () => {
         chat.onThinking(msg.data)
         tasks.onThinking(msg.data)
         break
+      case 'chat:typing':
+        chat.onTyping(msg.data)
+        break
+      case 'chat:stream':
+        chat.onStream(msg.data)
+        break
+      case 'chat:stream_end':
+        chat.onStreamEnd(msg.data)
+        break
       case 'chat:tool_use':
         chat.onToolUse(msg.data)
         tasks.onToolUse(msg.data)

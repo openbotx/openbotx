@@ -206,6 +206,19 @@ Response:
 
 Returns all `TODO` and `DOING` tasks, plus `DONE` and `ERROR` tasks from the last 24 hours.
 
+Each task object includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Task identifier |
+| `title` | string | Short title |
+| `state` | string | `TODO`, `DOING`, `DONE`, or `ERROR` |
+| `agent_name` | string | Name of the agent handling this task |
+| `tool_count` | int | Number of tool calls executed |
+| `iteration_count` | int | Number of LLM call iterations |
+| `token_usage` | object | Cumulative token usage: `{ prompt_tokens, completion_tokens, total_tokens }`. Empty object if no LLM calls were made |
+| `duration_ms` | int\|null | Milliseconds from start to completion |
+
 **PATCH /api/tasks/{task_id}**
 
 Request body:
@@ -859,13 +872,46 @@ ws://host:port/ws?token=JWT_TOKEN
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `chat:message` | `{ content, chat_id, task_id }` | Final AI response |
-| `chat:thinking` | `{ task_id, chat_id, content }` | Agent reasoning and thinking steps |
-| `chat:tool_use` | `{ task_id, chat_id, tool, description }` | Tool execution details |
+| `chat:stream` | `{ task_id, chat_id, content, agent_name }` | Real-time token streaming — sent for each chunk of text as the LLM generates it |
+| `chat:stream_end` | `{ task_id, chat_id, agent_name }` | End of streaming response (only for content-only responses, not when tool calls follow) |
+| `chat:message` | `{ content, chat_id, task_id, agent_name }` | Final AI response |
+| `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | Agent reasoning and thinking steps |
+| `chat:tool_use` | `{ task_id, chat_id, tool, description, agent_name }` | Tool execution details |
+| `chat:user_message` | `{ chat_id, content, media, channel }` | Non-web user message received (e.g., from Telegram, cron) |
+| `chat:transcription` | `{ chat_id, content }` | Audio media transcription result |
 | `task:created` | Task object | New task was created |
 | `task:updated` | Task object | Task state changed |
 | `channel:status` | `{ name, running }` | Channel connection status changed |
 | `sessions:updated` | `{}` | Session list changed (reload sidebar) |
+
+**chat:stream**
+
+```json
+{
+  "event": "chat:stream",
+  "data": {
+    "task_id": "string",
+    "chat_id": "string",
+    "content": "string (token chunk)",
+    "agent_name": "string"
+  }
+}
+```
+
+The frontend should accumulate `content` chunks and render them progressively. When `chat:stream_end` is received, finalize the message display.
+
+**chat:stream_end**
+
+```json
+{
+  "event": "chat:stream_end",
+  "data": {
+    "task_id": "string",
+    "chat_id": "string",
+    "agent_name": "string"
+  }
+}
+```
 
 **chat:message**
 
@@ -875,7 +921,8 @@ ws://host:port/ws?token=JWT_TOKEN
   "data": {
     "content": "string",
     "chat_id": "string",
-    "task_id": "string"
+    "task_id": "string",
+    "agent_name": "string"
   }
 }
 ```
@@ -888,7 +935,8 @@ ws://host:port/ws?token=JWT_TOKEN
   "data": {
     "task_id": "string",
     "chat_id": "string",
-    "content": "string"
+    "content": "string",
+    "agent_name": "string"
   }
 }
 ```
@@ -902,12 +950,13 @@ ws://host:port/ws?token=JWT_TOKEN
     "task_id": "string",
     "chat_id": "string",
     "tool": "string",
-    "description": "string"
+    "description": "string",
+    "agent_name": "string"
   }
 }
 ```
 
-All `chat:*` events include `chat_id` so the frontend can filter messages by session. Only messages matching the active session should be displayed — others are silently ignored until the user switches to that session.
+All `chat:*` events include `chat_id` and `agent_name` so the frontend can filter messages by session and identify which agent is responding. Only messages matching the active session should be displayed — others are silently ignored until the user switches to that session.
 
 #### Client to Server
 

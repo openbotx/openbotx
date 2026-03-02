@@ -145,12 +145,17 @@ class ServerFactory:
                 model=classifier_model,
             )
 
+        # use max_concurrent from the default agent's params
+        default_cfg = self._config.agents[default_agent_name]
+        max_concurrent = default_cfg.agent_params.max_concurrent
+
         return Orchestrator(
             bus=bus,
             agents=agent_loops,
             classifier=classifier,
             default_agent=default_agent_name,
             session_manager=session_manager,
+            max_concurrent=max_concurrent,
         )
 
     @staticmethod

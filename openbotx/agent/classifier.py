@@ -74,7 +74,17 @@ class AgentClassifier:
         recent = chat_history[-CLASSIFIER_HISTORY_LIMIT:]
         for msg in recent:
             role = msg.get("role")
-            content = msg.get("content", "")
+            raw = msg.get("content", "")
+            # extract plain text from content blocks array
+            if isinstance(raw, list):
+                text_parts = [
+                    b.get("text", "")
+                    for b in raw
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
+                content = "\n\n".join(p for p in text_parts if p)
+            else:
+                content = raw
             if role in ("user", "assistant") and content:
                 entry: dict[str, Any] = {"role": role, "content": content}
                 if role == "assistant" and msg.get("agent_name"):

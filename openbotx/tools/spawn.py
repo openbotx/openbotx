@@ -1,6 +1,7 @@
 from typing import Any, Protocol
 
 from openbotx.tools.base import Tool
+from openbotx.tools.context import RequestContext
 
 
 class SpawnManager(Protocol):
@@ -40,29 +41,14 @@ class SpawnTool(Tool):
 
     def __init__(self, manager: SpawnManager):
         self._manager = manager
-        self._origin_channel = "web"
-        self._origin_chat_id = "direct"
-        self._parent_task_id: str | None = None
-        self._agent_name = ""
-
-    def set_context(
-        self,
-        channel: str,
-        chat_id: str,
-        parent_task_id: str | None = None,
-        agent_name: str = "",
-    ) -> None:
-        self._origin_channel = channel
-        self._origin_chat_id = chat_id
-        self._parent_task_id = parent_task_id
-        self._agent_name = agent_name
 
     async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+        ctx: RequestContext | None = kwargs.get("_context")
         return await self._manager.spawn(
             task=task,
             label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-            parent_task_id=self._parent_task_id,
-            agent_name=self._agent_name,
+            origin_channel=ctx.channel if ctx else "web",
+            origin_chat_id=ctx.chat_id if ctx else "direct",
+            parent_task_id=ctx.task_id if ctx else None,
+            agent_name=ctx.agent_name if ctx else "",
         )

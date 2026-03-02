@@ -84,7 +84,10 @@ Event types:
 
 | Event                | Payload                                                  | Description                                        |
 | -------------------- | -------------------------------------------------------- | -------------------------------------------------- |
+| `chat:typing`        | `{ chat_id, agent_name, task_id }`                       | Agent is processing (show typing indicator)        |
 | `chat:thinking`      | `{ task_id, chat_id, content, agent_name }`              | Streaming reasoning/thinking text                  |
+| `chat:stream`        | `{ task_id, chat_id, content, agent_name }`              | Streaming content tokens in real time              |
+| `chat:stream_end`    | `{ task_id, chat_id, agent_name }`                       | End of streaming response                          |
 | `chat:tool_use`      | `{ task_id, chat_id, tool, description, agent_name }`    | Tool invocation with human-readable description    |
 | `chat:message`       | `{ content, chat_id, task_id, agent_name }`              | Final response delivered to user                   |
 | `chat:user_message`  | `{ chat_id, content, media, channel }`                   | Non-web user message received (for real-time display in the web UI) |
@@ -151,6 +154,7 @@ The `MessageBus` is the backbone of the platform. It holds two `asyncio.Queue` i
 | `queue.py`      | `MessageBus` with `inbound` and `outbound` async queues. Provides `publish_*` / `consume_*` methods. |
 | `events.py`     | Message data classes: `InboundMessage` (channel -> agent) and `OutboundMessage` (agent -> channel). |
 | `dispatcher.py` | `EventDispatcher` provides protocol-based event broadcasting. Components call `dispatcher.broadcast(event, data)` instead of coupling directly to WebSocketManager. Handlers register via `add_handler()`. |
+| `command_queue.py` | `CommandQueue` — lane-based async task queue for concurrent message processing. Each lane (keyed by session key) has its own FIFO queue with configurable concurrency. A global `asyncio.Semaphore` caps total parallel tasks across all lanes. See [concurrency.md](concurrency.md). |
 
 **Session key derivation:** Each `InboundMessage` derives its session key as `{channel}:{chat_id}`, which ties all messages from the same chat to the same conversation session. This can be overridden via `session_key_override`.
 
@@ -162,13 +166,16 @@ The agent subsystem is the intelligence layer of the platform.
 
 | File              | Purpose                                                                                        |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `orchestrator.py` | `Orchestrator` consumes inbound messages from the bus. Routes them to the appropriate agent via `AgentClassifier`, or directly to the default agent when only one exists. |
+| `orchestrator.py` | `Orchestrator` consumes inbound messages from the bus and dispatches them via a `CommandQueue`. Messages to the same session are serialized (same lane), while messages to different sessions run in parallel up to `max_concurrent`. Routes to the appropriate agent via `AgentClassifier`, or directly to the default agent when only one exists. |
 | `classifier.py`   | `AgentClassifier` is an LLM-based message classifier. Analyzes the user's message and recent history to select the best agent using a `route` tool call. Falls back to the first agent on error. Only instantiated when multiple agents are configured. |
-| `loop.py`         | `AgentLoop` is the main agentic loop. Receives an `AgentConfig` and a `ProjectContext`, builds context, calls the LLM, executes tool calls, and repeats until a plain text response or `max_iterations` (default 40) is reached. Streams `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events. For web/REST messages, the user message is already persisted at the HTTP layer (`message_saved` flag). For channel messages, the loop saves it before processing. Tool registration is delegated to `build_registry()`. |
-| `context.py`      | `ContextBuilder` assembles the system prompt from bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL, and agent-specific instructions. Provides helpers for building OpenAI-compatible message arrays with multimodal support (text + images). |
+| `loop.py`         | `AgentLoop` is the main agentic loop. Receives an `AgentConfig` and a `ProjectContext`, builds context, streams LLM responses via `_consume_stream()`, executes tool calls, and repeats until a plain text response or `max_iterations` (default 40) is reached. Includes context window management (automatic compaction), history limiting (pre-compaction trimming via `max_history`), loop detection (duplicate tool call prevention), typing indicators (`chat:typing` events), and usage tracking. Streams `chat:typing`, `chat:stream`, `chat:stream_end`, `chat:thinking`, `chat:tool_use`, `chat:user_message`, and `chat:transcription` events. |
+| `context.py`      | `ContextBuilder` assembles the system prompt from identity, runtime info (platform, Python version), channel guidance (web/telegram), response guidelines, available tool names, bootstrap files (`SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`), persisted memory, always-on skills, a skills summary, the public URL, and agent-specific instructions. Provides helpers for building OpenAI-compatible message arrays with multimodal support (text + images). |
+| `context_window.py` | Context window management. `estimate_tokens()` uses chars/4 heuristic. `MODEL_CONTEXT_LIMITS` maps model patterns to context sizes. `needs_compaction()` checks if usage exceeds 85% of the model limit. |
+| `compaction.py`   | `compact_messages()` summarizes the oldest 40% of conversation via the LLM, preserving key identifiers and context. Handles dangling tool results and strips verbose tool output before summarization. |
+| `usage.py`        | `UsageTracker` accumulates prompt/completion/total token counts across multiple LLM calls within a task. Persisted on the `Task.token_usage` field on completion. |
 | `memory.py`       | `MemoryStore` reads and writes `MEMORY.md` and `HISTORY.md` in the workspace `memory/` directory. Provides consolidation prompts when unconsolidated messages exceed `memory_window`. Consolidation input includes only user/assistant text messages. |
 | `skills.py`       | `SkillsLoader` discovers SKILL.md files from built-in (`openbotx/skills/`) and workspace (`workspace/skills/`) directories. Parses YAML frontmatter for metadata (name, description, always, requires). Each skill is tagged with `source` (`"builtin"` or `"project"`) and `location` (absolute path). Skills marked `always: true` are injected into every system prompt if their requirements are satisfied. |
-| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Subagents have no `message`, `spawn`, `cron`, or memory tools. They run with a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. On completion, results are announced back to the main agent via the inbound queue. |
+| `subagent.py`     | `SubagentManager` spawns independent background agent loops for delegated tasks. Uses `denied_tools=_SUBAGENT_DENIED` to block `message`, `spawn`, `cron`, `exec`, `browser`, and memory tools. Subagents run with a minimal system prompt (identity, workspace paths, available tool names, concise guidelines) to save tokens. They have a lower iteration cap (15) and hardcoded `max_tokens=4096`, `temperature=0.1`. Includes context window management (compaction) and history limiting. On completion, results are announced back to the main agent via the inbound queue. |
 
 **Multi-agent orchestration:**
 
@@ -237,30 +244,35 @@ The orchestrator's `run()` loop catches exceptions per-message. If a single mess
 **Agentic loop detail:**
 
 ```
-1. Receive InboundMessage from Orchestrator
+1. Receive InboundMessage from Orchestrator (dispatched via CommandQueue lane)
 2. Create or resume Task (set state to DOING)
-3. Initialize task.live_state = {tool_uses: []}
+3. Initialize task.live_state = {tool_uses: [], agent_name: ...}
 4. Load or create Session
 5. Initialize session.live_state = {tool_uses: [], agent_name: ...}
-6. Build system prompt (ContextBuilder)
-7. Build message array (system + history + new user message)
-8. Loop:
+6. Create RequestContext (channel, chat_id, task_id, agent_name, message_id)
+7. Build system prompt (ContextBuilder)
+8. Build message array (system + history + new user message)
+9. Loop:
    a. Increment task.iteration_count
-   b. Call LLM provider with messages + tool definitions
-   c. If response contains tool_calls:
-      - Execute each tool via ToolRegistry
+   b. Trim history if max_history > 0 (drop orphaned tool results)
+   c. Compact context if approaching model limit
+   d. Broadcast chat:typing event
+   e. Call LLM provider with messages + tool definitions
+   f. If response contains tool_calls:
+      - Execute each tool via ToolRegistry (with RequestContext)
       - Increment task.tool_count per tool call
       - Broadcast chat:tool_use via EventDispatcher
       - Append tool entry to session.live_state and task.live_state
+      - Accumulate content blocks (text and tool_use blocks)
       - Append assistant message + tool results to messages
       - Continue loop
-   d. If response is plain text:
-      - Break loop, return response
-9. Clear session.live_state and task.live_state
-10. Save messages to session
-11. Publish OutboundMessage to bus
-12. Set Task state to DONE
-13. Check if memory consolidation is needed
+   g. If response is plain text:
+      - Break loop, return response text and content blocks
+10. Clear session.live_state and task.live_state
+11. Save assistant message with content blocks array to session
+12. Publish OutboundMessage to bus
+13. Set Task state to DONE
+14. Check if memory consolidation is needed
 ```
 
 ### Channels
@@ -291,13 +303,17 @@ The provider subsystem abstracts LLM access behind a uniform interface.
 
 | File                   | Purpose                                                                             |
 | ---------------------- | ----------------------------------------------------------------------------------- |
-| `base.py`              | `LLMProvider` abstract class and `LLMResponse` data class (content, tool_calls, reasoning_content, has_tool_calls). |
-| `litellm_provider.py`  | `LiteLLMProvider` wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, and prompt caching. |
+| `base.py`              | `LLMProvider` abstract class, `LLMResponse` data class (content, tool_calls, reasoning_content, error_type, has_tool_calls), and `StreamChunk` data class for streaming responses. Default `chat_stream()` falls back to non-streaming `chat()`. |
+| `litellm_provider.py`  | `LiteLLMProvider` wraps [LiteLLM](https://github.com/BerriAI/litellm) for multi-provider LLM access. Handles model name resolution, environment variable setup, prompt caching, tool call ID sanitization, transcript validation (message ordering), thinking/reasoning budget, and streaming. Uses shared `_build_kwargs()` for both `chat()` and `chat_stream()`. |
 | `registry.py`          | `PROVIDERS` tuple of `ProviderSpec` objects. Defines metadata for each supported provider (custom, openrouter, anthropic, openai, deepseek, gemini, groq) with keyword matching and API key detection. |
+| `errors.py`            | Error classification system. `LLMErrorType` enum, typed exception hierarchy (`ContextOverflowError`, `RateLimitError`, `BillingError`, `AuthError`, `TransientError`), and `classify_error()` for pattern-based error classification. |
+| `retry.py`             | `retry_with_backoff()` wraps LLM calls with exponential backoff retry (3 attempts, 1-30s delay). Only retries `RateLimitError` and `TransientError`; other errors propagate immediately. |
 
 **Provider resolution:** The `Config.get_provider()` method matches a model name to a provider by first checking the LiteLLM-style prefix (e.g., `anthropic/claude-sonnet-4-20250514`), then falling back to keyword matching, and finally returning any provider whose referenced credential has an API key configured. `ServerFactory.create_provider()` resolves through provider -> credential -> concrete key to build a `LiteLLMProvider`.
 
 **Provider-level `model_params`:** Each `ProviderConfig` can define a default `model_params` dict (arbitrary key-value pairs like `max_tokens`, `temperature`, `top_p`, etc.). At startup, `ServerFactory.create_orchestrator` merges provider defaults into each agent's `model_params` using simple dict merge (`{**provider_params, **agent_params}`). Agent-level keys always take precedence.
+
+**Error handling:** LLM errors are classified by pattern matching on the error message. Context overflow errors propagate as `ContextOverflowError` so the agent loop can compact and retry. Rate limit and transient errors are retried with exponential backoff. Terminal errors (billing, auth) propagate immediately. Unknown errors are returned as `LLMResponse` with `finish_reason="error"`.
 
 ### Tools
 
@@ -308,20 +324,21 @@ Tools are the actions the agent can perform in the world.
 | File               | Purpose                                                                  |
 | ------------------ | ------------------------------------------------------------------------ |
 | `base.py`          | Abstract `Tool` class with `name`, `description`, `parameters`, `execute()`, `validate_params()`, and `to_schema()`. |
-| `registry.py`      | `ToolRegistry` manages tool registration, lookup, and execution. Generates tool definition arrays for LLM calls. Appends error hints on failure to guide recovery. |
+| `context.py`       | `RequestContext` — immutable (frozen) dataclass carrying per-request metadata (channel, chat_id, task_id, agent_name, message_id). Created once per `process_message` call and injected into tool execution via `kwargs["_context"]`. Replaces the previous mutable `set_context()` pattern, making concurrent message processing safe. |
+| `registry.py`      | `ToolRegistry` manages tool registration, lookup, and execution. `execute()` accepts an optional `RequestContext` and injects it as `_context` into tool kwargs. Generates tool definition arrays for LLM calls. Appends error hints on failure to guide recovery. Applies a 100K character truncation limit on all tool results. `build_registry()` supports `denied_tools` parameter for filtering. |
 | `filesystem.py`    | `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListDirTool` -- file operations using `PathResolver` for path resolution and directory restriction enforcement. |
 | `shell.py`         | `ExecTool` executes shell commands with configurable timeout and optional workspace restriction. |
 | `web.py`           | `WebSearchTool` (Brave Search API), `WebFetchTool` (HTTP fetch + content extraction). |
-| `message.py`       | `MessageTool` sends messages to channels from within the agent loop. Rate-limited to one message per turn. |
-| `spawn.py`         | `SpawnTool` delegates tasks to background subagents. |
-| `cron.py`          | `CronTool` creates, lists, and removes scheduled jobs. |
+| `message.py`       | `MessageTool` sends messages to channels from within the agent loop. Reads channel/chat_id from `RequestContext` (via `kwargs["_context"]`). |
+| `spawn.py`         | `SpawnTool` delegates tasks to background subagents. Reads origin channel/chat_id/task_id from `RequestContext`. |
+| `cron.py`          | `CronTool` creates, lists, and removes scheduled jobs. Reads channel/chat_id from `RequestContext`. |
 | `memory_tool.py`   | `MemorySaveTool` persists content to MEMORY.md and HISTORY.md. `MemoryReadTool` reads them on demand. `MemorySearchTool` searches across memory files with context. |
 | `browser.py`       | `BrowserTool` provides browser automation via CDP using the vendored `openbotx/cdp/` library. A singleton `_ChromeInstance` manages the Chrome process. Each tool instance gets its own tab. Clicks use pure CDP: resolve element, scroll into view, get content quads, dispatch mouse events. |
 | `http_client.py`   | `HttpClientTool` is a full HTTP client with download/upload support, `PathResolver` integration, and authentication via credentials (OAuth 1.0a, Basic, Bearer). |
 | `rss.py`           | `RssReaderTool` reads RSS 2.0 and Atom feeds. Auto-detects format and strips HTML from summaries. |
 | `image.py`         | `ImageGenerationTool` generates images via LiteLLM. Provider resolved from model prefix (e.g. `openai/dall-e-3`). |
 
-**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it includes file operations, shell, web tools, HTTP client, RSS reader, browser, and image generation. It excludes `MessageTool`, `SpawnTool`, `CronTool`, and all memory tools to prevent subagents from sending messages to users, spawning further subagents, creating scheduled jobs, or modifying memory.
+**Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it passes `denied_tools=_SUBAGENT_DENIED` (a hardcoded set: `spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`, `exec`, `browser`) to `build_registry()`. This is combined with the agent's own `denied_tools` config field. The result is subagents have file operations, web tools, HTTP client, RSS reader, and image generation — but cannot execute shell commands, automate browsers, send messages, spawn further subagents, create scheduled jobs, or modify memory.
 
 ### Tasks
 
@@ -331,7 +348,7 @@ Tasks provide observability into what the agent is doing.
 
 | File          | Purpose                                                                             |
 | ------------- | ----------------------------------------------------------------------------------- |
-| `models.py`   | `Task` dataclass with fields for identity, state, timing, metrics, and relationships. `duration_ms` returns elapsed milliseconds from `started_at` to `completed_at` (or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory and is never persisted to JSONL. |
+| `models.py`   | `Task` dataclass with fields for identity, state, timing, metrics, relationships, and `token_usage` (cumulative prompt/completion/total tokens). `duration_ms` returns elapsed milliseconds from `started_at` to `completed_at` (or to now if still running). The `live_state` dict holds transient runtime data (e.g., `tool_uses`) that lives only in memory and is never persisted to JSONL. |
 | `manager.py`  | `TaskManager` creates tasks, tracks state transitions, and broadcasts `task:created` / `task:updated` events. Auto-sets `started_at` on `DOING` and `completed_at` on `DONE`/`ERROR`. Provides `increment_tool_count()` and `increment_iteration_count()` for in-memory metric tracking. |
 
 Task states follow a Kanban model:
@@ -355,9 +372,11 @@ Sessions persist conversation history.
 
 | File          | Purpose                                                                           |
 | ------------- | --------------------------------------------------------------------------------- |
-| `manager.py`  | `SessionManager` manages `Session` objects stored as JSONL files in `workspace/sessions/`. Each session is keyed by `{channel}_{chat_id}`. Provides `get_or_create`, `save`, `delete`, and `list_sessions`. Uses an in-memory cache for fast access. |
+| `manager.py`  | `SessionManager` manages `Session` objects stored as JSONL files in `workspace/sessions/`. Each session is keyed by `{channel}_{chat_id}`. Provides `get_or_create`, `save` (async with per-session write lock), `delete`, and `list_sessions`. Uses an in-memory cache for fast access. |
 
 The `Session` dataclass holds a list of messages (role + content + metadata) and tracks `last_consolidated` for memory consolidation. `get_history()` returns messages for building LLM context, capped at 500 by default. The transient `live_state` dict holds runtime data (e.g., `tool_uses`, `agent_name`) during execution. It is returned via the chat history API but never persisted to JSONL.
+
+**Write lock:** `save()` is async and acquires a per-session `asyncio.Lock` before writing. This prevents concurrent requests to the same session from corrupting the JSONL file. Locks are created lazily per session key.
 
 ### Cron
 
@@ -428,6 +447,8 @@ Key configuration sections:
 - `description` field used by the `AgentClassifier` for routing decisions.
 - `instructions` field appended to the system prompt as agent-specific instructions.
 - `tools` list that whitelists which tools are available to the agent.
+- `agent_params.max_history` (default 0 = no limit) trims the message history to N messages before the compaction check. This is a cheap pre-compaction optimization that avoids unnecessary LLM calls.
+- `model_params.thinking` controls extended thinking budget: `"off"` (default), `"low"` (2048 tokens), `"medium"` (8192), `"high"` (32768). When enabled, temperature is forced to 1 (required by Anthropic).
 
 ### Helpers
 
@@ -474,7 +495,7 @@ Pages:
 
 | Page       | Function                                        |
 | ---------- | ----------------------------------------------- |
-| Chat       | Main conversation interface with session list panel and real-time updates. Users can switch between sessions. Supports media attachments and microphone recording. Audio is transcribed via faster-whisper before being sent to the LLM. In multi-agent mode, messages display the agent name. |
+| Chat       | Main conversation interface with session list panel and real-time updates. Users can switch between sessions without losing streaming state (per-session live cache). Assistant messages render typed content blocks (text and tool_use) in order. A processing indicator (animated dots + "Processing..." label) shows at the bottom of live messages. Supports media attachments and microphone recording. Audio is transcribed via faster-whisper before being sent to the LLM. In multi-agent mode, messages display the agent name. |
 | TaskBoard  | Kanban board with TODO/DOING/DONE/ERROR columns. Cards display duration, channel, errors, and result preview. DOING tasks show real-time tool status. Clicking a task title navigates to the associated chat session. |
 | Files      | File manager with type-aware rendering. Uses `MarkdownEditor` for `.md` files, `TextEditor` for other text, `MediaPreview` for media, and `FileDownload` for binaries. Supports creating, uploading, and deleting files and folders. |
 | Skills     | Card grid of agent skills. Each card shows name, description, source tag, and "always active" tag when applicable. Clicking a card opens the full content as Markdown. Project skills can be edited inline. Builtin skills are read-only. |
@@ -504,8 +525,9 @@ openbotx/
 │   ├── browser.py       # ChromeLauncher - Chrome process management
 │   ├── connection.py    # CDPConnection, CDPSession, connect_cdp (WebSocket)
 │   └── protocol/        # Auto-generated CDP domain modules (runtime, page, dom, input_, target, etc.)
-├── bus/             # Async message bus and event dispatching
+├── bus/             # Async message bus, event dispatching, and command queue
 │   ├── queue.py         # MessageBus with inbound/outbound queues
+│   ├── command_queue.py # CommandQueue — lane-based concurrent task queue
 │   ├── events.py        # InboundMessage, OutboundMessage data classes
 │   └── dispatcher.py    # EventDispatcher - protocol-based event broadcasting
 ├── channels/        # Communication channel implementations
@@ -633,3 +655,11 @@ On shutdown, the reverse occurs: HeartbeatService stops, orchestrator stops (whi
 **Centralized credentials.** All credentials (API keys, OAuth tokens, passwords, AWS keys, bot tokens) are defined in a single `credentials` dictionary. Other configuration sections (providers, channels, tools, storage, web_client, server) reference credentials by name via their `credential` field. The server's JWT signing secret is also stored as a `simple` credential referenced by `server.credential`. This eliminates credential duplication and provides a single place to manage secrets.
 
 **ServerFactory pattern.** All dependency creation logic is encapsulated in the `ServerFactory` class, keeping the lifespan function clean and making the initialization sequence testable. The factory creates providers, storage, cron callbacks, and the full orchestrator graph from a single `Config` object. `create_provider()` resolves through provider -> credential -> concrete key.
+
+**Lane-based concurrency.** The `Orchestrator` dispatches messages via a `CommandQueue` with lanes keyed by session key. Messages to the same session are serialized (FIFO within a lane), while messages to different sessions run in parallel up to `max_concurrent` (default 1). A global `asyncio.Semaphore` caps total parallel tasks. This eliminates the previous bottleneck where one slow message blocked all others. See [concurrency.md](concurrency.md).
+
+**Per-request tool context.** Tools that need request-scoped data (channel, chat_id, task_id) receive an immutable `RequestContext` via `kwargs["_context"]` instead of storing mutable state on shared tool instances. This replaces the previous `set_context()` pattern, which was unsafe for concurrent execution. The `ToolRegistry.execute()` method injects the context automatically.
+
+**Typed content blocks.** Assistant messages store `content` as an array of typed blocks (`text`, `tool_use`) instead of a plain string. This preserves the natural interleaving of text and tool calls as they occur during the agent loop. The frontend renders blocks in order, showing text and tool indicators exactly where they appeared. User messages remain plain strings. The `ContextBuilder` normalizes block arrays back to plain text when building LLM context.
+
+**Per-session live state cache.** The frontend chat store maintains a `_liveCache` Map keyed by `chat_id` that tracks streaming state (content blocks, agent name, tool running status) per session. WebSocket events always update their session's cache regardless of which session the user is viewing. When switching sessions, the client-side cache is preferred over backend `live_state`, preserving accumulated streaming content.

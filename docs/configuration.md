@@ -67,10 +67,13 @@ agents:
     description: ""               # str  -- Short description of this agent's purpose. Used by the AgentClassifier to route messages when multiple agents are configured.
     instructions: ""              # str  -- Agent-specific instructions appended to the system prompt as a dedicated section. Use for behavioral rules, domain expertise, or role-specific guidelines.
     tools: []                     # list[str] -- Whitelist of tool names available to this agent. When empty (default), all tools are registered. When set, only tools whose name appears in this list are available.
-    model_params: {}                # dict -- Arbitrary model parameters passed to the LLM provider. Common keys: max_tokens, temperature, top_p, etc. Empty by default.
+    denied_tools: []              # list[str] -- Denylist of tool names to exclude from this agent. Applied on top of the whitelist. Useful for selectively blocking dangerous tools without listing all allowed ones.
+    model_params: {}                # dict -- Arbitrary model parameters passed to the LLM provider. Common keys: max_tokens, temperature, top_p, thinking (off/low/medium/high). Empty by default.
     agent_params:
       max_iterations: 40          # int  -- Maximum agentic loop iterations per request.
       memory_window: 100          # int  -- Number of recent messages to keep in context before triggering consolidation.
+      max_history: 0              # int  -- Maximum non-system messages to keep before trimming. 0 = no limit. When > 0, oldest messages are dropped before compaction runs.
+      max_concurrent: 1           # int  -- Maximum parallel message-processing tasks across all lanes. Messages to the same session are serialized; different sessions run in parallel up to this limit. Read from the default agent's config.
 
 # ---------------------------------------------------------------------------
 # Classifier
@@ -89,7 +92,7 @@ classifier:
 # determines which fields are relevant. Other sections reference these by
 # name via their `credential` field.
 #
-# Supported types: simple, oauth1, basic, login, aws.
+# Supported types: simple, oauth1, basic, login, aws, header, bearer.
 credentials:
   anthropic:                      # Credential name (referenced by providers, channels, etc.).
     type: "simple"                # str  -- Credential type.
@@ -104,6 +107,13 @@ credentials:
   #   consumer_secret: ""
   #   access_token: ""
   #   access_token_secret: ""
+  # custom_header:
+  #   type: header
+  #   header_name: "X-Api-Key"    # str  -- HTTP header name.
+  #   value: ""                   # str  -- Header value.
+  # custom_bearer:
+  #   type: bearer
+  #   token: ""                   # str  -- Bearer token value.
 
 # ---------------------------------------------------------------------------
 # Image Generation
@@ -129,7 +139,7 @@ providers:
     base_url: ""                  # str  -- Custom base URL. Leave empty to use the provider's default endpoint. Used for OpenAI-compatible APIs, self-hosted models, or proxies.
     request_headers: {}           # dict[str, str] -- Custom HTTP headers sent with every API request.
     request_options: {}           # dict -- Additional provider-specific parameters merged into the request body.
-    model_params: {}              # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these. Empty by default.
+    model_params: {}              # dict -- Default model parameters for all agents using this provider. Agent-level model_params override these. Empty by default. Supports "context_window" to override the built-in context limit for compaction (e.g. context_window: 64000).
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +222,13 @@ This means:
 
 When `restrict_to_workspace` is `false`, all filesystem paths are accessible without restriction.
 
-### Tool Whitelisting
+### Tool Whitelisting and Denylisting
 
-The `tools` field accepts a list of tool names. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
+The `tools` field accepts a list of tool names as a **whitelist**. When set, only tools whose `name` property matches an entry in the list are registered for that agent. When empty (default), all tools are available.
+
+The `denied_tools` field accepts a list of tool names as a **denylist**. Tools in this list are excluded from the agent regardless of the whitelist. This is useful for selectively blocking dangerous tools without needing to enumerate all allowed ones.
+
+Both filters are combined in `build_registry()`: a tool is registered only if it passes the whitelist (if set) AND is not in the denylist. Subagents additionally have a hardcoded denylist (`spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`, `exec`, `browser`) that is combined with the agent's `denied_tools`.
 
 Available tool names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `http_client`, `rss_reader`, `browser`, `message`, `spawn`, `cron`, `memory_save`, `memory_read`, `memory_search`, `generate_image`.
 
@@ -595,3 +609,4 @@ providers:
 - **Heartbeat service.** When enabled, the agent periodically reads `HEARTBEAT.md` from the workspace for tasks. Results are stored in a dedicated `heartbeat` session, accessible from the web interface session list. Set `heartbeat.enabled: false` to disable.
 - **Model identifier format.** The `model` field in agent configurations uses the format `provider/model-name`. The prefix before the slash must match a key defined under `providers`.
 - **Classifier model.** In multi-agent setups, use `classifier.model` to specify a fast/cheap model for message classification. The classifier only needs to select an agent, not generate full responses, so a smaller model reduces cost and latency.
+- **Concurrent message processing.** The `max_concurrent` parameter controls parallel message processing via a lane-based command queue. Messages to the same session (channel + chat_id) are always serialized in FIFO order; messages to different sessions run in parallel up to the configured limit. This value is read from the **default agent's** `agent_params` and applies globally. See `docs/concurrency.md` for the full architecture.

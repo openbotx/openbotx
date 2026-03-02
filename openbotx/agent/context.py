@@ -1,4 +1,6 @@
 import logging
+import platform
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,22 @@ logger = logging.getLogger(__name__)
 BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
 
 IDENTITY = "You are OpenBotX, a personal AI assistant."
+
+RESPONSE_GUIDELINES = (
+    "- Be concise and actionable.\n"
+    "- When using tools, briefly explain what you are doing.\n"
+    "- If a task requires multiple steps, outline your plan before executing.\n"
+    "- When an error occurs, analyze the cause and try a different approach.\n"
+    "- Use Markdown formatting for structured responses."
+)
+
+CHANNEL_GUIDANCE = {
+    "web": "Channel: web. Use Markdown formatting freely including images, code blocks, and tables.",
+    "telegram": (
+        "Channel: Telegram. Keep messages under 4096 characters. "
+        "Use Markdown (bold, italic, code). Split long responses using the message tool."
+    ),
+}
 
 
 class ContextBuilder:
@@ -46,6 +64,8 @@ class ContextBuilder:
         self,
         agent_name: str = "",
         agent_instructions: str = "",
+        channel: str = "web",
+        tool_names: list[str] | None = None,
     ) -> str:
         parts = [IDENTITY]
 
@@ -55,10 +75,28 @@ class ContextBuilder:
         now = datetime.now()
         parts.append(f"\nCurrent date and time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
 
+        # runtime info
+        parts.append(
+            f"\n# Runtime\n"
+            f"Platform: {platform.system()} {platform.release()}\n"
+            f"Python: {sys.version.split()[0]}"
+        )
+
+        # channel guidance
+        guidance = CHANNEL_GUIDANCE.get(channel, CHANNEL_GUIDANCE["web"])
+        parts.append(f"\n{guidance}")
+
         if self._project_ctx.public_url:
             parts.append(f"\nPublic URL: {self._project_ctx.public_url}")
 
         parts.append(f"\n# Project Structure\n{self._build_directory_context()}")
+
+        # response guidelines
+        parts.append(f"\n# Guidelines\n{RESPONSE_GUIDELINES}")
+
+        # tool summaries
+        if tool_names:
+            parts.append("\n# Available Tools\n" + ", ".join(tool_names))
 
         for filename in BOOTSTRAP_FILES:
             filepath = self._project_ctx.project_path / filename
@@ -97,6 +135,20 @@ class ContextBuilder:
         return "\n".join(parts)
 
     @staticmethod
+    def _content_to_text(content: Any) -> str:
+        """Extract plain text from a content field (string or blocks array)."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            return "\n\n".join(p for p in parts if p)
+        return str(content) if content else ""
+
+    @staticmethod
     def build_messages(
         system_prompt: str,
         history: list[dict[str, Any]],
@@ -107,7 +159,18 @@ class ContextBuilder:
             {"role": "system", "content": system_prompt},
         ]
 
-        messages.extend(history)
+        # normalize history for the LLM: convert content blocks arrays to
+        # plain text and strip UI-only fields (agent_name, timestamp, etc.)
+        for msg in history:
+            entry: dict[str, Any] = {"role": msg["role"]}
+            raw = msg.get("content", "")
+            entry["content"] = (
+                ContextBuilder._content_to_text(raw) if isinstance(raw, list) else raw
+            )
+            for k in ("tool_calls", "tool_call_id", "name"):
+                if k in msg:
+                    entry[k] = msg[k]
+            messages.append(entry)
 
         if media:
             content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_content}]

@@ -12,6 +12,8 @@ The registry:
 2. Generates OpenAI-compatible function definitions (sent to the LLM).
 3. Executes tool calls by name with arguments.
 4. Returns string results back to the agent loop.
+5. Applies a global **100,000 character** truncation limit on all tool results to prevent context overflow.
+6. Supports **denied_tools** filtering — `build_registry()` accepts a `denied_tools: set[str]` parameter that prevents specific tools from being registered. This is combined with the agent's `denied_tools` config field.
 
 ### Path Resolution
 
@@ -134,6 +136,19 @@ Execute a shell command.
 The command runs with a configurable timeout (`tools.exec.timeout`, default 60 seconds). When `tools.general.restrict_to_workspace` is enabled (detected via `PathResolver.is_restricted`), the working directory is locked to the workspace.
 
 **Output limit:** Output larger than **200 KB** is truncated using tail-based truncation — only the last 200 KB of output is kept, prefixed with a warning: `[Output truncated: showing last 200000 of N chars]`. This preserves the most recent output (where errors and results typically appear) while discarding older output.
+
+**Safety guards** — the exec tool blocks dangerous command patterns:
+- Destructive file ops: `rm -rf`, `del /f`, `rmdir /s`, `shred`, `srm`, `wipe`, `truncate -s 0`, `find -delete`, `find -exec rm`
+- Disk/system destruction: `format`, `mkfs`, `diskpart`, `dd if=`, writes to `/dev/` (sd, nvme, loop, mem, kmem)
+- System commands: `shutdown`, `reboot`, `poweroff`, `halt`, `init 0/6`, fork bombs
+- Encoding/pipe bypass: `base64 -d`, `eval`, `curl|sh`, `wget|bash`, `python|sh`
+- Subshell/command substitution: `$(...)`, backtick execution
+- Process substitution: `<(...)`, `>(...)`
+- Environment injection: `LD_PRELOAD=`, `LD_LIBRARY_PATH=`, `DYLD_INSERT_LIBRARIES=`, `PROMPT_COMMAND=`, `PS4=`
+- Dangerous redirects: writes to `/etc/`, `/proc/`, `/sys/`, `/dev/`
+- ANSI-C quoting with hex, octal, or unicode escapes (`$'\x...'`, `$'\012...'`, `$'\u...'`)
+- Path traversal (`../`, `..\`)
+- Absolute paths outside the working directory (when workspace restriction is enabled)
 
 ---
 
@@ -408,12 +423,12 @@ Not all tools are available to every agent type. The main agent has full access,
 | `write_file` | Yes | Yes |
 | `edit_file` | Yes | Yes |
 | `list_dir` | Yes | Yes |
-| `exec` | Yes | Yes |
+| `exec` | Yes | No |
 | `web_search` | Yes | Yes |
 | `web_fetch` | Yes | Yes |
 | `http_client` | Yes | Yes |
 | `rss_reader` | Yes | Yes |
-| `browser` | Yes | Yes |
+| `browser` | Yes | No |
 | `generate_image` | Yes | Yes* |
 | `message` | Yes | No |
 | `spawn` | Yes | No |
@@ -422,8 +437,8 @@ Not all tools are available to every agent type. The main agent has full access,
 | `memory_read` | Yes | No |
 | `memory_search` | Yes | No |
 
-\* `generate_image` and `browser` are available to subagents only when their dependencies are satisfied (Chrome installed for browser, image API key configured for generate_image).
+\* `generate_image` is available to subagents only when its dependencies are satisfied (image API key configured).
 
-Subagents have access to file operations, shell execution, web tools, the HTTP client, RSS reader, browser automation, and image generation. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), or access memory (`memory_save`, `memory_read`, `memory_search`) are restricted to the main agent.
+Subagents have access to file operations, web tools, the HTTP client, RSS reader, and image generation. Tools that interact with the user (`message`), manage other agents (`spawn`), schedule tasks (`cron`), access memory (`memory_save`, `memory_read`, `memory_search`), execute shell commands (`exec`), or automate the browser (`browser`) are restricted to the main agent.
 
 Both main agents and subagents share the same `PathResolver` instance, so they have identical directory access restrictions.

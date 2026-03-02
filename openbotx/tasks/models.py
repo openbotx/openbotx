@@ -30,6 +30,7 @@ class Task:
     completed_at: str | None = None
     tool_count: int = 0
     iteration_count: int = 0
+    token_usage: dict = field(default_factory=dict)
     live_state: dict = field(default_factory=dict)
 
     @property
@@ -63,6 +64,7 @@ class Task:
             "completed_at": self.completed_at,
             "tool_count": self.tool_count,
             "iteration_count": self.iteration_count,
+            "token_usage": self.token_usage,
             "duration_ms": self.duration_ms,
         }
         if self.live_state:

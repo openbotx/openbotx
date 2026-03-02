@@ -27,7 +27,7 @@ class WebSocketManager:
             return
         msg = json.dumps({"type": event_type, "data": data}, default=str)
         dead: set[WebSocket] = set()
-        # Snapshot: connect/disconnect can modify the set during awaits below.
+        # snapshot: connect/disconnect can modify the set during awaits below.
         for ws in list(self._connections):
             try:
                 await ws.send_text(msg)

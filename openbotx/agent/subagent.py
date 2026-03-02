@@ -15,6 +15,18 @@ logger = logging.getLogger(__name__)
 
 MAX_SUBAGENT_ITERATIONS = 15
 
+# tools that subagents must not access
+_SUBAGENT_DENIED = {
+    "spawn",
+    "message",
+    "memory_save",
+    "memory_read",
+    "memory_search",
+    "cron",
+    "exec",
+    "browser",
+}
+
 
 class SubagentManager:
     def __init__(
@@ -75,17 +87,24 @@ class SubagentManager:
         result = build_registry(
             agent_cfg=self._agent_cfg,
             project_ctx=self._project_ctx,
+            denied_tools=_SUBAGENT_DENIED,
         )
         registry = result.registry
 
         workspace = self._agent_cfg.resolve_workspace(self._project_ctx.project_path)
 
+        tool_list = ", ".join(registry.tool_names) if registry.tool_names else "none"
         system_prompt = (
             "You are a subagent of OpenBotX. Complete the following task and "
             "report results. Be concise and efficient.\n"
             f"Workspace: {workspace} (internal files)\n"
             f"Public: {self._project_ctx.public_dir} (web-accessible files)\n"
-            "Always use absolute paths."
+            "Always use absolute paths.\n\n"
+            f"# Available Tools\n{tool_list}\n\n"
+            "# Guidelines\n"
+            "- Be concise. Report results directly.\n"
+            "- When errors occur, try a different approach.\n"
+            "- Do not ask for clarification; make reasonable assumptions."
         )
 
         messages: list[dict[str, Any]] = [
@@ -96,16 +115,41 @@ class SubagentManager:
         browser_tool = registry.get("browser")
 
         try:
+            from openbotx.agent.compaction import compact_messages
+            from openbotx.agent.context_window import needs_compaction, trim_history
+            from openbotx.providers.errors import ContextOverflowError
+
+            max_history = self._agent_cfg.agent_params.max_history
             final_content = ""
             for _ in range(MAX_SUBAGENT_ITERATIONS):
                 self._task_manager.increment_iteration_count(task_id)
 
-                response = await self._provider.chat(
-                    messages=messages,
-                    tools=registry.get_definitions(),
-                    model=self._agent_cfg.model,
-                    model_params={"max_tokens": 4096, "temperature": 0.1},
-                )
+                # trim history if configured (cheaper than compaction)
+                messages = trim_history(messages, max_history)
+
+                # compact context if approaching model limit
+                if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
+                    messages = await compact_messages(
+                        messages, self._provider, self._agent_cfg.model
+                    )
+
+                try:
+                    response = await self._provider.chat(
+                        messages=messages,
+                        tools=registry.get_definitions(),
+                        model=self._agent_cfg.model,
+                        model_params={"max_tokens": 4096, "temperature": 0.1},
+                    )
+                except ContextOverflowError:
+                    messages = await compact_messages(
+                        messages, self._provider, self._agent_cfg.model
+                    )
+                    response = await self._provider.chat(
+                        messages=messages,
+                        tools=registry.get_definitions(),
+                        model=self._agent_cfg.model,
+                        model_params={"max_tokens": 4096, "temperature": 0.1},
+                    )
 
                 if response.has_tool_calls:
                     assistant_msg: dict[str, Any] = {
@@ -133,9 +177,7 @@ class SubagentManager:
                                 "role": "tool",
                                 "tool_call_id": tc.id,
                                 "name": tc.name,
-                                "content": (
-                                    tool_result[:500] if len(tool_result) > 500 else tool_result
-                                ),
+                                "content": tool_result,
                             }
                         )
                 else:

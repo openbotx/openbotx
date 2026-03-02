@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,10 +22,24 @@ class LLMResponse:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None
+    error_type: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:
         return len(self.tool_calls) > 0
+
+
+@dataclass
+class StreamChunk:
+    """A single chunk from a streaming LLM response."""
+
+    type: str  # "content", "tool_call", "reasoning", "usage", "done"
+    content: str = ""
+    tool_call_index: int = 0
+    tool_call_id: str = ""
+    tool_call_name: str = ""
+    tool_call_arguments: str = ""
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 class LLMProvider(ABC):
@@ -110,6 +125,21 @@ class LLMProvider(ABC):
         model: str | None = None,
         model_params: dict[str, Any] | None = None,
     ) -> LLMResponse: ...
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        model_params: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        """Stream an LLM response. Default falls back to non-streaming chat."""
+        response = await self.chat(messages, tools, model, model_params)
+        if response.content:
+            yield StreamChunk(type="content", content=response.content)
+        if response.usage:
+            yield StreamChunk(type="usage", usage=response.usage)
+        yield StreamChunk(type="done")
 
     @abstractmethod
     def get_default_model(self) -> str: ...

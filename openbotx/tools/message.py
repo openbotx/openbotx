@@ -3,6 +3,7 @@ from typing import Any
 
 from openbotx.bus.events import OutboundMessage
 from openbotx.tools.base import Tool
+from openbotx.tools.context import RequestContext
 
 
 class MessageTool(Tool):
@@ -37,26 +38,11 @@ class MessageTool(Tool):
     def __init__(
         self,
         send_callback: Callable[[OutboundMessage], Awaitable[None]] | None = None,
-        default_channel: str = "",
-        default_chat_id: str = "",
-        default_message_id: str | None = None,
     ):
         self._send_callback = send_callback
-        self._default_channel = default_channel
-        self._default_chat_id = default_chat_id
-        self._default_message_id = default_message_id
-        self._sent_in_turn: bool = False
-
-    def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        self._default_channel = channel
-        self._default_chat_id = chat_id
-        self._default_message_id = message_id
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         self._send_callback = callback
-
-    def start_turn(self) -> None:
-        self._sent_in_turn = False
 
     async def execute(
         self,
@@ -66,8 +52,9 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any,
     ) -> str:
-        channel = channel or self._default_channel
-        chat_id = chat_id or self._default_chat_id
+        ctx: RequestContext | None = kwargs.get("_context")
+        channel = channel or (ctx.channel if ctx else "")
+        chat_id = chat_id or (ctx.chat_id if ctx else "")
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -79,12 +66,11 @@ class MessageTool(Tool):
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata={"message_id": self._default_message_id},
+            metadata={"message_id": ctx.message_id if ctx else None},
         )
 
         try:
             await self._send_callback(msg)
-            self._sent_in_turn = True
             return f"Message sent to {channel}:{chat_id}"
         except Exception as e:
             return f"Error sending message: {e}"
