@@ -175,12 +175,15 @@ class ChannelManager:
         if is_forwarded_input:
             return
 
-        # always broadcast to WebSocket so the web UI mirrors all sessions
+        # always broadcast to WebSocket so the web UI mirrors all sessions.
+        # content is always a block array — the authoritative
+        # source persisted to the session JSONL.
         await self._dispatcher.broadcast(
             "chat:message",
             {
-                "content": msg.content,
-                "content_blocks": msg.metadata.get("content_blocks"),
+                "content": msg.metadata.get(
+                    "content_blocks", [{"type": "text", "text": msg.content}]
+                ),
                 "chat_id": msg.chat_id,
                 "task_id": msg.metadata.get("task_id"),
                 "agent_name": msg.metadata.get("agent_name"),

@@ -874,7 +874,7 @@ ws://host:port/ws?token=JWT_TOKEN
 |-------|---------|-------------|
 | `chat:stream` | `{ task_id, chat_id, content, agent_name }` | Real-time token streaming — sent for each chunk of text as the LLM generates it |
 | `chat:stream_end` | `{ task_id, chat_id, agent_name }` | End of streaming response (only for content-only responses, not when tool calls follow) |
-| `chat:message` | `{ content, content_blocks, chat_id, task_id, agent_name }` | Final AI response with authoritative content blocks |
+| `chat:message` | `{ content, chat_id, task_id, agent_name }` | Final AI response — `content` is a block array |
 | `chat:thinking` | `{ task_id, chat_id, content, agent_name }` | Agent reasoning and thinking steps |
 | `chat:tool_use` | `{ task_id, chat_id, tool, description, agent_name }` | Tool execution details |
 | `chat:user_message` | `{ chat_id, content, media, channel }` | Non-web user message received (e.g., from Telegram, cron) |
@@ -919,8 +919,7 @@ The frontend should accumulate `content` chunks and render them progressively. W
 {
   "event": "chat:message",
   "data": {
-    "content": "string",
-    "content_blocks": [
+    "content": [
       { "type": "text", "text": "string" },
       { "type": "tool_use", "name": "string", "description": "string" }
     ],
@@ -931,7 +930,7 @@ The frontend should accumulate `content` chunks and render them progressively. W
 }
 ```
 
-The `content_blocks` array is the authoritative source of the complete response. It contains the same structured blocks persisted to the session. The frontend should always prefer `content_blocks` over client-accumulated streaming chunks, as it guarantees completeness even if stream tokens were lost.
+The `content` array is the authoritative source of the complete response. It contains the same structured blocks persisted to the session JSONL. The frontend uses this directly instead of client-accumulated streaming chunks, guaranteeing completeness even if stream tokens were lost.
 
 **chat:thinking**
 

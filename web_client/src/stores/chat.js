@@ -160,9 +160,8 @@ export const useChatStore = defineStore('chat', () => {
       if (exists) return
     }
 
-    // server content_blocks are the authoritative source — always prefer
-    // them over client-accumulated streaming chunks
-    const content = data.content_blocks || [{ type: 'text', text: data.content || '' }]
+    // server content is always a block array — the authoritative source
+    const content = data.content
 
     messages.value.push({
       role: 'assistant',

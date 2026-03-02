@@ -89,7 +89,7 @@ Event types:
 | `chat:stream`        | `{ task_id, chat_id, content, agent_name }`              | Streaming content tokens in real time              |
 | `chat:stream_end`    | `{ task_id, chat_id, agent_name }`                       | End of streaming response                          |
 | `chat:tool_use`      | `{ task_id, chat_id, tool, description, agent_name }`    | Tool invocation with human-readable description    |
-| `chat:message`       | `{ content, content_blocks, chat_id, task_id, agent_name }` | Final response with authoritative content blocks |
+| `chat:message`       | `{ content, chat_id, task_id, agent_name }`                  | Final response — `content` is a block array      |
 | `chat:user_message`  | `{ chat_id, content, media, channel }`                   | Non-web user message received (for real-time display in the web UI) |
 | `chat:transcription` | `{ chat_id, content }`                                   | Audio transcription result (when media contains audio) |
 | `task:created`       | Full task object                                         | New task created                                   |
