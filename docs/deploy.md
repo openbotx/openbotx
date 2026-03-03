@@ -15,6 +15,8 @@ After deploying on any platform, you need to:
 2. Access the web interface at the URL provided by the platform
 3. Log in with `admin` / `admin`
 
+---
+
 ## Shared Files
 
 ### `Dockerfile`
@@ -33,6 +35,12 @@ CMD ["sh", "-c", "openbotx start --no-browser --port ${PORT:-8000}"]
 ### `.dockerignore`
 
 Excludes development files, build artifacts, docs, and other non-runtime files from the Docker build context to keep the image small and the build fast.
+
+### `docker-compose.yml`
+
+Used by Hostinger and for local Docker deployments. Builds the image directly from the GitHub repository and exposes port `8000`.
+
+---
 
 ## Render
 
@@ -72,6 +80,8 @@ Set these in the Render dashboard under your service's **Environment** tab:
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
 | `PORT` | No (default `8000`) | Port the server listens on |
+
+---
 
 ## Heroku
 
@@ -119,6 +129,8 @@ Set these in the Heroku dashboard under **Settings > Config Vars**:
 | `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
 | `PORT` | No (set by Heroku) | Port the server listens on |
 
+---
+
 ## DigitalOcean App Platform
 
 **Website:** https://cloud.digitalocean.com
@@ -163,53 +175,47 @@ Set these in the DigitalOcean dashboard under your app's **Settings > App-Level 
 | `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
 | `PORT` | No (default `8000`) | Port the server listens on |
 
-## Railway
+---
 
-**Website:** https://railway.com
+## Hostinger
 
-**Config file:** `railway.json`
+**Website:** https://www.hostinger.com
 
-Railway does not support a deploy button that points directly to a GitHub repository URL. Instead, you need to create a template on Railway first, then use the generated template code in the button.
+**Config file:** `docker-compose.yml`
 
-### How to set up
+**Deploy button:**
 
-1. Go to [railway.com](https://railway.com) and sign in
-2. Click **New Project** and select **Deploy from GitHub repo**
-3. Select the `openbotx/openbotx` repository
-4. Railway detects the `Dockerfile` and `railway.json` automatically
-5. Set your environment variables (e.g. `ANTHROPIC_API_KEY`)
-6. Deploy
-
-### Creating a deploy button (optional)
-
-To create a one-click button for others:
-
-1. Go to your [Workspace Templates](https://railway.com/workspace/templates) page
-2. Click **New Template** and configure it with the GitHub repo
-3. Publish the template to get a template code (e.g. `ZweBXA`)
-4. Use the button in your README:
-
-```md
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/YOUR_CODE)
 ```
+https://www.hostinger.com/docker-hosting?compose_url=https://raw.githubusercontent.com/openbotx/openbotx/main/docker-compose.yml
+```
+
+### How it works
+
+1. User clicks the deploy button in the README
+2. Hostinger provisions a VPS with Docker pre-installed
+3. It pulls the `docker-compose.yml` from the raw GitHub URL
+4. Docker Compose clones the repository and builds the image using the `Dockerfile`
+5. The service starts on port `8000`
 
 ### Configuration
 
 | Field | Value | Description |
 |---|---|---|
-| `build.builder` | `DOCKERFILE` | Uses the Dockerfile for building |
-| `build.dockerfilePath` | `Dockerfile` | Path to the Dockerfile |
-| `deploy.restartPolicyType` | `ON_FAILURE` | Restarts the service if it crashes |
-| `deploy.restartPolicyMaxRetries` | `10` | Maximum restart attempts |
+| `services.openbotx.build` | GitHub repo URL | Clones the repo and builds the Dockerfile |
+| `services.openbotx.ports` | `8000:8000` | Maps container port to host |
+| `services.openbotx.environment.PORT` | `8000` | Port the server listens on |
+| `services.openbotx.restart` | `unless-stopped` | Restarts automatically on crash |
 
 ### Environment variables
 
-Set these in the Railway dashboard under your service's **Variables** tab:
+After deploying, SSH into the VPS or use the Hostinger panel to set environment variables in the `docker-compose.yml`:
 
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
-| `PORT` | No (set by Railway) | Port the server listens on |
+| `PORT` | No (default `8000`) | Port the server listens on |
+
+---
 
 ## File Summary
 
@@ -217,8 +223,8 @@ Set these in the Railway dashboard under your service's **Variables** tab:
 |---|---|---|
 | `Dockerfile` | All | Multi-stage build (Node.js frontend + Python backend + Chromium) |
 | `.dockerignore` | All | Excludes dev files from the Docker build context |
+| `docker-compose.yml` | Hostinger | Docker Compose service definition |
 | `render.yaml` | Render | Blueprint service definition |
 | `app.json` | Heroku | App metadata and stack declaration for the deploy button |
 | `heroku.yml` | Heroku | Docker build instructions |
 | `.do/deploy.template.yaml` | DigitalOcean | App Platform service definition (requires `spec:` key) |
-| `railway.json` | Railway | Build and deploy configuration (manual setup required) |
