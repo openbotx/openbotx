@@ -74,7 +74,7 @@ dependencies = [
     # mime detection from file bytes
     "filetype>=1.2.0",
 
-    # image generation (gemini native)
+    # image generation
     "google-genai>=1.0.0",
     "Pillow>=11.0.0",
 
