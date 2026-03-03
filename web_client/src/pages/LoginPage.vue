@@ -12,7 +12,7 @@ const authStore = useAuthStore()
 
 const loginSchema = [
   { name: 'username', type: 'text', label: 'Username', required: true },
-  { name: 'password', type: 'secret', label: 'Password', required: true },
+  { name: 'password', type: 'secret', label: 'Password', required: true, placeholder: '' },
 ]
 
 const formData = ref({ username: '', password: '' })
