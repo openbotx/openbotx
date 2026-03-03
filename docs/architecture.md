@@ -336,7 +336,7 @@ Tools are the actions the agent can perform in the world.
 | `browser.py`       | `BrowserTool` provides browser automation via CDP using the vendored `openbotx/cdp/` library. A singleton `_ChromeInstance` manages the Chrome process. Each tool instance gets its own tab. Clicks use pure CDP: resolve element, scroll into view, get content quads, dispatch mouse events. |
 | `http_client.py`   | `HttpClientTool` is a full HTTP client with download/upload support, `PathResolver` integration, and authentication via credentials (OAuth 1.0a, Basic, Bearer). |
 | `rss.py`           | `RssReaderTool` reads RSS 2.0 and Atom feeds. Auto-detects format and strips HTML from summaries. |
-| `image.py`         | `ImageGenerationTool` generates images via LiteLLM. Provider resolved from model prefix (e.g. `openai/dall-e-3`). |
+| `image.py`         | `ImageGenerationTool` generates images with provider-routed backends. Gemini models use the Google GenAI SDK with native aspect ratio, resolution, reference images, and search grounding. Other models use litellm. |
 
 **Subagent tool restrictions:** When `SubagentManager` builds a tool registry for a subagent, it passes `denied_tools=_SUBAGENT_DENIED` (a hardcoded set: `spawn`, `message`, `memory_save`, `memory_read`, `memory_search`, `cron`, `exec`, `browser`) to `build_registry()`. This is combined with the agent's own `denied_tools` config field. The result is subagents have file operations, web tools, HTTP client, RSS reader, and image generation — but cannot execute shell commands, automate browsers, send messages, spawn further subagents, create scheduled jobs, or modify memory.
 

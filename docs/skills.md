@@ -288,10 +288,10 @@ Make HTTP requests (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) to APIs and we
 
 ### image-generation
 
-Generate images from text descriptions using AI models. Supports configurable aspect ratios.
+Generate images from text descriptions using AI models. Provider-routed: Gemini models use the Google GenAI SDK with native support for aspect ratio, resolution, reference images, style hints, and Google Search grounding. Other models use litellm.
 
 - **Tool:** `generate_image`
-- **Parameters:** `prompt`, `filename`
+- **Parameters:** `prompt`, `filename`, `aspect_ratio`, `size`, `reference_images`, `style`, `negative_prompt`, `google_search`
 
 ### memory
 

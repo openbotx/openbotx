@@ -74,6 +74,10 @@ dependencies = [
     # mime detection from file bytes
     "filetype>=1.2.0",
 
+    # image generation (gemini native)
+    "google-genai>=1.0.0",
+    "Pillow>=11.0.0",
+
     # cli
     "click>=8.3.1",
 ]

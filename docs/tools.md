@@ -401,15 +401,20 @@ Supports both RSS 2.0 and Atom feed formats. Automatically detects the format by
 
 #### generate_image
 
-Generate images using AI models.
+Generate images using AI models with provider-routed backends. When the model starts with `gemini/`, the tool uses the Google GenAI SDK with native support for aspect ratio, resolution, reference images, and search grounding. All other models fall back to litellm (`aimage_generation`/`aimage_edit`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prompt` | string | Yes | Description of the image to generate or edit. |
-| `filename` | string | Yes | Output filename for the generated image. |
-| `reference_images` | array | No | List of storage paths to reference images for image-to-image editing. |
+| `prompt` | string | Yes | Detailed description of the image to generate. Include style, subject, setting, action, and composition. |
+| `filename` | string | Yes | Output filename (e.g. `poster.png`, `banner.jpg`). |
+| `aspect_ratio` | string | No | Image aspect ratio. Options: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9`. Falls back to `image.default_aspect_ratio` from config. |
+| `size` | string | No | Image resolution: `1K` (default), `2K`, `4K`. Falls back to `image.default_size` from config. |
+| `reference_images` | array | No | Storage paths to reference images. Sent as visual context BEFORE the text prompt. Use for logos, style references, or content to incorporate. |
+| `style` | string | No | Style hint (e.g. `photorealistic`, `illustration`, `watercolor`, `minimal`, `cinematic`). Prepended to the prompt. |
+| `negative_prompt` | string | No | What to avoid in the image (e.g. `blurry, text, watermark`). Appended to the prompt. |
+| `google_search` | boolean | No | Enable Google Search grounding for real-time data (stock prices, weather, current events). Gemini only. |
 
-Requires image generation configuration. The `image.model` field uses the same `provider/model` format as agents (e.g. `openai/dall-e-3`). Only registered when the model's provider prefix matches a configured provider with a valid credential.
+Requires image generation configuration. The `image.model` field uses the same `provider/model` format as agents (e.g. `gemini/gemini-2.0-flash-preview-image-generation`, `openai/dall-e-3`). Only registered when the model's provider prefix matches a configured provider with a valid credential.
 
 ---
 
