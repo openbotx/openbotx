@@ -1,0 +1,8 @@
+{
+  "name": "OpenBotX",
+  "description": "AI assistant platform with web interface, task board, and multi-channel support",
+  "repository": "https://github.com/openbotx/openbotx",
+  "logo": "https://raw.githubusercontent.com/openbotx/openbotx/main/extras/images/logo.png",
+  "keywords": ["ai", "agent", "assistant", "bot", "llm"],
+  "stack": "container"
+}

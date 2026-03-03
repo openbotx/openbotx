@@ -59,6 +59,17 @@ openbotx start
 
 Your browser opens at `http://localhost:8000`. Log in with `admin` / `admin`.
 
+## One-Click Deploy
+
+| Platform | |
+|---|---|
+| Render | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/openbotx/openbotx) |
+| Heroku | [![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://www.heroku.com/deploy?template=https://github.com/openbotx/openbotx) |
+| DigitalOcean | [![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/openbotx/openbotx/tree/main) |
+| Hostinger | [![Deploy on Hostinger](https://assets.hostinger.com/vps/deploy.svg)](https://www.hostinger.com/docker-hosting?compose_url=https://raw.githubusercontent.com/openbotx/openbotx/main/docker-compose.yml) |
+
+See the [deploy docs](docs/deploy.md) for details on each platform.
+
 ## From Source
 
 ```bash
@@ -78,6 +89,7 @@ openbotx start
 - [API Reference](docs/api.md) — REST API and WebSocket endpoints
 - [Skills](docs/skills.md) — Creating and managing skills
 - [Tools](docs/tools.md) — Built-in tools reference
+- [Deploy](docs/deploy.md) — One-click deploy
 
 ## License
 

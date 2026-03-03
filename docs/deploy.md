@@ -1,0 +1,227 @@
+# Deploy
+
+OpenBotX supports one-click deploy on multiple cloud platforms. Each platform reads specific configuration files from the repository to build and run the application automatically.
+
+All platforms use the same `Dockerfile` to build the application. The build process has two stages:
+
+1. **Frontend** — builds the Vue 3 web client using Node.js
+2. **Backend** — installs Python dependencies, Chromium (for the browser tool), and initializes the project with `openbotx init`
+
+The container listens on the port defined by the `PORT` environment variable (defaults to `8000`).
+
+After deploying on any platform, you need to:
+
+1. Set your LLM provider API key as an environment variable (e.g. `ANTHROPIC_API_KEY`)
+2. Access the web interface at the URL provided by the platform
+3. Log in with `admin` / `admin`
+
+---
+
+## Shared Files
+
+### `Dockerfile`
+
+Docker build used by all platforms. Based on `python:3.11-slim`, it installs the release version of OpenBotX from PyPI (which includes the pre-built web client), Chromium with system libraries for headless browser support, and runs `openbotx init` to scaffold the project.
+
+The `CMD` respects the platform's `PORT` environment variable:
+
+```
+CMD ["sh", "-c", "openbotx start --no-browser --port ${PORT:-8000}"]
+```
+
+### `.dockerignore`
+
+Excludes development files, build artifacts, docs, and other non-runtime files from the Docker build context to keep the image small and the build fast.
+
+### `docker-compose.yml`
+
+Used by Hostinger and for local Docker deployments. Builds the image directly from the GitHub repository and exposes port `8000`.
+
+---
+
+## Render
+
+**Website:** https://render.com
+
+**Config file:** `render.yaml`
+
+**Deploy button:**
+
+```
+https://render.com/deploy?repo=https://github.com/openbotx/openbotx
+```
+
+### How it works
+
+1. User clicks the deploy button in the README
+2. Render reads `render.yaml` (Blueprint spec) from the repository
+3. It builds the Docker image using the `Dockerfile`
+4. The service starts on the `free` plan with a public URL
+5. Render sets the `PORT` environment variable to `8000`
+
+### Configuration
+
+| Field | Value | Description |
+|---|---|---|
+| `type` | `web` | Web service with HTTP routing |
+| `runtime` | `docker` | Uses the Dockerfile for building |
+| `dockerfilePath` | `./Dockerfile` | Path to the Dockerfile |
+| `plan` | `free` | Uses the free tier |
+| `envVars.PORT` | `8000` | Port the server listens on |
+
+### Environment variables
+
+Set these in the Render dashboard under your service's **Environment** tab:
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
+| `PORT` | No (default `8000`) | Port the server listens on |
+
+---
+
+## Heroku
+
+**Website:** https://heroku.com
+
+**Config files:** `app.json` + `heroku.yml`
+
+**Deploy button:**
+
+```
+https://www.heroku.com/deploy?template=https://github.com/openbotx/openbotx
+```
+
+### How it works
+
+1. User clicks the deploy button in the README
+2. Heroku reads `app.json` for app metadata and detects `"stack": "container"`
+3. It reads `heroku.yml` to know how to build the Docker image
+4. The Docker image is built using the `Dockerfile`
+5. The service starts and Heroku assigns a public URL
+6. Heroku dynamically sets the `PORT` environment variable
+
+### Configuration
+
+**`app.json`** — defines the app for the deploy button:
+
+| Field | Value | Description |
+|---|---|---|
+| `name` | `OpenBotX` | Application name |
+| `stack` | `container` | Uses Docker instead of buildpacks |
+| `repository` | GitHub URL | Source repository |
+
+**`heroku.yml`** — tells Heroku how to build:
+
+| Field | Value | Description |
+|---|---|---|
+| `build.docker.web` | `Dockerfile` | Dockerfile for the web process |
+
+### Environment variables
+
+Set these in the Heroku dashboard under **Settings > Config Vars**:
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
+| `PORT` | No (set by Heroku) | Port the server listens on |
+
+---
+
+## DigitalOcean App Platform
+
+**Website:** https://cloud.digitalocean.com
+
+**Config file:** `.do/deploy.template.yaml`
+
+**Deploy button:**
+
+```
+https://cloud.digitalocean.com/apps/new?repo=https://github.com/openbotx/openbotx/tree/main
+```
+
+### How it works
+
+1. User clicks the deploy button in the README
+2. DigitalOcean reads `.do/deploy.template.yaml` from the repository
+3. It builds the Docker image using the `Dockerfile`
+4. The service starts on a `basic-xxs` instance with a public URL
+5. DigitalOcean routes HTTP traffic to port `8000`
+
+### Configuration
+
+The file requires a top-level `spec:` key. Without it, the deploy button does not work.
+
+| Field | Value | Description |
+|---|---|---|
+| `spec.name` | `openbotx` | Application name |
+| `spec.services[0].name` | `web` | Service name |
+| `spec.services[0].git.branch` | `main` | Branch to deploy |
+| `spec.services[0].git.repo_clone_url` | GitHub `.git` URL | Source repository |
+| `spec.services[0].dockerfile_path` | `Dockerfile` | Path to the Dockerfile |
+| `spec.services[0].http_port` | `8000` | Port the app listens on |
+| `spec.services[0].instance_count` | `1` | Number of instances |
+| `spec.services[0].instance_size_slug` | `basic-xxs` | Smallest instance size |
+
+### Environment variables
+
+Set these in the DigitalOcean dashboard under your app's **Settings > App-Level Environment Variables**:
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
+| `PORT` | No (default `8000`) | Port the server listens on |
+
+---
+
+## Hostinger
+
+**Website:** https://www.hostinger.com
+
+**Config file:** `docker-compose.yml`
+
+**Deploy button:**
+
+```
+https://www.hostinger.com/docker-hosting?compose_url=https://raw.githubusercontent.com/openbotx/openbotx/main/docker-compose.yml
+```
+
+### How it works
+
+1. User clicks the deploy button in the README
+2. Hostinger provisions a VPS with Docker pre-installed
+3. It pulls the `docker-compose.yml` from the raw GitHub URL
+4. Docker Compose clones the repository and builds the image using the `Dockerfile`
+5. The service starts on port `8000`
+
+### Configuration
+
+| Field | Value | Description |
+|---|---|---|
+| `services.openbotx.build` | GitHub repo URL | Clones the repo and builds the Dockerfile |
+| `services.openbotx.ports` | `8000:8000` | Maps container port to host |
+| `services.openbotx.environment.PORT` | `8000` | Port the server listens on |
+| `services.openbotx.restart` | `unless-stopped` | Restarts automatically on crash |
+
+### Environment variables
+
+After deploying, SSH into the VPS or use the Hostinger panel to set environment variables in the `docker-compose.yml`:
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes (or another provider key) | API key for the LLM provider |
+| `PORT` | No (default `8000`) | Port the server listens on |
+
+---
+
+## File Summary
+
+| File | Platform | Purpose |
+|---|---|---|
+| `Dockerfile` | All | Multi-stage build (Node.js frontend + Python backend + Chromium) |
+| `.dockerignore` | All | Excludes dev files from the Docker build context |
+| `docker-compose.yml` | Hostinger | Docker Compose service definition |
+| `render.yaml` | Render | Blueprint service definition |
+| `app.json` | Heroku | App metadata and stack declaration for the deploy button |
+| `heroku.yml` | Heroku | Docker build instructions |
+| `.do/deploy.template.yaml` | DigitalOcean | App Platform service definition (requires `spec:` key) |
