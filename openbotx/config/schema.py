@@ -108,6 +108,8 @@ class ProviderConfig(BaseModel):
 
 class ImageConfig(BaseModel):
     model: str = ""
+    default_aspect_ratio: str = ""
+    default_size: str = "1K"
 
 
 class WebClientConfig(BaseModel):

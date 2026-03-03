@@ -119,7 +119,9 @@ credentials:
 # Image Generation
 # ---------------------------------------------------------------------------
 image:
-  model: ""                            # str  -- Model in "provider/model" format (e.g. "openai/dall-e-3"). Provider is resolved from the prefix, same as agents.
+  model: ""                            # str  -- Model in "provider/model" format (e.g. "gemini/gemini-2.0-flash-preview-image-generation"). Provider is resolved from the prefix, same as agents.
+  default_aspect_ratio: ""             # str  -- Default aspect ratio when not specified per request (e.g. "1:1", "16:9"). Empty means no default.
+  default_size: "1K"                   # str  -- Default image resolution: "1K", "2K", or "4K".
 
 # ---------------------------------------------------------------------------
 # Authentication
