@@ -59,6 +59,15 @@ openbotx start
 
 Your browser opens at `http://localhost:8000`. Log in with `admin` / `admin`.
 
+## One-Click Deploy
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/from?repoUrl=https://github.com/openbotx/openbotx)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/openbotx/openbotx)
+[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/openbotx/openbotx)
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/openbotx/openbotx/tree/main)
+
+After deploying, set your LLM provider API key (e.g. `ANTHROPIC_API_KEY`) as an environment variable on the platform. Access the web interface at the provided URL and log in with `admin` / `admin`.
+
 ## From Source
 
 ```bash
@@ -78,6 +87,7 @@ openbotx start
 - [API Reference](docs/api.md) — REST API and WebSocket endpoints
 - [Skills](docs/skills.md) — Creating and managing skills
 - [Tools](docs/tools.md) — Built-in tools reference
+- [Deploy](docs/deploy.md) — One-click deploy
 
 ## License
 
