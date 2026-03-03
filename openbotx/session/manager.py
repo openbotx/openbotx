@@ -10,10 +10,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _safe_filename(name: str) -> str:
-    return re.sub(r"[^\w\-.]", "_", name)
-
-
 @dataclass
 class Session:
     """A conversation session with JSONL-based persistence."""
@@ -68,8 +64,12 @@ class SessionManager:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
+    @staticmethod
+    def _safe_filename(name: str) -> str:
+        return re.sub(r"[^\w\-.]", "_", name)
+
     def _get_session_path(self, key: str) -> Path:
-        safe_key = _safe_filename(key.replace(":", "_"))
+        safe_key = self._safe_filename(key.replace(":", "_"))
         return self.sessions_dir / f"{safe_key}.jsonl"
 
     def get_or_create(self, key: str) -> Session:

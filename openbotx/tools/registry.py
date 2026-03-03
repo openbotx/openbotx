@@ -29,14 +29,26 @@ from openbotx.tools.web import WebFetchTool, WebSearchTool
 logger = logging.getLogger(__name__)
 
 
+MAX_TOOL_RESULT_CHARS = 400_000
+TOOL_RESULT_CONTEXT_SHARE = 0.3
+
+
+def calculate_max_result_chars(context_window_tokens: int) -> int:
+    """Calculate max tool result chars based on context window size."""
+    max_tokens = int(context_window_tokens * TOOL_RESULT_CONTEXT_SHARE)
+    # ~4 chars per token on average
+    max_chars = max_tokens * 4
+    return min(max_chars, MAX_TOOL_RESULT_CHARS)
+
+
 class ToolRegistry:
     """Registry for agent tools."""
 
     _HINT = "\n\n[Analyze the error above and try a different approach.]"
-    _MAX_RESULT_CHARS = 100_000
 
-    def __init__(self):
+    def __init__(self, max_result_chars: int = MAX_TOOL_RESULT_CHARS):
         self._tools: dict[str, Tool] = {}
+        self._max_result_chars = max_result_chars
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -75,10 +87,10 @@ class ToolRegistry:
             if isinstance(result, str) and result.startswith("Error"):
                 return result + self._HINT
             # truncate oversized results to prevent context overflow
-            if isinstance(result, str) and len(result) > self._MAX_RESULT_CHARS:
+            if isinstance(result, str) and len(result) > self._max_result_chars:
                 result = (
-                    result[: self._MAX_RESULT_CHARS]
-                    + f"\n\n[Output truncated: {len(result)} total chars, showing first {self._MAX_RESULT_CHARS}]"
+                    result[: self._max_result_chars]
+                    + f"\n\n[Output truncated: {len(result)} total chars, showing first {self._max_result_chars}]"
                 )
             return result
         except Exception as e:
@@ -111,9 +123,12 @@ def build_registry(
     denied_tools: set[str] | None = None,
 ) -> RegistryResult:
     """Build a ToolRegistry with all tools configured from context objects."""
+    from openbotx.agent.context_window import get_model_limit
+
     whitelist = set(agent_cfg.tools) if agent_cfg.tools else None
     denylist = set(agent_cfg.denied_tools) | (denied_tools or set())
-    registry = ToolRegistry()
+    context_window = get_model_limit(agent_cfg.model, agent_cfg.model_params)
+    registry = ToolRegistry(max_result_chars=calculate_max_result_chars(context_window))
 
     resolver = project_ctx.create_resolver(agent_cfg)
     workspace = agent_cfg.resolve_workspace(project_ctx.project_path)

@@ -14,20 +14,6 @@ Follow any instructions or tasks listed there.
 If nothing needs attention, reply with just: HEARTBEAT_OK"""
 
 
-def _is_heartbeat_empty(content: str | None) -> bool:
-    """Check if HEARTBEAT.md has no actionable content."""
-    if not content:
-        return True
-
-    for line in content.split("\n"):
-        line = line.strip()
-        if not line or line.startswith("#") or line.startswith("<!--"):
-            continue
-        return False
-
-    return True
-
-
 class HeartbeatService:
     """Periodic heartbeat that wakes the agent to check HEARTBEAT.md for tasks."""
 
@@ -81,7 +67,7 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         content = self._read_heartbeat_file()
-        if _is_heartbeat_empty(content):
+        if self._is_heartbeat_empty(content):
             logger.debug("heartbeat: no tasks")
             return
 
@@ -93,6 +79,20 @@ class HeartbeatService:
             content=HEARTBEAT_PROMPT,
         )
         await self._bus.publish_inbound(msg)
+
+    @staticmethod
+    def _is_heartbeat_empty(content: str | None) -> bool:
+        """Check if HEARTBEAT.md has no actionable content."""
+        if not content:
+            return True
+
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("<!--"):
+                continue
+            return False
+
+        return True
 
     def _read_heartbeat_file(self) -> str | None:
         if self.heartbeat_file.exists():

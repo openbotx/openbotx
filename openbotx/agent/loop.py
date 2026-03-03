@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -23,6 +24,8 @@ from openbotx.tools.memory_tool import MemorySaveTool
 from openbotx.tools.registry import ToolRegistry, build_registry
 
 logger = logging.getLogger(__name__)
+
+TASK_RESULT_MAX_CHARS = 200
 
 
 class AgentLoop:
@@ -261,7 +264,9 @@ class AgentLoop:
             )
         )
 
-        await self._task_manager.update_state(task_id, TaskState.DONE, result=response_text[:200])
+        await self._task_manager.update_state(
+            task_id, TaskState.DONE, result=response_text[:TASK_RESULT_MAX_CHARS]
+        )
 
         await self._check_consolidation(session)
 
@@ -281,7 +286,8 @@ class AgentLoop:
 
         max_iterations = self._agent_cfg.agent_params.max_iterations
         max_history = self._agent_cfg.agent_params.max_history
-        _recent_tool_sigs: list[str] = []
+        _recent_tool_hashes: list[str] = []
+        _tool_call_counts: dict[str, int] = {}
         usage_tracker = UsageTracker()
         blocks: list[dict[str, str]] = []
 
@@ -298,7 +304,9 @@ class AgentLoop:
                     task_id,
                     iteration,
                 )
-                messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                messages = await compact_messages(
+                    messages, self._provider, self._agent_cfg.model, self._agent_cfg.model_params
+                )
 
             # signal typing to the frontend
             await self._dispatcher.broadcast(
@@ -316,7 +324,9 @@ class AgentLoop:
                 )
             except ContextOverflowError:
                 logger.warning("context overflow, forcing compaction (task %s)", task_id)
-                messages = await compact_messages(messages, self._provider, self._agent_cfg.model)
+                messages = await compact_messages(
+                    messages, self._provider, self._agent_cfg.model, self._agent_cfg.model_params
+                )
                 response = await self._consume_stream(
                     messages,
                     task_id,
@@ -329,13 +339,31 @@ class AgentLoop:
             if response.content:
                 blocks.append({"type": "text", "text": response.content})
 
-            if response.has_tool_calls:
-                # detect tool call loop (same calls repeated)
-                sig = "|".join(
-                    f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
-                    for tc in response.tool_calls
+            # handle token limit — LLM was cut off mid-response
+            if response.finish_reason == "length":
+                logger.warning(
+                    "LLM hit token limit at iteration %d (task %s), "
+                    "consider increasing max_tokens in model_params",
+                    iteration,
+                    task_id,
                 )
-                if sig in _recent_tool_sigs:
+                self._save_usage(task_id, usage_tracker)
+                text = response.content or "My response was cut short due to token limits."
+                return text, blocks
+
+            if response.has_tool_calls:
+                # detect tool call loop using sha256 hashing
+                sig_parts = []
+                for tc in response.tool_calls:
+                    raw = f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
+                    sig_parts.append(hashlib.sha256(raw.encode()).hexdigest()[:16])
+                sig_hash = "|".join(sig_parts)
+
+                # track per-signature repeat count
+                _tool_call_counts[sig_hash] = _tool_call_counts.get(sig_hash, 0) + 1
+
+                # exact repeat in recent window
+                if sig_hash in _recent_tool_hashes:
                     logger.warning(
                         "tool call loop detected at iteration %d (task %s)",
                         iteration,
@@ -347,9 +375,24 @@ class AgentLoop:
                         or "I seem to be repeating the same actions. Let me stop here."
                     )
                     return text, blocks
-                _recent_tool_sigs.append(sig)
-                if len(_recent_tool_sigs) > 3:
-                    _recent_tool_sigs.pop(0)
+
+                # global circuit breaker — same call repeated too many times
+                if _tool_call_counts[sig_hash] >= 10:
+                    logger.warning(
+                        "tool call repeated %d times, breaking loop (task %s)",
+                        _tool_call_counts[sig_hash],
+                        task_id,
+                    )
+                    self._save_usage(task_id, usage_tracker)
+                    text = (
+                        response.content
+                        or "I've been repeating the same actions too many times. Let me stop here."
+                    )
+                    return text, blocks
+
+                _recent_tool_hashes.append(sig_hash)
+                if len(_recent_tool_hashes) > 10:
+                    _recent_tool_hashes.pop(0)
 
                 tool_calls_data = [
                     {
@@ -428,6 +471,7 @@ class AgentLoop:
         reasoning_parts: list[str] = []
         tool_calls: list[ToolCallRequest] = []
         usage: dict[str, int] = {}
+        finish_reason = "stop"
 
         async for chunk in self._provider.chat_stream(
             messages=messages,
@@ -468,6 +512,10 @@ class AgentLoop:
                 usage = chunk.usage
                 usage_tracker.record(usage)
 
+            elif chunk.type == "done":
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
+
         # broadcast thinking if we accumulated reasoning
         reasoning_content = "".join(reasoning_parts) or None
         if reasoning_content:
@@ -488,10 +536,14 @@ class AgentLoop:
                 {"task_id": task_id, "chat_id": chat_id, "agent_name": agent_name},
             )
 
+        # use actual finish_reason from provider, fall back to derived
+        if finish_reason not in ("length",):
+            finish_reason = "tool_calls" if tool_calls else "stop"
+
         return LLMResponse(
             content="".join(content_parts) or None,
             tool_calls=tool_calls,
-            finish_reason="tool_calls" if tool_calls else "stop",
+            finish_reason=finish_reason,
             usage=usage,
             reasoning_content=reasoning_content,
         )
@@ -530,7 +582,7 @@ class AgentLoop:
                     messages=consolidation_messages,
                     tools=consolidation_registry.get_definitions(),
                     model=self._agent_cfg.model,
-                    model_params={"max_tokens": 4096, "temperature": 0.1},
+                    model_params=self._agent_cfg.model_params,
                 )
 
                 if response.has_tool_calls:

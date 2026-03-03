@@ -40,6 +40,7 @@ class StreamChunk:
     tool_call_name: str = ""
     tool_call_arguments: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    finish_reason: str = ""
 
 
 class LLMProvider(ABC):

@@ -47,7 +47,7 @@ class TransientError(LLMError):
         super().__init__(message, LLMErrorType.TRANSIENT)
 
 
-_ERROR_PATTERNS: dict[LLMErrorType, list[str]] = {
+ERROR_PATTERNS: dict[LLMErrorType, list[str]] = {
     LLMErrorType.CONTEXT_OVERFLOW: [
         "context_length_exceeded",
         "maximum context length",
@@ -94,7 +94,7 @@ _ERROR_PATTERNS: dict[LLMErrorType, list[str]] = {
     ],
 }
 
-_TRANSIENT_PATTERNS = [
+TRANSIENT_PATTERNS = [
     "timeout",
     "timed out",
     "connection",
@@ -114,11 +114,11 @@ def classify_error(error: Exception) -> LLMErrorType:
     """Classify an LLM exception into a known error type."""
     msg = str(error).lower()
 
-    for error_type, patterns in _ERROR_PATTERNS.items():
+    for error_type, patterns in ERROR_PATTERNS.items():
         if any(p in msg for p in patterns):
             return error_type
 
-    if any(p in msg for p in _TRANSIENT_PATTERNS):
+    if any(p in msg for p in TRANSIENT_PATTERNS):
         return LLMErrorType.TRANSIENT
 
     return LLMErrorType.UNKNOWN

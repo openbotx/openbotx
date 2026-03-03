@@ -13,7 +13,7 @@ from openbotx.providers.errors import (
 
 logger = logging.getLogger(__name__)
 
-_RETRYABLE_TYPES = {LLMErrorType.RATE_LIMIT, LLMErrorType.TRANSIENT}
+RETRYABLE_TYPES = {LLMErrorType.RATE_LIMIT, LLMErrorType.TRANSIENT}
 
 MAX_RETRIES = 3
 BASE_DELAY = 1.0
@@ -57,7 +57,7 @@ async def retry_with_backoff(
         except Exception as e:
             # unclassified exceptions — check if retryable
             error_type = classify_error(e)
-            if error_type in _RETRYABLE_TYPES:
+            if error_type in RETRYABLE_TYPES:
                 last_error = e
                 if attempt >= max_retries:
                     break

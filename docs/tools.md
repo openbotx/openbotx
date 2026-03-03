@@ -12,7 +12,7 @@ The registry:
 2. Generates OpenAI-compatible function definitions (sent to the LLM).
 3. Executes tool calls by name with arguments.
 4. Returns string results back to the agent loop.
-5. Applies a global **100,000 character** truncation limit on all tool results to prevent context overflow.
+5. Applies **context-aware truncation** on all tool results — limits each result to 30% of the model's context window (capped at 400K chars) to prevent context overflow.
 6. Supports **denied_tools** filtering — `build_registry()` accepts a `denied_tools: set[str]` parameter that prevents specific tools from being registered. This is combined with the agent's `denied_tools` config field.
 
 ### Path Resolution
@@ -132,6 +132,7 @@ Execute a shell command.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `command` | string | Yes | The shell command to execute. |
+| `working_dir` | string | No | Working directory for this command. Defaults to the agent's workspace. |
 
 The command runs with a configurable timeout (`tools.exec.timeout`, default 60 seconds). When `tools.general.restrict_to_workspace` is enabled (detected via `PathResolver.is_restricted`), the working directory is locked to the workspace.
 
@@ -191,6 +192,9 @@ Send a message to the user via the current channel.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `content` | string | Yes | The message content. |
+| `channel` | string | No | Target channel (e.g. `web`, `telegram`). Defaults to the current request's channel. |
+| `chat_id` | string | No | Target chat/user ID. Defaults to the current request's chat ID. |
+| `media` | array | No | File paths to attach (e.g. images, documents from storage). |
 
 Only available to the main agent (not subagents).
 
@@ -352,13 +356,15 @@ Full HTTP client with download, upload, and authentication support. Uses a `Path
 
 **Upload mode:** When `upload_file` is set, the file is sent as multipart form data. The MIME type is auto-detected from the file extension. Additional form fields can be passed as JSON in the `body` parameter.
 
-**Authentication:** When `auth` is set, the tool looks up the named credential from `credentials` in the config and applies the appropriate `Authorization` header. The http_client automatically has access to all credentials with compatible types (oauth1, basic, simple):
+**Authentication:** When `auth` is set, the tool looks up the named credential from `credentials` in the config and applies the appropriate `Authorization` header. The http_client automatically has access to all credentials with compatible types (oauth1, basic, simple, bearer, header):
 
 | Auth type | Credential fields | Header format |
 |-----------|---------------------|---------------|
 | `oauth1` | `consumer_key`, `consumer_secret`, `access_token`, `access_token_secret` | `OAuth oauth_consumer_key="...", ...` (HMAC-SHA1) |
 | `basic` | `username`, `password` | `Basic base64(username:password)` |
-| `simple` | `key` | `Bearer {key}` |
+| `simple` | `key` | Raw value of `key` as `Authorization` header |
+| `bearer` | `token` | `Bearer {token}` |
+| `header` | `header_name`, `value` | Custom header: `{header_name}: {value}` |
 
 Config example:
 ```yaml
@@ -370,8 +376,12 @@ credentials:
     access_token: ${TWITTER_ACCESS_TOKEN}
     access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
   my_api:
-    type: simple
-    key: ${MY_API_TOKEN}
+    type: bearer
+    token: ${MY_API_TOKEN}
+  custom_service:
+    type: header
+    header_name: "X-Api-Key"
+    value: ${CUSTOM_API_KEY}
 ```
 
 ---

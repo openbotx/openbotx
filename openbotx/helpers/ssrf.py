@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-_ALLOWED_SCHEMES = {"http", "https"}
+ALLOWED_SCHEMES = {"http", "https"}
 
 
 def validate_url(url: str) -> None:
@@ -16,7 +16,7 @@ def validate_url(url: str) -> None:
     or reserved IP address, or uses a disallowed scheme.
     """
     parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_SCHEMES:
+    if parsed.scheme not in ALLOWED_SCHEMES:
         raise ValueError(f"Scheme not allowed: {parsed.scheme}")
 
     hostname = parsed.hostname

@@ -10,7 +10,7 @@ from openbotx.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 
-_VALID_ASPECT_RATIOS = {
+VALID_ASPECT_RATIOS = {
     "1:1",
     "1:4",
     "1:8",
@@ -27,7 +27,7 @@ _VALID_ASPECT_RATIOS = {
     "21:9",
 }
 
-_VALID_SIZES = {"1K", "2K", "4K"}
+VALID_SIZES = {"1K", "2K", "4K"}
 
 
 class ImageGenerationTool(Tool):
@@ -135,12 +135,12 @@ class ImageGenerationTool(Tool):
         google_search = kwargs.get("google_search", False)
 
         # validate aspect ratio
-        if aspect_ratio and aspect_ratio not in _VALID_ASPECT_RATIOS:
-            return f"Error: invalid aspect_ratio '{aspect_ratio}'. Valid: {', '.join(sorted(_VALID_ASPECT_RATIOS))}"
+        if aspect_ratio and aspect_ratio not in VALID_ASPECT_RATIOS:
+            return f"Error: invalid aspect_ratio '{aspect_ratio}'. Valid: {', '.join(sorted(VALID_ASPECT_RATIOS))}"
 
         # validate size
-        if size and size not in _VALID_SIZES:
-            return f"Error: invalid size '{size}'. Valid: {', '.join(sorted(_VALID_SIZES))}"
+        if size and size not in VALID_SIZES:
+            return f"Error: invalid size '{size}'. Valid: {', '.join(sorted(VALID_SIZES))}"
 
         # build the final prompt with style and negative hints
         final_prompt = prompt
