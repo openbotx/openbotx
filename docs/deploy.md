@@ -21,10 +21,7 @@ After deploying on any platform, you need to:
 
 ### `Dockerfile`
 
-Multi-stage Docker build used by all platforms.
-
-- **Stage 1** (`node:22-alpine`): installs npm dependencies and builds the Vue 3 frontend
-- **Stage 2** (`python:3.11-slim`): installs Chromium and system libraries for headless browser support, installs the Python package with UV, and runs `openbotx init` to scaffold the project
+Docker build used by all platforms. Based on `python:3.11-slim`, it installs the release version of OpenBotX from PyPI (which includes the pre-built web client), Chromium with system libraries for headless browser support, and runs `openbotx init` to scaffold the project.
 
 The `CMD` respects the platform's `PORT` environment variable:
 

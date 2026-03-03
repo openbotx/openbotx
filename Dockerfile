@@ -1,11 +1,3 @@
-FROM node:22-alpine AS frontend
-
-WORKDIR /build/web_client
-COPY web_client/package.json ./
-RUN npm install
-COPY web_client/ ./
-RUN npm run build
-
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -28,10 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-WORKDIR /opt/openbotx
-COPY . .
-COPY --from=frontend /build/openbotx/web_client/ ./openbotx/web_client/
-RUN uv pip install --system .
+RUN uv pip install --system openbotx
 
 WORKDIR /app
 RUN openbotx init
