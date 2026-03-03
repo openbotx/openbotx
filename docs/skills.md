@@ -260,7 +260,7 @@ For simple edits, modify the XML directly.
 
 ## Built-in Skills
 
-OpenBotX ships with ten built-in skills.
+OpenBotX ships with eleven built-in skills.
 
 ### browser
 
@@ -294,6 +294,14 @@ Generate images from text descriptions using AI models. Provider-routed: Gemini 
 - **Parameters:** `prompt`, `filename`, `aspect_ratio`, `size`, `reference_images`, `style`, `negative_prompt`, `google_search`
 
 ### memory
+
+### pillow
+
+Manipulate images locally using Python and PIL/Pillow. Covers resizing, cropping, rotating, filtering, enhancing, compositing, watermarking, adding text, creating animated GIFs, and extracting metadata. Uses `write_file` + `exec` to run Pillow scripts.
+
+- **Tools:** `write_file`, `exec`
+- **Capabilities:** resize, crop, rotate, flip, filter, enhance, composite, watermark, text rendering, animated GIFs, format conversion, channel operations
+- **Bundled resources:** `references/api.md` — complete module-by-module API reference
 
 Two-layer memory system with search-based recall. Manages long-term facts in `memory/MEMORY.md` (always loaded into context) and an append-only event log in `memory/HISTORY.md` (searchable via `memory_search`).
 
