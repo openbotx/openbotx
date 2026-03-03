@@ -14,9 +14,11 @@ from openbotx.tools.registry import build_registry
 logger = logging.getLogger(__name__)
 
 MAX_SUBAGENT_ITERATIONS = 15
+TASK_RESULT_MAX_CHARS = 500
+ANNOUNCE_MAX_CHARS = 300
 
 # tools that subagents must not access
-_SUBAGENT_DENIED = {
+SUBAGENT_DENIED = {
     "spawn",
     "message",
     "memory_save",
@@ -87,7 +89,7 @@ class SubagentManager:
         result = build_registry(
             agent_cfg=self._agent_cfg,
             project_ctx=self._project_ctx,
-            denied_tools=_SUBAGENT_DENIED,
+            denied_tools=SUBAGENT_DENIED,
         )
         registry = result.registry
 
@@ -130,7 +132,10 @@ class SubagentManager:
                 # compact context if approaching model limit
                 if needs_compaction(messages, self._agent_cfg.model, self._agent_cfg.model_params):
                     messages = await compact_messages(
-                        messages, self._provider, self._agent_cfg.model
+                        messages,
+                        self._provider,
+                        self._agent_cfg.model,
+                        self._agent_cfg.model_params,
                     )
 
                 try:
@@ -138,17 +143,20 @@ class SubagentManager:
                         messages=messages,
                         tools=registry.get_definitions(),
                         model=self._agent_cfg.model,
-                        model_params={"max_tokens": 4096, "temperature": 0.1},
+                        model_params=self._agent_cfg.model_params,
                     )
                 except ContextOverflowError:
                     messages = await compact_messages(
-                        messages, self._provider, self._agent_cfg.model
+                        messages,
+                        self._provider,
+                        self._agent_cfg.model,
+                        self._agent_cfg.model_params,
                     )
                     response = await self._provider.chat(
                         messages=messages,
                         tools=registry.get_definitions(),
                         model=self._agent_cfg.model,
-                        model_params={"max_tokens": 4096, "temperature": 0.1},
+                        model_params=self._agent_cfg.model_params,
                     )
 
                 if response.has_tool_calls:
@@ -185,14 +193,14 @@ class SubagentManager:
                     break
 
             await self._task_manager.update_state(
-                task_id, TaskState.DONE, result=final_content[:500]
+                task_id, TaskState.DONE, result=final_content[:TASK_RESULT_MAX_CHARS]
             )
 
             announcement = InboundMessage(
                 channel=origin_channel,
                 sender_id="system",
                 chat_id=origin_chat_id,
-                content=f"[Subagent {task_id} completed]: {final_content[:300]}",
+                content=f"[Subagent {task_id} completed]: {final_content[:ANNOUNCE_MAX_CHARS]}",
                 metadata={"system_message": True, "subagent_task_id": task_id},
             )
             await self._bus.publish_inbound(announcement)

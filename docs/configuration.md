@@ -599,6 +599,108 @@ providers:
 
 ---
 
+## Bootstrap Files vs. config.yml
+
+OpenBotX uses two complementary mechanisms to configure agents:
+
+| Mechanism | Purpose | Who reads it |
+|-----------|---------|--------------|
+| `config.yml` → `agents` | **Technical configuration**: model, tools, workspace, parameters | The runtime (Python code) |
+| `AGENTS.md` (and other `.md` files) | **Natural-language context** injected into the system prompt | The LLM |
+
+The file **`config.yml`** defines *what* each agent is — which model it uses, which tools it has access to, how many iterations it can run, etc. The runtime reads this at startup to instantiate and configure each agent.
+
+**Bootstrap files** tell the LLM *how* to behave. They are Markdown files placed in the project root that get injected into every agent's system prompt automatically:
+
+| File | Purpose |
+|------|---------|
+| `AGENTS.md` | Describes who the agents are, their roles, and when to delegate between them |
+| `SOUL.md` | Personality, tone of voice, behavioral guidelines |
+| `USER.md` | Information about the user (preferences, context, background) |
+| `TOOLS.md` | Custom tool usage instructions, tips, or constraints |
+
+All four files are optional. If a file doesn't exist or is empty, it is simply skipped.
+
+### Example: config.yml alone (no bootstrap files)
+
+This works fine for simple setups. The agent gets a generic system prompt with its instructions:
+
+```yaml
+agents:
+  main:
+    model: "anthropic/claude-sonnet-4-20250514"
+    instructions: "You are a helpful assistant."
+```
+
+### Example: config.yml + AGENTS.md (multi-agent)
+
+When you have multiple agents, `config.yml` defines their technical setup, and `AGENTS.md` explains the relationships in natural language so the LLM understands the team dynamics:
+
+**config.yml:**
+```yaml
+agents:
+  main:
+    model: "anthropic/claude-sonnet-4-20250514"
+    description: "General-purpose assistant"
+    instructions: "Handle everyday tasks. Delegate research to the researcher agent."
+
+  researcher:
+    model: "openai/gpt-4o"
+    description: "Deep research and analysis"
+    tools: [read_file, write_file, web_search, web_fetch, rss_reader]
+```
+
+**AGENTS.md:**
+```markdown
+# Team
+
+- **main**: The default assistant. Handles general questions, conversations, and task coordination.
+- **researcher**: A specialist for deep research. Use when the user asks for in-depth analysis,
+  market research, or needs information gathered from multiple sources.
+
+## Routing rules
+
+- If the user asks "research X" or "analyze X", route to researcher.
+- If the user asks a follow-up question during a research session, keep it on researcher.
+- Everything else goes to main.
+```
+
+The classifier uses `description` from `config.yml` to pick the agent. Once the agent is running, it sees `AGENTS.md` in its system prompt and understands its role in the team.
+
+### Example: SOUL.md (personality)
+
+```markdown
+# Personality
+
+You are friendly but professional. Use a casual tone in Telegram and a more structured
+tone in the web interface.
+
+# Rules
+
+- Never share personal data about the user with third parties.
+- When unsure, ask for clarification instead of guessing.
+- Always respond in the same language the user writes in.
+```
+
+### Example: USER.md (user context)
+
+```markdown
+# About the user
+
+- Name: Paulo
+- Timezone: America/Sao_Paulo
+- Prefers concise answers
+- Works with Python and C++
+```
+
+### When to use which
+
+- **Agent behavior you want the LLM to follow** → bootstrap `.md` files
+- **Technical constraints** (model, tools, limits, workspace) → `config.yml`
+- **Both**: `config.yml instructions` is a middle ground — it's config that becomes part of the prompt. Use it for agent-specific rules that don't need a separate file.
+
+---
+
 ## Notes
 
 - **Defaults are applied automatically.** You only need to include the sections and fields you want to override. Any omitted field falls back to its default value.

@@ -1,12 +1,12 @@
-_SENSITIVE_SUFFIXES = ("_key", "_secret", "_token", "_password")
-_SENSITIVE_EXACT = frozenset({"key", "token", "password", "secret", "api_key", "value"})
+SENSITIVE_SUFFIXES = ("_key", "_secret", "_token", "_password")
+SENSITIVE_EXACT = frozenset({"key", "token", "password", "secret", "api_key", "value"})
 
 
 def is_sensitive_key(name: str) -> bool:
     n = name.lower()
-    if n in _SENSITIVE_EXACT:
+    if n in SENSITIVE_EXACT:
         return True
-    return any(n.endswith(s) for s in _SENSITIVE_SUFFIXES)
+    return any(n.endswith(s) for s in SENSITIVE_SUFFIXES)
 
 
 def mask_dict(d: dict | list) -> dict | list:

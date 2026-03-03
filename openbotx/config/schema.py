@@ -55,7 +55,7 @@ class AgentConfig(BaseModel):
         return p.resolve()
 
 
-_CREDENTIAL_FIELDS_BY_TYPE = {
+CREDENTIAL_FIELDS_BY_TYPE = {
     "simple": {"type", "key"},
     "oauth1": {"type", "consumer_key", "consumer_secret", "access_token", "access_token_secret"},
     "basic": {"type", "username", "password"},
@@ -91,7 +91,7 @@ class CredentialConfig(BaseModel):
     def _serialize(self, handler):
         data = handler(self)
         auth_type = data.get("type", "") if isinstance(data, dict) else self.type
-        fields = _CREDENTIAL_FIELDS_BY_TYPE.get(auth_type)
+        fields = CREDENTIAL_FIELDS_BY_TYPE.get(auth_type)
         if fields and isinstance(data, dict):
             return {k: v for k, v in data.items() if k in fields}
         return data

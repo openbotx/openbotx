@@ -760,13 +760,14 @@ graph TD
     A2 --> B1[Stream response from LLM]
     B1 --> B{LLM responded with...}
     B -->|Plain text| C[Save usage → Return as final response - END]
-    B -->|Tool calls| C1{Same tool calls as last 3 iterations?}
+    B -->|Token limit| C3[finish_reason=length → Log warning → Return - END]
+    B -->|Tool calls| C1{Same tool calls in recent 10 hashes?}
     C1 -->|Yes| C2[Loop detected → Save usage → Return - END]
     C1 -->|No| D[For each tool call:]
     D --> E[ToolRegistry finds the tool]
     E --> F[Validate parameters]
     F --> G[Execute tool]
-    G --> G1["Truncate result if > 100K chars"]
+    G --> G1["Truncate result (30% of context window, max 400K)"]
     G1 --> H["Add result to messages (role: tool)"]
     H --> I{More tool calls?}
     I -->|Yes| D
@@ -878,7 +879,7 @@ Tool output is managed at two levels:
 - **http_client** — 50 KB response body truncation
 - **web_fetch** — 50 KB content extraction limit
 
-**Global truncation** — the `ToolRegistry` applies a **100,000 character** (`_MAX_RESULT_CHARS`) limit on all tool results. If any tool returns a result exceeding this, it is truncated with a `[Output truncated: N total chars, showing first 100000]` marker. This prevents any single tool result from consuming excessive context window space.
+**Global truncation** — the `ToolRegistry` applies **context-aware truncation** on all tool results. The limit is calculated as 30% of the model's context window (in characters, using a 4-chars-per-token heuristic), capped at 400K characters. For example, a 200K-token model allows up to 240K chars per tool result, while a 1M-token model is capped at the 400K hard limit. Results exceeding the limit are truncated with a `[Output truncated]` marker.
 
 ### Token Streaming
 
@@ -890,9 +891,10 @@ The agent loop uses **streaming** by default via `_consume_stream()`, which call
    - `type="reasoning"` — reasoning/thinking tokens, accumulated and broadcast as `chat:thinking` after the stream ends
    - `type="tool_call"` — tool call deltas, accumulated and assembled into `ToolCallRequest` objects
    - `type="usage"` — token usage stats (prompt, completion, total)
-   - `type="done"` — marks the end of the stream
-3. After the stream completes, `_consume_stream()` returns an assembled `LLMResponse` with the full content, tool calls, reasoning, and usage
-4. If the response has content but no tool calls, a `chat:stream_end` event is broadcast to signal the frontend to finalize the message
+   - `type="done"` — marks the end of the stream, carries the actual `finish_reason` from the provider
+3. After the stream completes, `_consume_stream()` returns an assembled `LLMResponse` with the full content, tool calls, reasoning, usage, and the actual `finish_reason`
+4. If `finish_reason="length"` (token limit hit), the agent loop logs a warning and returns what it has — partial tool calls are dropped since they're incomplete
+5. If the response has content but no tool calls, a `chat:stream_end` event is broadcast to signal the frontend to finalize the message
 
 The base `LLMProvider` class provides a fallback `chat_stream()` that delegates to the non-streaming `chat()` method, so providers that don't support streaming still work transparently.
 
@@ -911,15 +913,20 @@ Long conversations with many tool calls can exceed the LLM's context window. The
 1. Separates system messages from conversation messages
 2. Takes the oldest **40%** of conversation messages for summarization
 3. Ensures the remaining messages don't start with a dangling tool result (moves orphaned tool results to the summarization set)
-4. Strips tool results to 200 chars and removes reasoning content before summarizing
-5. Calls the LLM with a summarization prompt: "Summarize the conversation so far. Preserve: key decisions, file paths, variable names, IDs, URLs, errors encountered, and current task context."
+4. Strips tool results to 2000 chars and removes reasoning content before summarizing
+5. Calls the LLM with the parent agent's `model_params` (no hardcoded overrides) and a summarization prompt: "Summarize the conversation so far. Preserve: key decisions, file paths, variable names, IDs, URLs, errors encountered, and current task context."
 6. Returns `[system] + [summary as user message] + [assistant acknowledgment] + [recent messages]`
 
 **Error recovery** — if the LLM returns a context overflow error despite the proactive check, the loop catches `ContextOverflowError`, forces compaction, and retries the request.
 
 ### Loop Detection
 
-The agent loop tracks the last 3 tool call signatures (tool name + sorted JSON arguments). If the LLM emits the exact same set of tool calls as a previous iteration, a loop is detected and the agent stops:
+The agent loop uses SHA256-based tool call hashing to detect repetitive behavior. Each iteration's tool calls are hashed into a signature (`name:arguments` → SHA256). Two detection mechanisms work together:
+
+1. **Sliding window** — the last 10 signatures are tracked. If the current signature matches any in the window, a loop is detected immediately.
+2. **Global circuit breaker** — a counter tracks how many times each signature has appeared across the entire run. If any signature reaches 10 total repeats, the loop breaks.
+
+When a loop is detected, the agent stops:
 
 ```
 "I seem to be repeating the same actions. Let me stop here."
@@ -980,6 +987,8 @@ Each provider can define a default `model_params` dict with arbitrary key-value 
 2. **Agent `model_params`** — override provider defaults (agent keys always take precedence)
 
 This merge happens once in `ServerFactory.create_orchestrator` before agent loops are created: `{**provider_params, **agent_params}`.
+
+All internal LLM calls (compaction, memory consolidation, subagents) inherit the resolved `model_params` from the parent agent — no hardcoded overrides. The only exception is the `AgentClassifier`, which uses its own fixed parameters (`max_tokens: 256, temperature: 0.0`) since classification always requires short, deterministic output.
 
 ### Model Name Resolution
 
@@ -1244,7 +1253,7 @@ The agent "remembers" because of the **session history** — not because of any 
 
 ### Subagent Tool Policy
 
-Subagents have **restricted tool access** enforced by the `denied_tools` system. The `_SUBAGENT_DENIED` set in `openbotx/agent/subagent.py` blocks dangerous tools:
+Subagents have **restricted tool access** enforced by the `denied_tools` system. The `SUBAGENT_DENIED` set in `openbotx/agent/subagent.py` blocks dangerous tools:
 
 | Allowed | Blocked (via `denied_tools`) |
 |---|---|
@@ -1264,13 +1273,12 @@ This prevents subagents from executing arbitrary shell commands, automating brow
 | Feature | Main Agent | Subagent |
 |---|---|---|
 | Max iterations | 40 (configurable) | **15** (hardcoded) |
-| Max tokens | Configurable (default 4096) | **4096** (hardcoded) |
-| Temperature | Configurable (default 0.7) | **0.1** (hardcoded) |
+| Model params | Configurable per agent | **Inherits from parent agent** |
 | System prompt | Full (SOUL + USER + memory + skills + agent instructions) | **Simplified** ("You are a subagent..." with workspace + public paths) |
 | Session history | Yes | **No** |
 | Memory | Yes | **No** |
 | Tools | All (17) | **9** (no spawn, message, memory_save, memory_read, memory_search, cron, exec, browser) |
-| Tool result truncation | 100K chars (global via ToolRegistry) | **100K chars** (same global ToolRegistry limit) |
+| Tool result truncation | Context-aware (30% of context window, max 400K) | **Context-aware** (same proportional limit) |
 | Context management | Streaming + compaction + loop detection | **Non-streaming** + compaction (same context window management) |
 | Model | Configurable per agent | **Inherits from parent agent** |
 | PathResolver | Per-agent (workspace + public) | **Shared** with parent agent |
@@ -1397,7 +1405,7 @@ Current MEMORY.md content:
 Use the memory_save tool to persist both."
 ```
 
-5. The LLM analyzes and calls `memory_save` (loop of up to **5 iterations** to ensure the LLM has a chance to complete)
+5. The LLM is called with the parent agent's `model_params` (no hardcoded overrides). It analyzes the conversation and calls `memory_save` (loop of up to **5 iterations** to ensure the LLM has a chance to complete)
 6. `memory_save` writes:
    - `history_entry` → **appended** to the end of `HISTORY.md`
    - `updated_memory` → **overwrites** the entire `MEMORY.md`

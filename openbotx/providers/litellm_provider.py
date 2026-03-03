@@ -10,7 +10,7 @@ from litellm import acompletion
 from openbotx.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from openbotx.providers.registry import find_by_model, find_gateway
 
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
 
 
 class LiteLLMProvider(LLMProvider):
@@ -133,7 +133,7 @@ class LiteLLMProvider(LLMProvider):
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sanitized = []
         for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            clean = {k: v for k, v in msg.items() if k in ALLOWED_MSG_KEYS}
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
             sanitized.append(clean)
@@ -324,7 +324,7 @@ class LiteLLMProvider(LLMProvider):
         if self._supports_cache_control(original_model):
             messages, tools = self._apply_cache_control(messages, tools)
 
-        params = {"max_tokens": 4096, "temperature": 0.7}
+        params = {}
         if model_params:
             params.update(model_params)
         if "max_tokens" in params:
@@ -413,6 +413,7 @@ class LiteLLMProvider(LLMProvider):
 
         # accumulate partial tool calls
         partial_tool_calls: dict[int, dict[str, str]] = {}
+        actual_finish_reason = ""
 
         async for chunk in response:
             if not chunk.choices:
@@ -455,17 +456,9 @@ class LiteLLMProvider(LLMProvider):
                         if tc_delta.function.arguments:
                             entry["arguments"] += tc_delta.function.arguments
 
-            # emit completed tool calls
-            if finish_reason == "tool_calls" or finish_reason == "stop":
-                for idx in sorted(partial_tool_calls):
-                    entry = partial_tool_calls[idx]
-                    yield StreamChunk(
-                        type="tool_call",
-                        tool_call_index=idx,
-                        tool_call_id=self._sanitize_tool_call_id(entry["id"]),
-                        tool_call_name=entry["name"],
-                        tool_call_arguments=entry["arguments"],
-                    )
+            # track the actual finish reason from the provider
+            if finish_reason:
+                actual_finish_reason = finish_reason
 
             # usage in final chunk
             if hasattr(chunk, "usage") and chunk.usage:
@@ -478,7 +471,19 @@ class LiteLLMProvider(LLMProvider):
                     },
                 )
 
-        yield StreamChunk(type="done")
+        # emit accumulated tool calls at the end of the stream
+        if partial_tool_calls and actual_finish_reason != "length":
+            for idx in sorted(partial_tool_calls):
+                entry = partial_tool_calls[idx]
+                yield StreamChunk(
+                    type="tool_call",
+                    tool_call_index=idx,
+                    tool_call_id=self._sanitize_tool_call_id(entry["id"]),
+                    tool_call_name=entry["name"],
+                    tool_call_arguments=entry["arguments"],
+                )
+
+        yield StreamChunk(type="done", finish_reason=actual_finish_reason or "stop")
 
     def get_default_model(self) -> str:
         return self.default_model

@@ -39,7 +39,7 @@ class AsyncIOEventLoop(IEventLoop):
 loop = AsyncIOEventLoop()
 
 
-_CLOSE_SENTINEL = object
+CLOSE_SENTINEL = object
 
 
 class CDPEventListener:
@@ -59,7 +59,7 @@ class CDPEventListener:
     def close(self):
         self._closed = True
         try:
-            self._queue.put_nowait(_CLOSE_SENTINEL)
+            self._queue.put_nowait(CLOSE_SENTINEL)
         except asyncio.QueueFull:
             pass
 
@@ -67,7 +67,7 @@ class CDPEventListener:
         try:
             while not self._closed:
                 elem = await self._queue.get()
-                if elem is _CLOSE_SENTINEL:
+                if elem is CLOSE_SENTINEL:
                     return
                 yield elem
         finally:

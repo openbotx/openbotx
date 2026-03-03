@@ -6,10 +6,9 @@ from openbotx.providers.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 COMPACT_RATIO = 0.4  # summarize oldest 40% of conversation
-MAX_TOOL_RESULT_IN_SUMMARY = 200  # truncate tool results before summarizing
-SUMMARY_MAX_TOKENS = 2048
+MAX_TOOL_RESULT_IN_SUMMARY = 2000  # truncate tool results before summarizing
 
-_SUMMARY_PROMPT = (
+SUMMARY_PROMPT = (
     "Summarize the conversation below into a concise recap. Preserve:\n"
     "- Key decisions and conclusions\n"
     "- File paths, variable names, identifiers, URLs\n"
@@ -47,6 +46,7 @@ async def compact_messages(
     messages: list[dict[str, Any]],
     provider: LLMProvider,
     model: str,
+    model_params: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Summarize the oldest portion of conversation to reduce context size."""
     # separate system messages from conversation
@@ -69,7 +69,7 @@ async def compact_messages(
         return messages
 
     try:
-        summary = await _generate_summary(to_summarize, provider, model)
+        summary = await _generate_summary(to_summarize, provider, model, model_params)
     except Exception as e:
         logger.error("compaction failed, keeping original messages: %s", e)
         return messages
@@ -100,6 +100,7 @@ async def _generate_summary(
     messages: list[dict[str, Any]],
     provider: LLMProvider,
     model: str,
+    model_params: dict[str, Any] | None = None,
 ) -> str:
     """Use the LLM to generate a summary of the given messages."""
     stripped = _strip_for_summary(messages)
@@ -118,14 +119,14 @@ async def _generate_summary(
     conversation_text = "\n\n".join(parts)
 
     summary_messages = [
-        {"role": "system", "content": _SUMMARY_PROMPT},
+        {"role": "system", "content": SUMMARY_PROMPT},
         {"role": "user", "content": conversation_text},
     ]
 
     response = await provider.chat(
         messages=summary_messages,
         model=model,
-        model_params={"max_tokens": SUMMARY_MAX_TOKENS, "temperature": 0.1},
+        model_params=model_params,
     )
 
     return response.content or "[summary unavailable]"
